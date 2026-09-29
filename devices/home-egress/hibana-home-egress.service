@@ -1,0 +1,30 @@
+[Unit]
+Description=Hibana authenticated home browser relay
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+User=hibana
+Group=hibana
+WorkingDirectory=/opt/hibana/apps/bot
+EnvironmentFile=/etc/hibana/home-egress.env
+ExecStart=/usr/local/bin/bun src/home-egress.ts
+Restart=on-failure
+RestartSec=5
+UMask=0077
+RuntimeDirectory=hibana-home-egress
+RuntimeDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=160M
+TasksMax=32
+
+[Install]
+WantedBy=multi-user.target

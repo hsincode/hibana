@@ -1,0 +1,17 @@
+services:
+  bot:
+    build: .
+    network_mode: host
+    env_file: apps/bot/.env
+    environment:
+      HIBANA_DATA_DIR: ${HIBANA_HOST_DATA_DIR:-/var/lib/hibana}
+      # Docker bind mounts refer to host paths. Use the identical absolute path inside and outside.
+      SANDBOX_WORKSPACE_ROOT: ${HIBANA_HOST_DATA_DIR:-/var/lib/hibana}/workspaces
+      SKILLS_DIR: ${HIBANA_HOST_SKILLS_DIR:-/opt/hibana/apps/bot/skills}
+    volumes:
+      - ${HIBANA_HOST_DATA_DIR:-/var/lib/hibana}:${HIBANA_HOST_DATA_DIR:-/var/lib/hibana}
+      - ${HIBANA_HOST_SKILLS_DIR:-/opt/hibana/apps/bot/skills}:${HIBANA_HOST_SKILLS_DIR:-/opt/hibana/apps/bot/skills}:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s

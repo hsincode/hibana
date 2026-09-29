@@ -1,0 +1,12 @@
+node_modules/
+dist/
+playwright-report/
+test-results/
+.env
+.env.local
+.env*
+!.env.example
+!.env.production
+*.log
+.vercel/
+.vercel

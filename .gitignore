@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+data/
+*.log
+.vercel/
+playwright-report/
+.playwright-cli/
+test-results/
+__pycache__/
+*.pyc
+
+# Machine-local deployment access details are never committed.
+.local/

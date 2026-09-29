@@ -1,0 +1,25 @@
+[Unit]
+Description=Hibana Discord AI bot
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hibana
+Group=hibana
+SupplementaryGroups=docker
+WorkingDirectory=/opt/hibana/apps/bot
+EnvironmentFile=/etc/hibana/bot.env
+Environment=HIBANA_DATA_DIR=/var/lib/hibana
+ExecStart=/usr/local/bin/bun src/main.ts
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/hibana
+
+[Install]
+WantedBy=multi-user.target

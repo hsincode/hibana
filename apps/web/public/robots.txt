@@ -1,0 +1,6 @@
+# 設定画面はログインが要り、クロールしても中身が無いので弾く
+User-agent: *
+Disallow: /g/
+Disallow: /users
+
+Sitemap: https://bot.hsincode.com/sitemap.xml

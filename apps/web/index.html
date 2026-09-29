@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>Hibana — Discord ボット設定ダッシュボード</title>
+    <meta
+      name="description"
+      content="Hibana の設定ダッシュボード。Discord サーバーごとに、使うモデルをブラウザから切り替えられます。"
+    />
+    <meta name="author" content="hsincode" />
+    <link rel="canonical" href="%SITE_URL%/" />
+
+    <!-- ダッシュボード本体はログインが要るので、公開ページだけをクロール対象にする -->
+    <meta name="robots" content="index,follow" />
+
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0a0a0a" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+    <script>
+      try { document.documentElement.dataset.theme = localStorage.getItem("hibana-theme") || "system"; } catch {}
+    </script>
+
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+
+    <!-- Open Graph: Discord / Slack などの展開カード -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Hibana" />
+    <meta property="og:locale" content="ja_JP" />
+    <meta property="og:url" content="%SITE_URL%/" />
+    <meta property="og:title" content="Hibana — Discord ボット設定ダッシュボード" />
+    <meta
+      property="og:description"
+      content="Discord サーバーごとに、使うモデルをブラウザから切り替えられる設定ダッシュボード。"
+    />
+    <!-- Discord は相対パスを解決しないので、必ず絶対 URL を入れる（ビルド時に置換） -->
+    <meta property="og:image" content="%SITE_URL%/og.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Hibana — Discord ボット設定ダッシュボード" />
+
+    <!-- X.com -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Hibana — Discord ボット設定ダッシュボード" />
+    <meta
+      name="twitter:description"
+      content="Discord サーバーごとに、使うモデルをブラウザから切り替えられる設定ダッシュボード。"
+    />
+    <meta name="twitter:image" content="%SITE_URL%/og.png" />
+    <meta name="twitter:image:alt" content="Hibana — Discord ボット設定ダッシュボード" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Hibana",
+        "url": "%SITE_URL%/",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Web",
+        "inLanguage": "ja",
+        "description": "Discord サーバーごとに、使うモデルを切り替えられる Hibana の設定ダッシュボード。",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "JPY" }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

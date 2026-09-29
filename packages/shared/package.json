@@ -1,0 +1,26 @@
+{
+  "name": "@hibana/shared",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./catalog": {
+      "types": "./src/catalog.ts",
+      "default": "./dist/catalog.js"
+    },
+    "./settings": {
+      "types": "./src/settings.ts",
+      "default": "./dist/settings.js"
+    },
+    "./audit": {
+      "types": "./src/audit.ts",
+      "default": "./dist/audit.js"
+    }
+  },
+  "dependencies": {
+    "zod": "^3.24.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "bun build src/audit.ts src/catalog.ts src/settings.ts --target=bun --outdir=dist --packages=external"
+  }
+}

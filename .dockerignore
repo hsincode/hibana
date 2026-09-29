@@ -1,0 +1,10 @@
+.git
+**/node_modules
+**/.env
+**/.env.*
+**/data
+**/dist
+**/.vercel
+**/test-results
+**/playwright-report
+**/__pycache__

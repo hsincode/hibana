@@ -1,0 +1,5090 @@
+{
+ "version": 1,
+ "source": {
+  "site": "https://min-chi.material.jp",
+  "name": "みんちりえ",
+  "license": "商用利用OK / 利用報告不要 / クレジット不要 / 加工OK / 素材としての再配布・販売は不可"
+ },
+ "materials": [
+  {
+   "id": "mc-2nd_floor_hallway",
+   "title": "家の2階の廊下（5枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "2nd_floor_hallway",
+   "variants": [
+    {
+     "name": "家の2階の廊下（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "家の2階の廊下（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "家の2階の廊下（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "家の2階の廊下（夜・月明り）",
+     "ext": "jpg"
+    },
+    {
+     "name": "家の2階の廊下（夜・まっくら）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "家",
+    "屋内",
+    "廊下"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/2nd_floor_hallway/"
+  },
+  {
+   "id": "mc-apartment",
+   "title": "アパート（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "apartment",
+   "variants": [
+    {
+     "name": "アパート（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "アパート（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "アパート（夜・灯りあり）",
+     "ext": "jpg"
+    },
+    {
+     "name": "アパート（夜・灯りなし）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "アパート・マンション",
+    "外観",
+    "家",
+    "屋外",
+    "集合住宅"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/apartment/"
+  },
+  {
+   "id": "mc-apartment_hallway",
+   "title": "アパートの玄関ホール（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "apartment_hallway",
+   "variants": [
+    {
+     "name": "アパートの玄関ホール（照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "アパートの玄関ホール（照明OFF）",
+     "ext": "jpg"
+    },
+    {
+     "name": "アパートの玄関ホール（奥の部屋の照明ON）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "アパート・マンション",
+    "キッチン",
+    "家",
+    "屋内",
+    "廊下",
+    "洗濯機",
+    "玄関",
+    "集合住宅"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/apartment_hallway/"
+  },
+  {
+   "id": "mc-archive_room",
+   "title": "資料室（2枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "archive_room",
+   "variants": [
+    {
+     "name": "資料室（照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "資料室（照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "図書館",
+    "屋内",
+    "施設",
+    "本",
+    "本棚",
+    "資料室",
+    "部屋"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/archive_room/"
+  },
+  {
+   "id": "mc-art_museum",
+   "title": "美術館（2枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "art_museum",
+   "variants": [
+    {
+     "name": "美術館",
+     "ext": "jpg"
+    },
+    {
+     "name": "美術館（消灯）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "屋内",
+    "施設",
+    "美術館"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/art-museum/"
+  },
+  {
+   "id": "mc-atm_corner",
+   "title": "ATMコーナー（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "atm_corner",
+   "variants": [
+    {
+     "name": "ATMコーナー（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "ATMコーナー（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "ATMコーナー（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "ATM",
+    "屋内",
+    "施設",
+    "現金自動預払機",
+    "郵便局",
+    "銀行"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/atm_corner/"
+  },
+  {
+   "id": "mc-attic_room",
+   "title": "屋根裏部屋（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "attic_room",
+   "variants": [
+    {
+     "name": "屋根裏部屋（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "屋根裏部屋（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "屋根裏部屋（夜・灯りあり）",
+     "ext": "jpg"
+    },
+    {
+     "name": "屋根裏部屋（夜・灯りなし）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "家",
+    "屋内",
+    "屋根裏部屋",
+    "部屋"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/attic_room/"
+  },
+  {
+   "id": "mc-back_alley",
+   "title": "街中の裏通り（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "back_alley",
+   "variants": [
+    {
+     "name": "街中の裏通り（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "街中の裏通り（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "街中の裏通り（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "屋外",
+    "繁華街",
+    "街",
+    "街並み",
+    "街中",
+    "裏路地",
+    "裏通り",
+    "裏道",
+    "路地裏",
+    "道",
+    "道路",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/back_alley/"
+  },
+  {
+   "id": "mc-back_of_classroom",
+   "title": "教室の後ろの方（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "back_of_classroom",
+   "variants": [
+    {
+     "name": "教室の後ろの方（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "教室の後ろの方（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "教室の後ろの方（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "教室の後ろの方（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "学校",
+    "室内",
+    "屋内",
+    "席",
+    "教室",
+    "机",
+    "校内",
+    "高校",
+    "黒板"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/back_of_classroom/"
+  },
+  {
+   "id": "mc-bar",
+   "title": "バー",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "bar",
+   "variants": [
+    {
+     "name": "バー",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "バー",
+    "屋内",
+    "店",
+    "店内",
+    "施設",
+    "酒場"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/bar/"
+  },
+  {
+   "id": "mc-basement_room",
+   "title": "地下室（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "basement_room",
+   "variants": [
+    {
+     "name": "地下室（照明ON強め）",
+     "ext": "jpg"
+    },
+    {
+     "name": "地下室（照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "地下室（照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "地下室",
+    "家",
+    "屋内",
+    "部屋"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/basement_room/"
+  },
+  {
+   "id": "mc-bedroom",
+   "title": "寝室の窓際のベッド（12枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "bedroom",
+   "variants": [
+    {
+     "name": "寝室の窓際のベッド（日中・青）",
+     "ext": "jpg"
+    },
+    {
+     "name": "寝室の窓際のベッド（日中・赤）",
+     "ext": "jpg"
+    },
+    {
+     "name": "寝室の窓際のベッド（夕方・青）",
+     "ext": "jpg"
+    },
+    {
+     "name": "寝室の窓際のベッド（夕方・赤）",
+     "ext": "jpg"
+    },
+    {
+     "name": "寝室の窓際のベッド（夜・照明ON・青）",
+     "ext": "jpg"
+    },
+    {
+     "name": "寝室の窓際のベッド（夜・照明ON・赤）",
+     "ext": "jpg"
+    },
+    {
+     "name": "寝室の窓際のベッド（夜・まっくら・青）",
+     "ext": "jpg"
+    },
+    {
+     "name": "寝室の窓際のベッド（夜・まっくら・赤）",
+     "ext": "jpg"
+    },
+    {
+     "name": "寝室の窓際のベッド（夜・月明り・青）",
+     "ext": "jpg"
+    },
+    {
+     "name": "寝室の窓際のベッド（夜・月明り・赤）",
+     "ext": "jpg"
+    },
+    {
+     "name": "寝室の窓際のベッド（夜・ランプ・青）",
+     "ext": "jpg"
+    },
+    {
+     "name": "寝室の窓際のベッド（夜・ランプ・赤）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "ベッド",
+    "室内",
+    "家",
+    "寝室",
+    "屋内",
+    "布団",
+    "部屋"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/bedroom/"
+  },
+  {
+   "id": "mc-behind_school_gym",
+   "title": "学校の体育館裏（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "behind_school_gym",
+   "variants": [
+    {
+     "name": "学校の体育館裏（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の体育館裏（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の体育館裏（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の体育館裏（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "体育館",
+    "体育館裏",
+    "告白",
+    "学校",
+    "屋外",
+    "校内",
+    "校庭",
+    "校舎",
+    "校舎裏",
+    "裏庭",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/behind_school_gym/"
+  },
+  {
+   "id": "mc-blackboard",
+   "title": "黒板",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "blackboard",
+   "variants": [
+    {
+     "name": "黒板",
+     "ext": "png"
+    },
+    {
+     "name": "黒板｜奥レイヤ・小黒板あり",
+     "ext": "png"
+    },
+    {
+     "name": "黒板｜奥レイヤ・小黒板なし",
+     "ext": "png"
+    },
+    {
+     "name": "黒板｜手前レイヤ・教卓",
+     "ext": "png"
+    },
+    {
+     "name": "黒板｜手前レイヤ・椅子1",
+     "ext": "png"
+    },
+    {
+     "name": "黒板｜手前レイヤ・椅子2",
+     "ext": "png"
+    },
+    {
+     "name": "黒板｜手前レイヤ・椅子3",
+     "ext": "png"
+    },
+    {
+     "name": "黒板｜手前レイヤ・椅子4",
+     "ext": "png"
+    },
+    {
+     "name": "黒板｜手前レイヤ・机1",
+     "ext": "png"
+    },
+    {
+     "name": "黒板｜手前レイヤ・机2",
+     "ext": "png"
+    },
+    {
+     "name": "黒板｜手前レイヤ・机3",
+     "ext": "png"
+    },
+    {
+     "name": "黒板｜手前レイヤ・机4",
+     "ext": "png"
+    }
+   ],
+   "tags": [
+    "レイヤ分け配布有り",
+    "学校",
+    "授業",
+    "教卓",
+    "教室",
+    "机",
+    "解説",
+    "黒板"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/blackboard/"
+  },
+  {
+   "id": "mc-bookstore",
+   "title": "書店",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "bookstore",
+   "variants": [
+    {
+     "name": "書店",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "屋内",
+    "店",
+    "店内",
+    "施設",
+    "書店",
+    "本",
+    "本屋",
+    "本棚",
+    "買い物"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/bookstore/"
+  },
+  {
+   "id": "mc-building",
+   "title": "街中のビル（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "building",
+   "variants": [
+    {
+     "name": "街中のビル（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "街中のビル（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "街中のビル（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "街中のビル（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "オフィス",
+    "オフィス街",
+    "ビル",
+    "事務所",
+    "仕事場",
+    "企業",
+    "会社",
+    "入り口",
+    "入口",
+    "外観",
+    "屋外",
+    "建物",
+    "施設",
+    "職場",
+    "街",
+    "街中"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/building/"
+  },
+  {
+   "id": "mc-building_hallway",
+   "title": "ビルの廊下（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "building_hallway",
+   "variants": [
+    {
+     "name": "ビルの廊下（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "ビルの廊下（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "ビルの廊下（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "ビルの廊下（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "オフィス",
+    "ビル",
+    "会社",
+    "大学",
+    "屋内",
+    "廊下",
+    "研究所",
+    "社内",
+    "通路"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/building_hallway/",
+   "recommended": true
+  },
+  {
+   "id": "mc-cafe",
+   "title": "喫茶店（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "cafe",
+   "variants": [
+    {
+     "name": "喫茶店（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "喫茶店（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "喫茶店（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "カフェ",
+    "レストラン",
+    "喫茶店",
+    "屋内",
+    "店",
+    "店内",
+    "飲食店"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/cafe/"
+  },
+  {
+   "id": "mc-campus",
+   "title": "大学のキャンパス（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "campus",
+   "variants": [
+    {
+     "name": "大学のキャンパス（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "大学のキャンパス（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "大学のキャンパス（夜・灯りあり）",
+     "ext": "jpg"
+    },
+    {
+     "name": "大学のキャンパス（夜・灯りなし）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "キャンパス",
+    "大学",
+    "学校",
+    "屋外",
+    "施設",
+    "構内",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/campus/"
+  },
+  {
+   "id": "mc-casual_restaurant",
+   "title": "飲食店の店内（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "casual_restaurant",
+   "variants": [
+    {
+     "name": "飲食店の店内（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "飲食店の店内（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "飲食店の店内（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "カフェ",
+    "ファミリーレストラン",
+    "ファミレス",
+    "レストラン",
+    "喫茶店",
+    "屋内",
+    "店",
+    "店内"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/casual_restaurant/"
+  },
+  {
+   "id": "mc-city_station",
+   "title": "繁華街の駅前（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "city_station",
+   "variants": [
+    {
+     "name": "繁華街の駅前（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "繁華街の駅前（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "繁華街の駅前（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "ペデストリアンデッキ",
+    "屋外",
+    "市街地",
+    "施設",
+    "繁華街",
+    "街",
+    "街中",
+    "風景",
+    "駅",
+    "駅前"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/city_station/"
+  },
+  {
+   "id": "mc-cluttered_room",
+   "title": "散らかった部屋（10枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "cluttered_room",
+   "variants": [
+    {
+     "name": "散らかった部屋（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "散らかった部屋（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "散らかった部屋（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "散らかった部屋（夜・照明OFF・開き）",
+     "ext": "jpg"
+    },
+    {
+     "name": "散らかった部屋（夜・照明OFF・閉め）",
+     "ext": "jpg"
+    },
+    {
+     "name": "少し散らかった部屋（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "少し散らかった部屋（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "少し散らかった部屋（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "少し散らかった部屋（夜・照明OFF・開き）",
+     "ext": "jpg"
+    },
+    {
+     "name": "少し散らかった部屋（夜・照明OFF・閉め）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "アパート・マンション",
+    "ワンルーム",
+    "一人暮らし",
+    "一人部屋",
+    "室内",
+    "家",
+    "屋内",
+    "汚い部屋",
+    "汚部屋",
+    "私室",
+    "部屋"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/cluttered_room/"
+  },
+  {
+   "id": "mc-condominium",
+   "title": "マンション（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "condominium",
+   "variants": [
+    {
+     "name": "マンション（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "マンション（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "マンション（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "アパート・マンション",
+    "入り口",
+    "外観",
+    "家",
+    "屋外",
+    "玄関",
+    "街中",
+    "集合住宅"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/condominium/"
+  },
+  {
+   "id": "mc-condominium_corridor",
+   "title": "マンションの外廊下（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "condominium_corridor",
+   "variants": [
+    {
+     "name": "マンションの外廊下（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "マンションの外廊下（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "マンションの外廊下（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "アパート・マンション",
+    "ドア",
+    "入り口",
+    "家",
+    "屋外",
+    "廊下",
+    "玄関",
+    "通路",
+    "集合住宅",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/condominium_corridor/"
+  },
+  {
+   "id": "mc-connecting_corridor",
+   "title": "学校の渡り廊下（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "connecting_corridor",
+   "variants": [
+    {
+     "name": "学校の渡り廊下（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の渡り廊下（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の渡り廊下（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の渡り廊下（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "学校",
+    "屋外",
+    "廊下",
+    "校内",
+    "校舎",
+    "渡り廊下",
+    "移動教室",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/connecting_corridor/"
+  },
+  {
+   "id": "mc-convenience_store",
+   "title": "コンビニ（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "convenience_store",
+   "variants": [
+    {
+     "name": "コンビニ（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "コンビニ（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "コンビニ（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "コンビニ",
+    "コンビニエンスストア",
+    "外観",
+    "屋外",
+    "店",
+    "買い物"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/convenience_store/"
+  },
+  {
+   "id": "mc-conveyor_belt_sushi",
+   "title": "回転寿司",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "conveyor_belt_sushi",
+   "variants": [
+    {
+     "name": "回転寿司",
+     "ext": "jpg"
+    },
+    {
+     "name": "回転寿司（皿無し）",
+     "ext": "jpg"
+    },
+    {
+     "name": "回転寿司｜奥レイヤ",
+     "ext": "jpg"
+    },
+    {
+     "name": "回転寿司｜手前レイヤ・テーブル",
+     "ext": "png"
+    },
+    {
+     "name": "回転寿司｜手前レイヤ・テーブル（皿無し）",
+     "ext": "png"
+    }
+   ],
+   "tags": [
+    "レイヤ分け配布有り",
+    "レストラン",
+    "回転寿司",
+    "寿司",
+    "寿司屋",
+    "店",
+    "店内",
+    "施設",
+    "飲食店"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/conveyor_belt_sushi/"
+  },
+  {
+   "id": "mc-counter",
+   "title": "窓口",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "counter",
+   "variants": [
+    {
+     "name": "窓口",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "屋内",
+    "市役所",
+    "施設",
+    "窓口",
+    "郵便局",
+    "銀行"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/counter/"
+  },
+  {
+   "id": "mc-country_road",
+   "title": "田舎道（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "country_road",
+   "variants": [
+    {
+     "name": "田舎道（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "田舎道（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "田舎道（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "田舎道（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "和風",
+    "坂道",
+    "屋外",
+    "日本家屋",
+    "田んぼ",
+    "田園風景",
+    "田舎",
+    "田舎道",
+    "道",
+    "道路",
+    "郊外",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/country_road/"
+  },
+  {
+   "id": "mc-country_road2",
+   "title": "田舎道２（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "country_road2",
+   "variants": [
+    {
+     "name": "田舎道２（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "田舎道２（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "田舎道２（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "田舎道２（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "和風",
+    "坂道",
+    "屋外",
+    "日本家屋",
+    "田んぼ",
+    "田舎",
+    "田舎道",
+    "街中",
+    "道",
+    "道路",
+    "郊外",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/country_road2/"
+  },
+  {
+   "id": "mc-crossing_in_city",
+   "title": "街中の横断歩道（6枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "crossing_in_city",
+   "variants": [
+    {
+     "name": "街中の横断歩道（日中・青信号）",
+     "ext": "jpg"
+    },
+    {
+     "name": "街中の横断歩道（日中・赤信号）",
+     "ext": "jpg"
+    },
+    {
+     "name": "街中の横断歩道（夕方・青信号）",
+     "ext": "jpg"
+    },
+    {
+     "name": "街中の横断歩道（夕方・赤信号）",
+     "ext": "jpg"
+    },
+    {
+     "name": "街中の横断歩道（夜・青信号）",
+     "ext": "jpg"
+    },
+    {
+     "name": "街中の横断歩道（夜・赤信号）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "信号",
+    "屋外",
+    "押しボタン",
+    "横断歩道",
+    "街",
+    "街並み",
+    "街中",
+    "道",
+    "道路",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/crossing_in_city/"
+  },
+  {
+   "id": "mc-cultural_club_room",
+   "title": "文化系の部室（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "cultural_club_room",
+   "variants": [
+    {
+     "name": "文化系の部室（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "文化系の部室（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "文化系の部室（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "文化系の部室（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "学校",
+    "室内",
+    "屋内",
+    "文化系",
+    "文化部",
+    "校内",
+    "生徒会室",
+    "部室",
+    "部屋",
+    "高校"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/cultural_club_room/"
+  },
+  {
+   "id": "mc-double_room",
+   "title": "二人部屋（6枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "double_room",
+   "variants": [
+    {
+     "name": "二人部屋（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "二人部屋（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "二人部屋（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "二人部屋（夜・月明り）",
+     "ext": "jpg"
+    },
+    {
+     "name": "二人部屋（夜・ランプON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "二人部屋（夜・まっくら）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "ベッド",
+    "二人部屋",
+    "室内",
+    "家",
+    "寝室",
+    "屋内",
+    "部屋"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/double_room/"
+  },
+  {
+   "id": "mc-elevator_hall_facility",
+   "title": "何かの施設のエレベーターホール（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "elevator_hall_facility",
+   "variants": [
+    {
+     "name": "何かの施設のエレベーターホール（照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "何かの施設のエレベーターホール（照明OFF）",
+     "ext": "jpg"
+    },
+    {
+     "name": "何かの施設のエレベーターホール（怪しげ）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "エレベーター",
+    "オフィス",
+    "ビル",
+    "会社",
+    "大学",
+    "屋内",
+    "廊下",
+    "施設",
+    "研究所",
+    "通路"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/elevator_hall_facility/"
+  },
+  {
+   "id": "mc-emergency_staircase",
+   "title": "学校の非常階段（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "emergency_staircase",
+   "variants": [
+    {
+     "name": "学校の非常階段（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の非常階段（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の非常階段（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の非常階段（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "学校",
+    "屋内",
+    "廊下",
+    "校内",
+    "階段",
+    "非常階段"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/emergency_staircase/"
+  },
+  {
+   "id": "mc-facility",
+   "title": "何かの施設（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "facility",
+   "variants": [
+    {
+     "name": "何かの施設（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "何かの施設（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "何かの施設（夜・灯りあり）",
+     "ext": "jpg"
+    },
+    {
+     "name": "何かの施設（夜・灯りなし）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "オフィス",
+    "外観",
+    "屋外",
+    "工場",
+    "市役所",
+    "施設",
+    "研究所"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/facility/"
+  },
+  {
+   "id": "mc-facility2",
+   "title": "何かの施設２（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "facility2",
+   "variants": [
+    {
+     "name": "何かの施設２（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "何かの施設２（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "何かの施設２（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "何かの施設２（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "オフィス",
+    "外観",
+    "屋外",
+    "市役所",
+    "施設",
+    "研究所"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/facility2/"
+  },
+  {
+   "id": "mc-front_of_classroom",
+   "title": "教室の前の方（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "front_of_classroom",
+   "variants": [
+    {
+     "name": "教室の前の方（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "教室の前の方（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "教室の前の方（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "教室の前の方（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "学校",
+    "室内",
+    "屋内",
+    "席",
+    "教卓",
+    "教壇",
+    "教室",
+    "机",
+    "校内",
+    "高校",
+    "黒板"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/front_of_classroom/"
+  },
+  {
+   "id": "mc-hideout",
+   "title": "アジト（2枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "hideout",
+   "variants": [
+    {
+     "name": "アジト（照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "アジト（照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "アジト",
+    "コンクリート",
+    "地下",
+    "地下室",
+    "室内",
+    "屋内",
+    "巣窟",
+    "秘密基地",
+    "部屋",
+    "隠れ家"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/hideout/"
+  },
+  {
+   "id": "mc-high_rise_building",
+   "title": "高層ビルの外観（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "high_rise_building",
+   "variants": [
+    {
+     "name": "高層ビルの外観（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "高層ビルの外観（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "高層ビルの外観（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "オフィス",
+    "オフィス街",
+    "ビル",
+    "仕事場",
+    "企業",
+    "会社",
+    "外観",
+    "大企業",
+    "屋外",
+    "施設",
+    "職場",
+    "高層ビル"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/high_rise_building/"
+  },
+  {
+   "id": "mc-hospital",
+   "title": "病院（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "hospital",
+   "variants": [
+    {
+     "name": "病院（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "病院（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "病院（夜・点灯）",
+     "ext": "jpg"
+    },
+    {
+     "name": "病院（夜・消灯）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "外観",
+    "屋外",
+    "施設",
+    "病院"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/hospital/"
+  },
+  {
+   "id": "mc-hospital_lobby",
+   "title": "病院のロビー・受付（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "hospital_lobby",
+   "variants": [
+    {
+     "name": "病院のロビー・受付（照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "病院のロビー・受付（照明OFF）",
+     "ext": "jpg"
+    },
+    {
+     "name": "病院のロビー・受付（停電）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "エントランス",
+    "フロント",
+    "ロビー",
+    "入り口",
+    "受付",
+    "屋内",
+    "施設",
+    "病院",
+    "窓口"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/hospital_lobby/",
+   "recommended": true
+  },
+  {
+   "id": "mc-hot_spring",
+   "title": "旅館の温泉（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "hot_spring",
+   "variants": [
+    {
+     "name": "旅館の温泉（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "旅館の温泉（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "旅館の温泉（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "お風呂",
+    "ホテル",
+    "入浴",
+    "屋外",
+    "店",
+    "施設",
+    "旅館",
+    "温泉",
+    "露天風呂",
+    "風呂"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/hot_spring/"
+  },
+  {
+   "id": "mc-hotel_entrance",
+   "title": "ホテルの入り口（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "hotel_entrance",
+   "variants": [
+    {
+     "name": "ホテルの入り口（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "ホテルの入り口（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "ホテルの入り口（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "エントランス",
+    "ビジネスホテル",
+    "ホテル",
+    "入り口",
+    "屋外",
+    "店",
+    "施設",
+    "玄関"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/hotel_entrance/"
+  },
+  {
+   "id": "mc-house",
+   "title": "家（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "house",
+   "variants": [
+    {
+     "name": "家（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "家（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "家（夜・灯りあり）",
+     "ext": "jpg"
+    },
+    {
+     "name": "家（夜・灯りなし）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "住宅街",
+    "外観",
+    "家",
+    "屋外",
+    "街中"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/house/"
+  },
+  {
+   "id": "mc-house2",
+   "title": "家２（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "house2",
+   "variants": [
+    {
+     "name": "家２（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "家２（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "家２（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "家２（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "住宅街",
+    "外観",
+    "家",
+    "屋外",
+    "街",
+    "街中"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/house2/"
+  },
+  {
+   "id": "mc-house_hallway",
+   "title": "家の玄関ホール（5枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "house_hallway",
+   "variants": [
+    {
+     "name": "家の玄関ホール（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "家の玄関ホール（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "家の玄関ホール（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "家の玄関ホール（夜・照明OFF）",
+     "ext": "jpg"
+    },
+    {
+     "name": "家の玄関ホール（夜・奥の部屋の照明ON）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "家",
+    "屋内",
+    "廊下",
+    "民家",
+    "玄関",
+    "玄関ホール",
+    "通路",
+    "階段"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/house_hallway/"
+  },
+  {
+   "id": "mc-in_car",
+   "title": "自動車の車内（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "in_car",
+   "variants": [
+    {
+     "name": "自動車の車内（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "自動車の車内（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "自動車の車内（夜）",
+     "ext": "jpg"
+    },
+    {
+     "name": "自動車の車内（日中）｜奥レイヤ",
+     "ext": "png"
+    },
+    {
+     "name": "自動車の車内（日中）｜手前レイヤ１",
+     "ext": "png"
+    },
+    {
+     "name": "自動車の車内（日中）｜手前レイヤ２",
+     "ext": "png"
+    },
+    {
+     "name": "自動車の車内（日中）｜手前レイヤ３",
+     "ext": "png"
+    },
+    {
+     "name": "自動車の車内（夕方）｜奥レイヤ",
+     "ext": "png"
+    },
+    {
+     "name": "自動車の車内（夕方）｜手前レイヤ１",
+     "ext": "png"
+    },
+    {
+     "name": "自動車の車内（夕方）｜手前レイヤ２",
+     "ext": "png"
+    },
+    {
+     "name": "自動車の車内（夕方）｜手前レイヤ３",
+     "ext": "png"
+    },
+    {
+     "name": "自動車の車内（夜）｜奥レイヤ",
+     "ext": "png"
+    },
+    {
+     "name": "自動車の車内（夜）｜手前レイヤ１",
+     "ext": "png"
+    },
+    {
+     "name": "自動車の車内（夜）｜手前レイヤ２",
+     "ext": "png"
+    },
+    {
+     "name": "自動車の車内（夜）｜手前レイヤ３",
+     "ext": "png"
+    }
+   ],
+   "tags": [
+    "ドライブ",
+    "レイヤ分け配布有り",
+    "乗り物",
+    "乗用車",
+    "助手席",
+    "自動車",
+    "車",
+    "車の中",
+    "車内",
+    "運転",
+    "運転席"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/in_car/"
+  },
+  {
+   "id": "mc-in_convenience_store",
+   "title": "コンビニの店内",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "in_convenience_store",
+   "variants": [
+    {
+     "name": "コンビニの店内",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "コンビニ",
+    "コンビニエンスストア",
+    "屋内",
+    "店",
+    "店内",
+    "買い物"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/in_convenience_store/"
+  },
+  {
+   "id": "mc-inside_train",
+   "title": "電車の車内（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "inside_train",
+   "variants": [
+    {
+     "name": "電車の車内（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "電車の車内（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "電車の車内（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "乗り物",
+    "地下鉄",
+    "旅行",
+    "車内",
+    "通勤",
+    "通学",
+    "電車"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/inside_train/",
+   "recommended": true
+  },
+  {
+   "id": "mc-intersection",
+   "title": "街中の交差点（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "intersection",
+   "variants": [
+    {
+     "name": "街中の交差点（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "街中の交差点（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "街中の交差点（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "交差点",
+    "信号",
+    "屋外",
+    "市街地",
+    "歩道",
+    "街",
+    "街並み",
+    "街中",
+    "道",
+    "道路",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/intersection/"
+  },
+  {
+   "id": "mc-island_kitchen",
+   "title": "アイランドキッチン（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "island_kitchen",
+   "variants": [
+    {
+     "name": "アイランドキッチン（日中）",
+     "ext": "png"
+    },
+    {
+     "name": "アイランドキッチン（夕方）",
+     "ext": "png"
+    },
+    {
+     "name": "アイランドキッチン（夜・照明ON）",
+     "ext": "png"
+    },
+    {
+     "name": "アイランドキッチン（夜・照明OFF）",
+     "ext": "png"
+    },
+    {
+     "name": "アイランドキッチン（日中）｜奥レイヤ",
+     "ext": "png"
+    },
+    {
+     "name": "アイランドキッチン（日中）｜手前レイヤ",
+     "ext": "png"
+    },
+    {
+     "name": "アイランドキッチン（夕方）｜奥レイヤ",
+     "ext": "png"
+    },
+    {
+     "name": "アイランドキッチン（夕方）｜手前レイヤ",
+     "ext": "png"
+    },
+    {
+     "name": "アイランドキッチン（夜・照明ON）｜奥レイヤ",
+     "ext": "png"
+    },
+    {
+     "name": "アイランドキッチン（夜・照明ON）｜手前レイヤ",
+     "ext": "png"
+    },
+    {
+     "name": "アイランドキッチン（夜・照明OFF）｜奥レイヤ",
+     "ext": "png"
+    },
+    {
+     "name": "アイランドキッチン（夜・照明OFF）｜手前レイヤ",
+     "ext": "png"
+    }
+   ],
+   "tags": [
+    "キッチン",
+    "レイヤ分け配布有り",
+    "室内",
+    "家",
+    "屋内",
+    "料理",
+    "部屋",
+    "食卓"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/island_kitchen/"
+  },
+  {
+   "id": "mc-izakaya_table",
+   "title": "居酒屋のテーブル席",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "izakaya_table",
+   "variants": [
+    {
+     "name": "居酒屋のテーブル席",
+     "ext": "jpg"
+    },
+    {
+     "name": "居酒屋のテーブル席｜手前レイヤ",
+     "ext": "png"
+    },
+    {
+     "name": "居酒屋のテーブル席｜奥レイヤ",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "レイヤ分け配布有り",
+    "レストラン",
+    "居酒屋",
+    "屋内",
+    "店",
+    "店内",
+    "酒場",
+    "飲み会",
+    "飲み屋",
+    "飲食店"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/izakaya_table/"
+  },
+  {
+   "id": "mc-japanese_bathroom",
+   "title": "和モダンな浴室（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "japanese_bathroom",
+   "variants": [
+    {
+     "name": "和モダンな浴室（照明ON・お湯有り）",
+     "ext": "jpg"
+    },
+    {
+     "name": "和モダンな浴室（照明ON・お湯無し）",
+     "ext": "jpg"
+    },
+    {
+     "name": "和モダンな浴室（照明OFF・お湯有り）",
+     "ext": "jpg"
+    },
+    {
+     "name": "和モダンな浴室（照明OFF・お湯無し）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "お風呂",
+    "シャワー",
+    "バスルーム",
+    "入浴",
+    "和風",
+    "室内",
+    "家",
+    "屋内",
+    "浴室",
+    "部屋",
+    "風呂",
+    "風呂場"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/japanese_bathroom/"
+  },
+  {
+   "id": "mc-japanese_corridor",
+   "title": "田舎の家の縁側（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "japanese_corridor",
+   "variants": [
+    {
+     "name": "田舎の家の縁側（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "田舎の家の縁側（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "田舎の家の縁側（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "田舎の家の縁側（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "和風",
+    "家",
+    "屋内",
+    "廊下",
+    "日本家屋",
+    "田舎",
+    "縁側"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/japanese_corridor/"
+  },
+  {
+   "id": "mc-japanese_style_house",
+   "title": "和風の家（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "japanese_style_house",
+   "variants": [
+    {
+     "name": "和風の家（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "和風の家（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "和風の家（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "和風の家（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "和風",
+    "外観",
+    "家",
+    "屋外",
+    "庭",
+    "日本家屋",
+    "犬小屋",
+    "田舎"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/japanese_style_house/"
+  },
+  {
+   "id": "mc-jp_entrance_hall",
+   "title": "和風の家の玄関ホール（2枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "jp_entrance_hall",
+   "variants": [
+    {
+     "name": "和風の家の玄関ホール（照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "和風の家の玄関ホール（照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "和室",
+    "和風",
+    "家",
+    "屋内",
+    "廊下",
+    "日本家屋",
+    "玄関",
+    "玄関ホール",
+    "通路"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/jp_entrance_hall/"
+  },
+  {
+   "id": "mc-jp_passage_way",
+   "title": "和風な廊下（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "jp_passage_way",
+   "variants": [
+    {
+     "name": "和風な廊下（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "和風な廊下（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "和風な廊下（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "和風な廊下（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "ホテル",
+    "和風",
+    "家",
+    "屋内",
+    "廊下",
+    "施設",
+    "旅館",
+    "通路"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/jp_passage_way/"
+  },
+  {
+   "id": "mc-karaoke",
+   "title": "カラオケ",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "karaoke",
+   "variants": [
+    {
+     "name": "カラオケ",
+     "ext": "png"
+    },
+    {
+     "name": "カラオケ｜奥レイヤ",
+     "ext": "png"
+    },
+    {
+     "name": "カラオケ｜手前レイヤ・左ソファー",
+     "ext": "png"
+    },
+    {
+     "name": "カラオケ｜手前レイヤ・テーブル",
+     "ext": "png"
+    },
+    {
+     "name": "カラオケ｜手前レイヤ・右ソファー",
+     "ext": "png"
+    }
+   ],
+   "tags": [
+    "カラオケ",
+    "デート",
+    "レイヤ分け配布有り",
+    "店",
+    "店内",
+    "施設",
+    "歌枠",
+    "歌配信",
+    "部屋"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/karaoke/"
+  },
+  {
+   "id": "mc-kyudo_hall",
+   "title": "弓道場（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "kyudo_hall",
+   "variants": [
+    {
+     "name": "弓道場（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "弓道場（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "弓道場（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "学校",
+    "屋内",
+    "弓道",
+    "弓道場",
+    "弓道部",
+    "施設",
+    "校内",
+    "道場"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/kyudo_hall/"
+  },
+  {
+   "id": "mc-levee_trail",
+   "title": "川沿いの土手の遊歩道（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "levee_trail",
+   "variants": [
+    {
+     "name": "川沿いの土手の遊歩道（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "川沿いの土手の遊歩道（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "川沿いの土手の遊歩道（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "土手",
+    "屋外",
+    "川",
+    "歩道",
+    "河川敷",
+    "河川管理用通路",
+    "遊歩道",
+    "道",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/levee_trail/"
+  },
+  {
+   "id": "mc-library",
+   "title": "市立図書館",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "library",
+   "variants": [
+    {
+     "name": "市立図書館",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "図書館",
+    "大学",
+    "屋内",
+    "施設",
+    "本",
+    "本棚"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/library/"
+  },
+  {
+   "id": "mc-library_room",
+   "title": "図書室（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "library_room",
+   "variants": [
+    {
+     "name": "図書室（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "図書室（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "図書室（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "図書室（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "図書室",
+    "図書館",
+    "学校",
+    "屋内",
+    "施設",
+    "本",
+    "本棚",
+    "校内"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/library_room/"
+  },
+  {
+   "id": "mc-living",
+   "title": "リビング（5枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "living",
+   "variants": [
+    {
+     "name": "リビング（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "リビング（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "リビング（夜・照明ON・カーテン閉）",
+     "ext": "jpg"
+    },
+    {
+     "name": "リビング（夜・照明OFF・カーテン開）",
+     "ext": "jpg"
+    },
+    {
+     "name": "リビング（夜・照明OFF・カーテン閉）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "ソファー",
+    "ダイニング",
+    "リビング",
+    "室内",
+    "家",
+    "居間",
+    "屋内",
+    "部屋",
+    "食卓"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/living/"
+  },
+  {
+   "id": "mc-living2",
+   "title": "リビング２（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "living2",
+   "variants": [
+    {
+     "name": "リビング２（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "リビング２（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "リビング２（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "リビング２（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "ソファー",
+    "ダイニング",
+    "ナチュラル",
+    "リビング",
+    "室内",
+    "家",
+    "居間",
+    "屋内",
+    "部屋",
+    "食卓"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/living2/",
+   "recommended": true
+  },
+  {
+   "id": "mc-local_bus_station",
+   "title": "田舎のバス停（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "local_bus_station",
+   "variants": [
+    {
+     "name": "田舎のバス停（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "田舎のバス停（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "田舎のバス停（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "バス",
+    "バス停",
+    "外観",
+    "屋外",
+    "待合小屋",
+    "待合所",
+    "田んぼ",
+    "田園風景",
+    "田舎"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/local_bus_station/"
+  },
+  {
+   "id": "mc-local_station",
+   "title": "田舎の駅前（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "local_station",
+   "variants": [
+    {
+     "name": "田舎の駅前（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "田舎の駅前（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "田舎の駅前（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "外観",
+    "屋外",
+    "施設",
+    "田舎",
+    "電車",
+    "風景",
+    "駅",
+    "駅前",
+    "駅舎"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/local_station/"
+  },
+  {
+   "id": "mc-machine_room",
+   "title": "機械室（2枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "machine_room",
+   "variants": [
+    {
+     "name": "機械室（照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "機械室（照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "屋内",
+    "施設",
+    "機械室",
+    "発電室",
+    "部屋",
+    "配電室",
+    "配電盤",
+    "電気室"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/machine_room/",
+   "recommended": true
+  },
+  {
+   "id": "mc-mall",
+   "title": "ショッピングモール（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "mall",
+   "variants": [
+    {
+     "name": "ショッピングモール",
+     "ext": "jpg"
+    },
+    {
+     "name": "ショッピングモール（シャッター閉）",
+     "ext": "jpg"
+    },
+    {
+     "name": "ショッピングモール（消灯）",
+     "ext": "jpg"
+    },
+    {
+     "name": "ショッピングモール（消灯・シャッター閉）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "エスカレーター",
+    "ショッピングセンター",
+    "ショッピングモール",
+    "デパート",
+    "ブティック",
+    "屋内",
+    "店",
+    "施設",
+    "服屋",
+    "買い物"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/mall/"
+  },
+  {
+   "id": "mc-mall2",
+   "title": "ショッピングモール２",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "mall2",
+   "variants": [
+    {
+     "name": "ショッピングモール２",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "ショッピングセンター",
+    "ショッピングモール",
+    "デパート",
+    "屋内",
+    "店",
+    "施設",
+    "買い物"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/mall2/"
+  },
+  {
+   "id": "mc-medium_office",
+   "title": "会社のオフィス（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "medium_office",
+   "variants": [
+    {
+     "name": "会社のオフィス（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "会社のオフィス（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "会社のオフィス（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "会社のオフィス（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "オフィス",
+    "デスク",
+    "パソコン",
+    "ビジネス",
+    "ビル",
+    "事務所",
+    "仕事場",
+    "企業",
+    "会社",
+    "屋内",
+    "施設",
+    "社内",
+    "職場"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/medium_office/",
+   "recommended": true
+  },
+  {
+   "id": "mc-office",
+   "title": "事務所（2枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "office",
+   "variants": [
+    {
+     "name": "事務所",
+     "ext": "jpg"
+    },
+    {
+     "name": "事務所（消灯）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "オフィス",
+    "ビジネス",
+    "事務所",
+    "会社",
+    "屋内",
+    "探偵事務所",
+    "施設",
+    "社長室",
+    "部屋"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/office/",
+   "recommended": true
+  },
+  {
+   "id": "mc-park_gazebo_bench",
+   "title": "公園の東屋のベンチ（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "park_gazebo_bench",
+   "variants": [
+    {
+     "name": "公園の東屋のベンチ（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "公園の東屋のベンチ（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "公園の東屋のベンチ（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "ベンチ",
+    "休憩所",
+    "公園",
+    "屋外",
+    "散歩",
+    "東屋",
+    "椅子"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/park_gazebo_bench/"
+  },
+  {
+   "id": "mc-park_in_autumn",
+   "title": "秋の公園（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "park_in_autumn",
+   "variants": [
+    {
+     "name": "秋の公園（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "秋の公園（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "秋の公園（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "秋の公園（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "イチョウ",
+    "ベンチ",
+    "公園",
+    "園路",
+    "屋外",
+    "秋",
+    "紅葉",
+    "銀杏",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/park_in_autumn/"
+  },
+  {
+   "id": "mc-park_in_spring",
+   "title": "春の公園（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "park_in_spring",
+   "variants": [
+    {
+     "name": "春の公園（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "春の公園（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "春の公園（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "公園",
+    "噴水",
+    "夜桜",
+    "屋外",
+    "春",
+    "桜",
+    "桜吹雪",
+    "花見",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/park_in_spring/"
+  },
+  {
+   "id": "mc-pc_room",
+   "title": "パソコン部屋（5枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "pc_room",
+   "variants": [
+    {
+     "name": "パソコン部屋（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "パソコン部屋（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "パソコン部屋（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "パソコン部屋（夜・照明OFF）",
+     "ext": "jpg"
+    },
+    {
+     "name": "パソコン部屋（夜・画面のみON）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "オフィス",
+    "パソコン",
+    "リモートワーク",
+    "仕事",
+    "仕事場",
+    "室内",
+    "家",
+    "屋内",
+    "研究室",
+    "部屋"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/pc_room/"
+  },
+  {
+   "id": "mc-pc_room2",
+   "title": "パソコン部屋２（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "pc_room2",
+   "variants": [
+    {
+     "name": "パソコン部屋２（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "パソコン部屋２（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "パソコン部屋２（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "パソコン部屋２（夜・照明OFF）",
+     "ext": "jpg"
+    },
+    {
+     "name": "パソコン部屋２（日中）｜奥レイヤ",
+     "ext": "png"
+    },
+    {
+     "name": "パソコン部屋２（日中）｜手前レイヤ・椅子",
+     "ext": "png"
+    },
+    {
+     "name": "パソコン部屋２（日中）｜手前レイヤ・机",
+     "ext": "png"
+    },
+    {
+     "name": "パソコン部屋２（夕方）｜奥レイヤ",
+     "ext": "png"
+    },
+    {
+     "name": "パソコン部屋２（夕方）｜手前レイヤ・椅子",
+     "ext": "png"
+    },
+    {
+     "name": "パソコン部屋２（夕方）｜手前レイヤ・机",
+     "ext": "png"
+    },
+    {
+     "name": "パソコン部屋２（夜・照明ON）｜奥レイヤ",
+     "ext": "png"
+    },
+    {
+     "name": "パソコン部屋２（夜・照明ON）｜手前レイヤ・椅子",
+     "ext": "png"
+    },
+    {
+     "name": "パソコン部屋２（夜・照明ON）｜手前レイヤ・机",
+     "ext": "png"
+    },
+    {
+     "name": "パソコン部屋２（夜・照明OFF）｜奥レイヤ",
+     "ext": "png"
+    },
+    {
+     "name": "パソコン部屋２（夜・照明OFF）｜手前レイヤ・椅子",
+     "ext": "png"
+    },
+    {
+     "name": "パソコン部屋２（夜・照明OFF）｜手前レイヤ・机",
+     "ext": "png"
+    }
+   ],
+   "tags": [
+    "ディスプレイ",
+    "パソコン",
+    "モニター",
+    "リモートワーク",
+    "レイヤ分け配布有り",
+    "仕事",
+    "仕事場",
+    "在宅勤務",
+    "室内",
+    "家",
+    "屋内",
+    "部屋",
+    "配信部屋"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/pc_room2/"
+  },
+  {
+   "id": "mc-pedestrian_bridge",
+   "title": "歩道橋（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "pedestrian_bridge",
+   "variants": [
+    {
+     "name": "歩道橋（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "歩道橋（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "歩道橋（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "交差点",
+    "大通り",
+    "屋外",
+    "歩道",
+    "歩道橋",
+    "街",
+    "街中",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/pedestrian_bridge/"
+  },
+  {
+   "id": "mc-playground",
+   "title": "広い公園（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "playground",
+   "variants": [
+    {
+     "name": "広い公園（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "広い公園（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "広い公園（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "シーソー",
+    "ブランコ",
+    "公園",
+    "屋外",
+    "広場",
+    "滑り台",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/playground/"
+  },
+  {
+   "id": "mc-police_station",
+   "title": "警察署（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "police_station",
+   "variants": [
+    {
+     "name": "警察署（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "警察署（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "警察署（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "パトカー",
+    "外観",
+    "屋外",
+    "施設",
+    "警察",
+    "警察署"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/police_station/"
+  },
+  {
+   "id": "mc-pond_park",
+   "title": "池のある公園（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "pond_park",
+   "variants": [
+    {
+     "name": "池のある公園（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "池のある公園（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "池のある公園（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "公園",
+    "屋外",
+    "散歩",
+    "散歩道",
+    "池",
+    "沼",
+    "湖",
+    "湖畔",
+    "遊歩道",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/pond_park/"
+  },
+  {
+   "id": "mc-railroad_crossing",
+   "title": "街中の踏切（9枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "railroad_crossing",
+   "variants": [
+    {
+     "name": "街中の踏切（日中・開）",
+     "ext": "jpg"
+    },
+    {
+     "name": "街中の踏切（日中・閉・右）",
+     "ext": "jpg"
+    },
+    {
+     "name": "街中の踏切（日中・閉・左）",
+     "ext": "jpg"
+    },
+    {
+     "name": "街中の踏切（夕方・開）",
+     "ext": "jpg"
+    },
+    {
+     "name": "街中の踏切（夕方・閉・右）",
+     "ext": "jpg"
+    },
+    {
+     "name": "街中の踏切（夕方・閉・左）",
+     "ext": "jpg"
+    },
+    {
+     "name": "街中の踏切（夜・開）",
+     "ext": "jpg"
+    },
+    {
+     "name": "街中の踏切（夜・閉・右）",
+     "ext": "jpg"
+    },
+    {
+     "name": "街中の踏切（夜・閉・左）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "レール",
+    "屋外",
+    "線路",
+    "街",
+    "街中",
+    "踏切",
+    "道",
+    "道路",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/railroad_crossing/"
+  },
+  {
+   "id": "mc-residential_street",
+   "title": "住宅街（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "residential_street",
+   "variants": [
+    {
+     "name": "住宅街（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "住宅街（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "住宅街（夜・灯り有り）",
+     "ext": "jpg"
+    },
+    {
+     "name": "住宅街（夜・灯り無し）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "住宅地",
+    "住宅街",
+    "家",
+    "屋外",
+    "市街地",
+    "街",
+    "街並み",
+    "街中",
+    "通学路",
+    "道",
+    "道路",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/residential_street/"
+  },
+  {
+   "id": "mc-residential_street2",
+   "title": "住宅街２（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "residential_street2",
+   "variants": [
+    {
+     "name": "住宅街２（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "住宅街２（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "住宅街２（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "住宅街２（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "住宅地",
+    "住宅街",
+    "家",
+    "屋外",
+    "市街地",
+    "街",
+    "街並み",
+    "街中",
+    "通学路",
+    "道",
+    "道路",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/residential_street2/"
+  },
+  {
+   "id": "mc-restaurant",
+   "title": "レストラン（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "restaurant",
+   "variants": [
+    {
+     "name": "レストラン（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "レストラン（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "レストラン（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "ホテル",
+    "レストラン",
+    "屋内",
+    "店",
+    "店内",
+    "食事",
+    "飲食店"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/restaurant/"
+  },
+  {
+   "id": "mc-retro_living",
+   "title": "昭和レトロな茶の間（2枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "retro_living",
+   "variants": [
+    {
+     "name": "昭和レトロな茶の間（照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "昭和レトロな茶の間（照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "お茶の間",
+    "テレビ",
+    "リビング",
+    "レトロ",
+    "和室",
+    "和風",
+    "室内",
+    "家",
+    "居間",
+    "屋内",
+    "昭和",
+    "茶の間",
+    "部屋",
+    "食卓"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/retro_living/"
+  },
+  {
+   "id": "mc-ruined_hallway_1f",
+   "title": "廃墟ビルの1階通路（2枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "ruined_hallway_1f",
+   "variants": [
+    {
+     "name": "廃墟ビルの1階通路（明）",
+     "ext": "jpg"
+    },
+    {
+     "name": "廃墟ビルの1階通路（暗）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "アジト",
+    "ビル",
+    "ホラー",
+    "屋内",
+    "廃ビル",
+    "廃墟",
+    "廊下",
+    "心霊スポット",
+    "施設",
+    "肝試し",
+    "荒廃",
+    "通路"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/ruined_hallway_1f/"
+  },
+  {
+   "id": "mc-ruined_room",
+   "title": "廃墟ビルの部屋（2枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "ruined_room",
+   "variants": [
+    {
+     "name": "廃墟ビルの部屋（明）",
+     "ext": "jpg"
+    },
+    {
+     "name": "廃墟ビルの部屋（暗）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "アジト",
+    "ビル",
+    "室内",
+    "屋内",
+    "廃ビル",
+    "廃墟",
+    "心霊スポット",
+    "施設",
+    "肝試し",
+    "荒廃",
+    "部屋"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/ruined_room/"
+  },
+  {
+   "id": "mc-rural_railside",
+   "title": "田舎の線路沿いの道（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "rural_railside",
+   "variants": [
+    {
+     "name": "田舎の線路沿いの道（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "田舎の線路沿いの道（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "田舎の線路沿いの道（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "田舎の線路沿いの道（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "夏",
+    "屋外",
+    "田んぼ",
+    "田園風景",
+    "田舎",
+    "田舎道",
+    "線路",
+    "道",
+    "道路",
+    "郊外",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/rural_railside/"
+  },
+  {
+   "id": "mc-ryokan_reception",
+   "title": "旅館のフロント（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "ryokan_reception",
+   "variants": [
+    {
+     "name": "旅館のフロント",
+     "ext": "jpg"
+    },
+    {
+     "name": "旅館のフロント（夜・点灯）",
+     "ext": "jpg"
+    },
+    {
+     "name": "旅館のフロント（夜・消灯）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "フロント",
+    "ホテル",
+    "受付",
+    "和風",
+    "屋内",
+    "施設",
+    "旅館"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/ryokan-reception/"
+  },
+  {
+   "id": "mc-ryokan_room",
+   "title": "旅館の客室っぽい和室（5枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "ryokan_room",
+   "variants": [
+    {
+     "name": "旅館の客室っぽい和室（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "旅館の客室っぽい和室（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "旅館の客室っぽい和室（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "旅館の客室っぽい和室（夜・月明り）",
+     "ext": "jpg"
+    },
+    {
+     "name": "旅館の客室っぽい和室（夜・まっくら）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "ホテル",
+    "和室",
+    "和風",
+    "室内",
+    "屋内",
+    "施設",
+    "旅館",
+    "部屋"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/ryokan-room/"
+  },
+  {
+   "id": "mc-school_courtyard_bench",
+   "title": "学校のベンチ（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "school_courtyard_bench",
+   "variants": [
+    {
+     "name": "学校のベンチ（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校のベンチ（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校のベンチ（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校のベンチ（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "ベンチ",
+    "中庭",
+    "学校",
+    "屋外",
+    "庭",
+    "校内",
+    "椅子"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/school_courtyard_bench/"
+  },
+  {
+   "id": "mc-school_entrance",
+   "title": "学校の昇降口（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "school_entrance",
+   "variants": [
+    {
+     "name": "学校の昇降口（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の昇降口（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の昇降口（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の昇降口（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "入り口",
+    "外観",
+    "学校",
+    "屋外",
+    "昇降口",
+    "校内",
+    "校舎",
+    "玄関"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/school_entrance/"
+  },
+  {
+   "id": "mc-school_ground",
+   "title": "学校のグラウンド（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "school_ground",
+   "variants": [
+    {
+     "name": "学校のグラウンド（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校のグラウンド（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校のグラウンド（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校のグラウンド（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "グラウンド",
+    "学校",
+    "屋外",
+    "校内",
+    "校庭",
+    "運動場",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/school_ground/"
+  },
+  {
+   "id": "mc-school_hallway",
+   "title": "学校の廊下（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "school_hallway",
+   "variants": [
+    {
+     "name": "学校の廊下（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の廊下（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の廊下（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の廊下（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "学校",
+    "屋内",
+    "廊下",
+    "校内",
+    "通路"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/school_hallway/"
+  },
+  {
+   "id": "mc-school_in_spring",
+   "title": "春の学校（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "school_in_spring",
+   "variants": [
+    {
+     "name": "春の学校（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "春の学校（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "春の学校（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "春の学校（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "学校",
+    "屋外",
+    "春",
+    "校内",
+    "校舎",
+    "桜",
+    "桜吹雪",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/school_in_spring/"
+  },
+  {
+   "id": "mc-school_music_room",
+   "title": "学校の音楽室（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "school_music_room",
+   "variants": [
+    {
+     "name": "学校の音楽室（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の音楽室（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の音楽室（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の音楽室（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "ピアノ",
+    "学校",
+    "室内",
+    "屋内",
+    "部活動",
+    "音楽室",
+    "黒板"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/school_music_room/"
+  },
+  {
+   "id": "mc-school_rooftop",
+   "title": "学校の屋上（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "school_rooftop",
+   "variants": [
+    {
+     "name": "学校の屋上（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の屋上（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の屋上（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "学校",
+    "屋上",
+    "屋外",
+    "校内",
+    "校舎",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/school_rooftop/"
+  },
+  {
+   "id": "mc-school_store",
+   "title": "学校の購買部（2枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "school_store",
+   "variants": [
+    {
+     "name": "学校の購買部（昼食販売中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の購買部（昼食売り切れ）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "パン",
+    "売店",
+    "学校",
+    "屋内",
+    "弁当",
+    "校内",
+    "購買",
+    "購買部"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/school_store/"
+  },
+  {
+   "id": "mc-sea_island",
+   "title": "海・無人島・有人島（9枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "sea_island",
+   "variants": [
+    {
+     "name": "海（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "海（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "海（夜）",
+     "ext": "jpg"
+    },
+    {
+     "name": "無人島（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "無人島（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "無人島（夜）",
+     "ext": "jpg"
+    },
+    {
+     "name": "有人島（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "有人島（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "有人島（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "屋外",
+    "島",
+    "有人島",
+    "海",
+    "海の上",
+    "海上",
+    "海原",
+    "無人島",
+    "航海",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/sea_island/"
+  },
+  {
+   "id": "mc-seaside_bus_stop",
+   "title": "海辺のバス停（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "seaside_bus_stop",
+   "variants": [
+    {
+     "name": "海辺のバス停（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "海辺のバス停（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "海辺のバス停（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "バス",
+    "バス停",
+    "ビーチ",
+    "夏",
+    "屋外",
+    "待合小屋",
+    "待合所",
+    "海",
+    "海水浴場",
+    "海辺",
+    "砂浜"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/seaside_bus_stop/"
+  },
+  {
+   "id": "mc-shooting_stall",
+   "title": "射的の屋台（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "shooting_stall",
+   "variants": [
+    {
+     "name": "射的の屋台（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "射的の屋台（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "射的の屋台（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "お祭り",
+    "出店",
+    "夏",
+    "夏祭り",
+    "射的",
+    "屋台",
+    "屋外",
+    "店",
+    "的当て",
+    "祭り",
+    "縁日"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/shooting_stall/"
+  },
+  {
+   "id": "mc-shop_in_park",
+   "title": "公園の売店（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "shop_in_park",
+   "variants": [
+    {
+     "name": "公園の売店（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "公園の売店（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "公園の売店（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "かき氷",
+    "アイスクリーム",
+    "ソフトクリーム",
+    "公園",
+    "売店",
+    "屋外",
+    "店"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/shop_in_park/"
+  },
+  {
+   "id": "mc-shopping_arcade",
+   "title": "アーケード商店街（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "shopping_arcade",
+   "variants": [
+    {
+     "name": "アーケード商店街（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "アーケード商店街（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "アーケード商店街（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "アーケード",
+    "アーケード街",
+    "商店街",
+    "屋外",
+    "店",
+    "繁華街",
+    "街",
+    "街並み",
+    "街中",
+    "買い物",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/shopping_arcade/"
+  },
+  {
+   "id": "mc-shopping_street",
+   "title": "商店街（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "shopping_street",
+   "variants": [
+    {
+     "name": "商店街（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "商店街（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "商店街（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "交差点",
+    "商店街",
+    "屋外",
+    "市街地",
+    "店",
+    "歩道",
+    "繁華街",
+    "街",
+    "街中",
+    "買い物",
+    "道",
+    "道路",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/shopping_street/"
+  },
+  {
+   "id": "mc-shrine",
+   "title": "神社（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "shrine",
+   "variants": [
+    {
+     "name": "神社（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "神社（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "神社（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "神社（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "参道",
+    "境内",
+    "屋外",
+    "施設",
+    "神社",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/shrine/"
+  },
+  {
+   "id": "mc-single_room",
+   "title": "一人部屋（5枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "single_room",
+   "variants": [
+    {
+     "name": "一人部屋（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "一人部屋（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "一人部屋（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "一人部屋（夜・月明り）",
+     "ext": "jpg"
+    },
+    {
+     "name": "一人部屋（夜・まっくら）",
+     "ext": "jpg"
+    },
+    {
+     "name": "一人部屋（日中）｜奥レイヤ",
+     "ext": "jpg"
+    },
+    {
+     "name": "一人部屋（日中）｜手前レイヤ",
+     "ext": "png"
+    },
+    {
+     "name": "一人部屋（夕方）｜奥レイヤ",
+     "ext": "jpg"
+    },
+    {
+     "name": "一人部屋（夕方）｜手前レイヤ",
+     "ext": "png"
+    },
+    {
+     "name": "一人部屋（夜・照明ON）｜奥レイヤ",
+     "ext": "jpg"
+    },
+    {
+     "name": "一人部屋（夜・照明ON）｜手前レイヤ",
+     "ext": "png"
+    },
+    {
+     "name": "一人部屋（夜・月明り）｜奥レイヤ",
+     "ext": "jpg"
+    },
+    {
+     "name": "一人部屋（夜・月明り）｜手前レイヤ",
+     "ext": "png"
+    },
+    {
+     "name": "一人部屋（夜・まっくら）｜奥レイヤ",
+     "ext": "jpg"
+    },
+    {
+     "name": "一人部屋（夜・まっくら）｜手前レイヤ",
+     "ext": "png"
+    }
+   ],
+   "tags": [
+    "アパート・マンション",
+    "ソファー",
+    "ベッド",
+    "レイヤ分け配布有り",
+    "ワンルーム",
+    "一人暮らし",
+    "室内",
+    "家",
+    "屋内",
+    "私室",
+    "部屋"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/single_room/"
+  },
+  {
+   "id": "mc-single_room2",
+   "title": "一人部屋２（5枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "single_room2",
+   "variants": [
+    {
+     "name": "一人部屋２（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "一人部屋２（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "一人部屋２（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "一人部屋２（夜・照明OFF）",
+     "ext": "jpg"
+    },
+    {
+     "name": "一人部屋２（夜・ランプON）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "かわいい",
+    "ピンク",
+    "ベッド",
+    "一人部屋",
+    "可愛い",
+    "室内",
+    "家",
+    "寝室",
+    "屋内",
+    "私室",
+    "部屋"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/single_room2/"
+  },
+  {
+   "id": "mc-single_room3",
+   "title": "一人部屋３（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "single_room3",
+   "variants": [
+    {
+     "name": "一人部屋３（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "一人部屋３（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "一人部屋３（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "一人部屋３（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "ベッド",
+    "一人部屋",
+    "室内",
+    "家",
+    "寝室",
+    "屋内",
+    "私室",
+    "部屋"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/single_room3/",
+   "recommended": true
+  },
+  {
+   "id": "mc-small_bathroom",
+   "title": "アパートの浴室（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "small_bathroom",
+   "variants": [
+    {
+     "name": "アパートの浴室（照明ON・お湯有り）",
+     "ext": "jpg"
+    },
+    {
+     "name": "アパートの浴室（照明ON・お湯無し）",
+     "ext": "jpg"
+    },
+    {
+     "name": "アパートの浴室（照明OFF・お湯有り）",
+     "ext": "jpg"
+    },
+    {
+     "name": "アパートの浴室（照明OFF・お湯無し）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "お風呂",
+    "アパート・マンション",
+    "シャワー",
+    "バスルーム",
+    "入浴",
+    "室内",
+    "家",
+    "屋内",
+    "浴室",
+    "部屋",
+    "風呂",
+    "風呂場"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/small_bathroom/"
+  },
+  {
+   "id": "mc-small_playground",
+   "title": "住宅街の公園（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "small_playground",
+   "variants": [
+    {
+     "name": "住宅街の公園（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "住宅街の公園（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "住宅街の公園（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "シーソー",
+    "ブランコ",
+    "ベンチ",
+    "住宅街",
+    "公園",
+    "屋外",
+    "滑り台",
+    "街中",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/small_playground/"
+  },
+  {
+   "id": "mc-small_sandy_beach",
+   "title": "小さな砂浜（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "small_sandy_beach",
+   "variants": [
+    {
+     "name": "小さな砂浜（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "小さな砂浜（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "小さな砂浜（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "ビーチ",
+    "夏",
+    "屋外",
+    "浜辺",
+    "海",
+    "海水浴場",
+    "海辺",
+    "田舎",
+    "砂浜",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/small_sandy_beach/"
+  },
+  {
+   "id": "mc-staff_room",
+   "title": "学校の職員室（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "staff_room",
+   "variants": [
+    {
+     "name": "学校の職員室（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の職員室（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の職員室（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "学校の職員室（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "学校",
+    "室内",
+    "屋内",
+    "教務室",
+    "教員室",
+    "校内",
+    "職員室"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/staff_room/"
+  },
+  {
+   "id": "mc-stairs_facility",
+   "title": "何かの施設の階段（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "stairs_facility",
+   "variants": [
+    {
+     "name": "何かの施設の階段（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "何かの施設の階段（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "何かの施設の階段（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "何かの施設の階段（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "オフィス",
+    "会社",
+    "大学",
+    "屋内",
+    "施設",
+    "研究所",
+    "踊り場",
+    "階段"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/stairs_facility/"
+  },
+  {
+   "id": "mc-stalls",
+   "title": "縁日の屋台（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "stalls",
+   "variants": [
+    {
+     "name": "縁日の屋台（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "縁日の屋台（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "縁日の屋台（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "お祭り",
+    "出店",
+    "参道",
+    "夏祭り",
+    "屋外",
+    "店",
+    "神社",
+    "祭り",
+    "縁日"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/stalls/"
+  },
+  {
+   "id": "mc-station_concourse",
+   "title": "駅のコンコース",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "station_concourse",
+   "variants": [
+    {
+     "name": "駅のコンコース",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "のりば",
+    "コンコース",
+    "出口",
+    "屋内",
+    "改札",
+    "改札口",
+    "施設",
+    "通路",
+    "電車",
+    "駅",
+    "駅構内"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/station_concourse/"
+  },
+  {
+   "id": "mc-station_platform",
+   "title": "駅のホーム（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "station_platform",
+   "variants": [
+    {
+     "name": "駅のホーム（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "駅のホーム（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "駅のホーム（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "駅のホーム（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "プラットホーム",
+    "乗り場",
+    "屋内",
+    "施設",
+    "線路",
+    "電車",
+    "風景",
+    "駅"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/station_platform/",
+   "recommended": true
+  },
+  {
+   "id": "mc-storeroom",
+   "title": "物置（2枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "storeroom",
+   "variants": [
+    {
+     "name": "物置（照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "物置（照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "家",
+    "屋内",
+    "物置",
+    "部屋"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/storeroom/"
+  },
+  {
+   "id": "mc-street_in_autumn",
+   "title": "秋の街中（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "street_in_autumn",
+   "variants": [
+    {
+     "name": "秋の街中（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "秋の街中（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "秋の街中（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "イチョウ",
+    "屋外",
+    "歩道",
+    "秋",
+    "紅葉",
+    "街",
+    "街並み",
+    "街中",
+    "道",
+    "銀杏",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/street_in_autumn/"
+  },
+  {
+   "id": "mc-street_in_spring",
+   "title": "春の街中（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "street_in_spring",
+   "variants": [
+    {
+     "name": "春の街中（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "春の街中（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "春の街中（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "屋外",
+    "川",
+    "春",
+    "桜",
+    "桜並木",
+    "桜吹雪",
+    "街",
+    "街中",
+    "道路",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/street_in_spring/"
+  },
+  {
+   "id": "mc-street_in_summer",
+   "title": "夏の街中（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "street_in_summer",
+   "variants": [
+    {
+     "name": "夏の街中（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "夏の街中（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "夏の街中（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "入道雲",
+    "和風",
+    "夏",
+    "家",
+    "屋外",
+    "店",
+    "田舎",
+    "街中",
+    "道",
+    "道路",
+    "郊外",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/street_in_summer/"
+  },
+  {
+   "id": "mc-street_in_winter",
+   "title": "冬の街中（5枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "street_in_winter",
+   "variants": [
+    {
+     "name": "冬の街中（晴れ・日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "冬の街中（晴れ・夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "冬の街中（晴れ・夜）",
+     "ext": "jpg"
+    },
+    {
+     "name": "冬の街中（降雪・日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "冬の街中（降雪・夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "住宅街",
+    "冬",
+    "屋外",
+    "街",
+    "街並み",
+    "街中",
+    "道",
+    "道路",
+    "雪",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/street_in_winter/"
+  },
+  {
+   "id": "mc-summer_beach",
+   "title": "夏のビーチ（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "summer_beach",
+   "variants": [
+    {
+     "name": "夏のビーチ（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "夏のビーチ（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "夏のビーチ（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "ビーチ",
+    "入道雲",
+    "夏",
+    "屋外",
+    "海",
+    "海岸",
+    "海水浴場",
+    "砂浜",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/summer_beach/"
+  },
+  {
+   "id": "mc-summer_river",
+   "title": "夏の河原（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "summer_river",
+   "variants": [
+    {
+     "name": "夏の河原（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "夏の河原（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "夏の河原（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "キャンプ",
+    "キャンプ場",
+    "入道雲",
+    "夏",
+    "小川",
+    "屋外",
+    "川",
+    "河原",
+    "渓流",
+    "自然",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/summer_river/"
+  },
+  {
+   "id": "mc-supermarket",
+   "title": "スーパーマーケット",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "supermarket",
+   "variants": [
+    {
+     "name": "スーパーマーケット",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "スーパー",
+    "スーパーマーケット",
+    "屋内",
+    "店",
+    "店内",
+    "買い物",
+    "食料品"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/supermarket/"
+  },
+  {
+   "id": "mc-tatami_pc",
+   "title": "和室のパソコン（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "tatami_pc",
+   "variants": [
+    {
+     "name": "和室のパソコン（照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "和室のパソコン（照明OFF）",
+     "ext": "jpg"
+    },
+    {
+     "name": "和室のパソコン（画面のみ点灯）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "パソコン",
+    "和室",
+    "和風",
+    "室内",
+    "家",
+    "屋内",
+    "部屋"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/tatami_pc/"
+  },
+  {
+   "id": "mc-tatami_tv",
+   "title": "和室のテレビ（5枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "tatami_tv",
+   "variants": [
+    {
+     "name": "和室のテレビ（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "和室のテレビ（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "和室のテレビ（夜・照明ON）",
+     "ext": "jpg"
+    },
+    {
+     "name": "和室のテレビ（夜・画面のみ点灯）",
+     "ext": "jpg"
+    },
+    {
+     "name": "和室のテレビ（夜・照明OFF）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "お茶の間",
+    "テレビ",
+    "和室",
+    "和風",
+    "室内",
+    "家",
+    "屋内",
+    "茶の間",
+    "部屋"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/tatami_tv/"
+  },
+  {
+   "id": "mc-under_bridge",
+   "title": "河川敷の橋の下（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "under_bridge",
+   "variants": [
+    {
+     "name": "河川敷の橋の下（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "河川敷の橋の下（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "河川敷の橋の下（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "屋外",
+    "川",
+    "橋",
+    "河川",
+    "河川敷",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/under_bridge/"
+  },
+  {
+   "id": "mc-urban_street",
+   "title": "都会の街中（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "urban_street",
+   "variants": [
+    {
+     "name": "都会の街中（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "都会の街中（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "都会の街中（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "屋外",
+    "市街地",
+    "店",
+    "歩道",
+    "繁華街",
+    "街",
+    "街並み",
+    "街中",
+    "道",
+    "道路",
+    "都会",
+    "都市",
+    "風景"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/urban_street/"
+  },
+  {
+   "id": "mc-used_bookstore",
+   "title": "古本屋",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "used_bookstore",
+   "variants": [
+    {
+     "name": "古本屋",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "古書店",
+    "古本屋",
+    "屋内",
+    "店",
+    "店内",
+    "書店",
+    "書籍",
+    "本",
+    "本屋",
+    "本棚"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/used_bookstore/"
+  },
+  {
+   "id": "mc-vending_machine",
+   "title": "街中の自動販売機（3枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "vending_machine",
+   "variants": [
+    {
+     "name": "街中の自動販売機（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "街中の自動販売機（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "街中の自動販売機（夜）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "ジュース",
+    "屋外",
+    "清涼飲料水",
+    "自動販売機",
+    "自販機",
+    "街中",
+    "道",
+    "道路"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/vending_machine/"
+  },
+  {
+   "id": "mc-veranda_condominium",
+   "title": "マンションのベランダ（4枚）",
+   "kind": "写実系",
+   "dir": "background-c",
+   "file": "veranda_condominium",
+   "variants": [
+    {
+     "name": "マンションのベランダ（日中）",
+     "ext": "jpg"
+    },
+    {
+     "name": "マンションのベランダ（夕方）",
+     "ext": "jpg"
+    },
+    {
+     "name": "マンションのベランダ（夜・灯りあり）",
+     "ext": "jpg"
+    },
+    {
+     "name": "マンションのベランダ（夜・灯りなし）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "アパート・マンション",
+    "バルコニー",
+    "ベランダ",
+    "家",
+    "屋内",
+    "集合住宅"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_c/veranda_condominium/"
+  },
+  {
+   "id": "mc-concentrated_lines_1",
+   "title": "集中線 1（6枚）",
+   "kind": "抽象系",
+   "dir": "background-a",
+   "file": "concentrated_lines_1",
+   "variants": [
+    {
+     "name": "集中線1（多色）",
+     "ext": "jpg"
+    },
+    {
+     "name": "集中線1（青）",
+     "ext": "jpg"
+    },
+    {
+     "name": "集中線1（紫）",
+     "ext": "jpg"
+    },
+    {
+     "name": "集中線1（赤）",
+     "ext": "jpg"
+    },
+    {
+     "name": "集中線1（黄）",
+     "ext": "jpg"
+    },
+    {
+     "name": "集中線1（緑）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "クール",
+    "サムネ背景",
+    "ワープ",
+    "流線",
+    "集中線"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_a/concentrated_lines_1/"
+  },
+  {
+   "id": "mc-concentrated_lines_2",
+   "title": "集中線 2（6枚）",
+   "kind": "抽象系",
+   "dir": "background-a",
+   "file": "concentrated_lines_2",
+   "variants": [
+    {
+     "name": "集中線2（多色）",
+     "ext": "jpg"
+    },
+    {
+     "name": "集中線2（青）",
+     "ext": "jpg"
+    },
+    {
+     "name": "集中線2（紫）",
+     "ext": "jpg"
+    },
+    {
+     "name": "集中線2（赤）",
+     "ext": "jpg"
+    },
+    {
+     "name": "集中線2（黄）",
+     "ext": "jpg"
+    },
+    {
+     "name": "集中線2（緑）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "クール",
+    "サムネ背景",
+    "ワープ",
+    "流線",
+    "集中線"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_a/concentrated_lines_2/"
+  },
+  {
+   "id": "mc-diagonal_lines_1",
+   "title": "斜め流線 1（6枚）",
+   "kind": "抽象系",
+   "dir": "background-a",
+   "file": "diagonal_lines_1",
+   "variants": [
+    {
+     "name": "斜め流線1（カラフル）",
+     "ext": "jpg"
+    },
+    {
+     "name": "斜め流線1（青）",
+     "ext": "jpg"
+    },
+    {
+     "name": "斜め流線1（紫）",
+     "ext": "jpg"
+    },
+    {
+     "name": "斜め流線1（赤）",
+     "ext": "jpg"
+    },
+    {
+     "name": "斜め流線1（黄）",
+     "ext": "jpg"
+    },
+    {
+     "name": "斜め流線1（緑）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "クール",
+    "サムネ背景",
+    "流線"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_a/diagonal_lines_1/"
+  },
+  {
+   "id": "mc-diagonal_lines_2",
+   "title": "斜め流線 2（6枚）",
+   "kind": "抽象系",
+   "dir": "background-a",
+   "file": "diagonal_lines_2",
+   "variants": [
+    {
+     "name": "斜め流線2（カラフル）",
+     "ext": "jpg"
+    },
+    {
+     "name": "斜め流線2（青）",
+     "ext": "jpg"
+    },
+    {
+     "name": "斜め流線2（紫）",
+     "ext": "jpg"
+    },
+    {
+     "name": "斜め流線2（赤）",
+     "ext": "jpg"
+    },
+    {
+     "name": "斜め流線2（黄）",
+     "ext": "jpg"
+    },
+    {
+     "name": "斜め流線2（緑）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "クール",
+    "サムネ背景",
+    "流線"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_a/diagonal_lines_2/"
+  },
+  {
+   "id": "mc-horizontal_lines_1",
+   "title": "水平流線 1（6枚）",
+   "kind": "抽象系",
+   "dir": "background-a",
+   "file": "horizontal_lines_1",
+   "variants": [
+    {
+     "name": "水平流線1（青）",
+     "ext": "jpg"
+    },
+    {
+     "name": "水平流線1（紫）",
+     "ext": "jpg"
+    },
+    {
+     "name": "水平流線1（赤）",
+     "ext": "jpg"
+    },
+    {
+     "name": "水平流線1（黄）",
+     "ext": "jpg"
+    },
+    {
+     "name": "水平流線1（緑）",
+     "ext": "jpg"
+    },
+    {
+     "name": "水平流線1（灰）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "クール",
+    "サムネ背景",
+    "流線"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_a/horizontal_lines_1/"
+  },
+  {
+   "id": "mc-horizontal_lines_2",
+   "title": "水平流線 2（6枚）",
+   "kind": "抽象系",
+   "dir": "background-a",
+   "file": "horizontal_lines_2",
+   "variants": [
+    {
+     "name": "水平流線2（青）",
+     "ext": "jpg"
+    },
+    {
+     "name": "水平流線2（紫）",
+     "ext": "jpg"
+    },
+    {
+     "name": "水平流線2（赤）",
+     "ext": "jpg"
+    },
+    {
+     "name": "水平流線2（黄）",
+     "ext": "jpg"
+    },
+    {
+     "name": "水平流線2（緑）",
+     "ext": "jpg"
+    },
+    {
+     "name": "水平流線2（灰）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "クール",
+    "サムネ背景",
+    "流線"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_a/horizontal_lines_2/"
+  },
+  {
+   "id": "mc-rotation_1",
+   "title": "回転 1（3枚）",
+   "kind": "抽象系",
+   "dir": "background-a",
+   "file": "rotation_1",
+   "variants": [
+    {
+     "name": "回転1（青）",
+     "ext": "jpg"
+    },
+    {
+     "name": "回転1（黄）",
+     "ext": "jpg"
+    },
+    {
+     "name": "回転1（紫）",
+     "ext": "jpg"
+    }
+   ],
+   "tags": [
+    "クール",
+    "サムネ背景",
+    "回転"
+   ],
+   "page": "https://min-chi.material.jp/fm/bg_a/rotation_1/"
+  }
+ ],
+ "recommended_note": "recommended: true は「猫ミームでよく使われる定番背景」。nm-bg.py list は既定でこれだけを表示する。"
+}

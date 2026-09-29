@@ -1,0 +1,48 @@
+# 動作確認用の短いサンプル (みんちりえ背景のみ)
+# python3 scripts/nm-build.py assets/example.yaml -o /tmp/neko-example.mp4
+title: 在宅勤務のリアル
+size: landscape
+fps: 30
+crop: auto
+pos: bottom-flush
+text_style:
+  box: true
+scenes:
+  - text: "在宅勤務 初日"
+    cat: yt-sleeping-cat
+    bg: mc-single_room3-1
+    scale: 0.25
+    duration: 2.5
+    fade_in: 0.3
+
+  - text: "上司「顔出しでよろしく」"
+    cat: yt-talking-and-huh
+    bg: mc-medium_office-1
+    scale: 0.50
+    duration: 3.0
+
+  - text: "は？"
+    cat: yt-popcat
+    bg: mc-medium_office-1
+    scale: 0.40
+    duration: 2.0
+
+  - text: "とりあえず仕事してる感を出す"
+    text2: "※実際は寝てる"
+    cat: yt-typing-cat
+    bg: mc-single_room3-2
+    scale: 0.40
+    duration: 3.0
+
+  - text: "定時"
+    cat: yt-chipi-chipi
+    bg: mc-living2-3
+    scale: 0.40
+    duration: 2.5
+
+  - text: "また明日"
+    cat: yt-laughing-dog
+    bg: mc-living2-1
+    scale: 0.30
+    duration: 2.5
+    fade_out: 0.5

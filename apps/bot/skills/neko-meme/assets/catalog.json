@@ -1,0 +1,1226 @@
+{
+ "version": 1,
+ "updated": "2026-07-29",
+ "sources": {
+  "memesstyle": {
+   "site": "https://www.memesstyle.com/",
+   "note": "Cloudflare R2 に mp4 直置き。ほぼ全てグリーンバック。yt-dlp 不要"
+  },
+  "youtube": {
+   "site": "https://neko-meme-site.vercel.app/sozai-list",
+   "note": "猫ミーム情報局(@ShariSamon)がまとめた YouTube 素材へのリンク集。取得に yt-dlp が必要"
+  }
+ },
+ "license_note": "いずれも第三者が公開している素材。個人利用/SNS 投稿の範囲を想定。商用利用や再配布は各配布元・投稿者の条件を確認すること。",
+ "materials": [
+  {
+   "id": "biker-cat",
+   "name": "前乗りバイク猫",
+   "source": "memesstyle",
+   "url": "https://pub-d81332ee385741718118505c735e2f46.r2.dev/downloads%2F%E5%89%8D%E4%B9%97%E3%82%8A%E3%83%8F%E3%82%99%E3%82%A4%E3%82%AF%E7%8C%AB.mp4",
+   "page": "https://www.memesstyle.com/cat-meme-list",
+   "name_ja": "前乗りバイク猫",
+   "tags": [
+    "移動",
+    "バイク",
+    "出発"
+   ]
+  },
+  {
+   "id": "cat-person",
+   "name": "1451982764-1-16",
+   "source": "memesstyle",
+   "url": "https://pub-d81332ee385741718118505c735e2f46.r2.dev/downloads%2F1451982764-1-16.mp4",
+   "page": "https://www.memesstyle.com/cat-meme-list",
+   "name_ja": "人が扮する猫",
+   "tags": [
+    "人間",
+    "コスプレ",
+    "ボケ"
+   ]
+  },
+  {
+   "id": "chipi-chipi",
+   "name": "Chipi Chipi Chapa Chapa Cat green screen 猫ミーム素材",
+   "source": "memesstyle",
+   "url": "https://pub-d81332ee385741718118505c735e2f46.r2.dev/downloads%2FChipi%20Chipi%20Chapa%20Chapa%20Cat%20green%20screen%20%E7%8C%AB%E3%83%9F%E3%83%BC%E3%83%A0%E7%B4%A0%E6%9D%90%20.mp4",
+   "page": "https://www.memesstyle.com/",
+   "name_ja": "チピチピチャパチャパ猫",
+   "tags": [
+    "ダンス",
+    "定番",
+    "ノリノリ",
+    "首振り"
+   ]
+  },
+  {
+   "id": "crunchy-cat",
+   "name": "Green Screen Crunchy Cat Luna Meme 猫ミーム素材",
+   "source": "memesstyle",
+   "url": "https://pub-d81332ee385741718118505c735e2f46.r2.dev/downloads/Green Screen Crunchy Cat Luna Meme 猫ミーム素材 .mp4",
+   "page": "https://www.memesstyle.com/cat-meme-list",
+   "name_ja": "物をかむ猫",
+   "tags": [
+    "食べる",
+    "カリカリ",
+    "無視"
+   ]
+  },
+  {
+   "id": "dancing-girlfriend",
+   "name": "Cat Dances to Girlfriend 猫ミーム素材",
+   "source": "memesstyle",
+   "url": "https://pub-d81332ee385741718118505c735e2f46.r2.dev/downloads/Cat Dances to Girlfriend 猫ミーム素材 .mp4",
+   "page": "https://www.memesstyle.com/",
+   "name_ja": "Girlfriendを踊る猫",
+   "tags": [
+    "ダンス",
+    "嬉しい",
+    "ノリノリ"
+   ]
+  },
+  {
+   "id": "goat-person",
+   "name": "1451982551-1-16",
+   "source": "memesstyle",
+   "url": "https://pub-d81332ee385741718118505c735e2f46.r2.dev/downloads%2F1451982551-1-16.mp4",
+   "page": "https://www.memesstyle.com/cat-meme-list",
+   "name_ja": "人が扮するヤギ",
+   "tags": [
+    "ヤギ",
+    "人間",
+    "コスプレ",
+    "ツッコミ"
+   ]
+  },
+  {
+   "id": "gojo-cat",
+   "name": "A cat dressed up like Satoru Gojo",
+   "source": "memesstyle",
+   "url": "https://pub-d81332ee385741718118505c735e2f46.r2.dev/downloads%2FA%20cat%20dressed%20up%20like%20Satoru%20Gojo.mp4",
+   "page": "https://www.memesstyle.com/",
+   "name_ja": "五条悟のコスプレをした猫",
+   "tags": [
+    "コスプレ",
+    "五条悟",
+    "登場"
+   ]
+  },
+  {
+   "id": "hodomoe-cat",
+   "name": "ホドモエシティ猫mp4",
+   "source": "memesstyle",
+   "url": "https://pub-d81332ee385741718118505c735e2f46.r2.dev/downloads%2F%E3%83%9B%E3%83%88%E3%82%99%E3%83%A2%E3%82%A8%E3%82%B7%E3%83%86%E3%82%A3%E7%8C%ABmp4.mp4",
+   "page": "https://www.memesstyle.com/",
+   "name_ja": "ホドモエシティ猫",
+   "tags": [
+    "ダンス",
+    "ポケモン",
+    "ノリノリ"
+   ]
+  },
+  {
+   "id": "kitten-butt",
+   "name": "子猫のお尻のお尻",
+   "source": "memesstyle",
+   "url": "https://pub-d81332ee385741718118505c735e2f46.r2.dev/downloads%2F%E5%AD%90%E7%8C%AB%E3%81%AE%E3%81%8A%E5%B0%BB%E3%81%AE%E3%81%8A%E5%B0%BB.mp4",
+   "page": "https://www.memesstyle.com/cat-meme-list",
+   "name_ja": "子猫のお尻のお尻",
+   "tags": [
+    "かわいい",
+    "子猫",
+    "お尻"
+   ]
+  },
+  {
+   "id": "laughing-pointing-cat",
+   "name": "指着你的大笑猫",
+   "source": "memesstyle",
+   "url": "https://pub-d81332ee385741718118505c735e2f46.r2.dev/downloads%2F%E6%8C%87%E7%9D%80%E4%BD%A0%E7%9A%84%E5%A4%A7%E7%AC%91%E7%8C%AB.mp4",
+   "page": "https://www.memesstyle.com/cat-meme-list",
+   "name_ja": "笑っている猫に指を向けてください",
+   "tags": [
+    "爆笑",
+    "指差し",
+    "煽り",
+    "オチ"
+   ]
+  },
+  {
+   "id": "pause-button",
+   "name": "Pause-Button-Green-Screen",
+   "source": "memesstyle",
+   "url": "https://pub-d81332ee385741718118505c735e2f46.r2.dev/downloads/Pause-Button-Green-Screen.mp4",
+   "page": "https://www.memesstyle.com/",
+   "name_ja": "ポーズボタンエフェクト グリーンスクリーン",
+   "tags": [
+    "エフェクト",
+    "一時停止",
+    "演出"
+   ]
+  },
+  {
+   "id": "popcat",
+   "name": "Pop Cat Green screen 猫ミーム素材 cat meme",
+   "source": "memesstyle",
+   "url": "https://pub-d81332ee385741718118505c735e2f46.r2.dev/downloads%2FPop%20Cat%20Green%20screen%20%E7%8C%AB%E3%83%9F%E3%83%BC%E3%83%A0%E7%B4%A0%E6%9D%90%20cat%20meme%20.mp4",
+   "page": "https://www.memesstyle.com/",
+   "name_ja": "口をパクパクする猫（POPCAT",
+   "tags": [
+    "驚き",
+    "定番",
+    "口パク",
+    "リアクション"
+   ]
+  },
+  {
+   "id": "pot-dog",
+   "name": "狗敲盆",
+   "source": "memesstyle",
+   "url": "https://pub-d81332ee385741718118505c735e2f46.r2.dev/downloads%2F%E7%8B%97%E6%95%B2%E7%9B%86.mp4",
+   "page": "https://www.memesstyle.com/",
+   "name_ja": "鍋をたたく犬",
+   "tags": [
+    "犬",
+    "催促",
+    "ごはん",
+    "騒ぐ"
+   ]
+  },
+  {
+   "id": "support-cat",
+   "name": "客服猫",
+   "source": "memesstyle",
+   "url": "https://pub-d81332ee385741718118505c735e2f46.r2.dev/downloads%2F%E5%AE%A2%E6%9C%8D%E7%8C%AB.mp4",
+   "page": "https://www.memesstyle.com/cat-meme-list",
+   "name_ja": "顧客サービスの役割を果たす猫",
+   "tags": [
+    "仕事",
+    "接客",
+    "対応",
+    "困惑"
+   ]
+  },
+  {
+   "id": "swinging-cat",
+   "name": "Swinging Cat",
+   "source": "memesstyle",
+   "url": "https://pub-d81332ee385741718118505c735e2f46.r2.dev/downloads%2FSwinging%20Cat.mp4",
+   "page": "https://www.memesstyle.com/",
+   "name_ja": "揺れる猫 (Yureru Neko)",
+   "tags": [
+    "揺れる",
+    "のんき",
+    "待ち"
+   ]
+  },
+  {
+   "id": "talking-cats",
+   "name": "Green Screen Talking Cats Meme _ 猫ミーム素材 cat meme I",
+   "source": "memesstyle",
+   "url": "https://pub-d81332ee385741718118505c735e2f46.r2.dev/downloads%2FGreen%20Screen%20Talking%20Cats%20Meme%20_%20%E7%8C%AB%E3%83%9F%E3%83%BC%E3%83%A0%E7%B4%A0%E6%9D%90%20cat%20meme%20I.mp4",
+   "page": "https://www.memesstyle.com/",
+   "name_ja": "会話してる猫",
+   "tags": [
+    "会話",
+    "定番",
+    "説明",
+    "掛け合い"
+   ]
+  },
+  {
+   "id": "teemo",
+   "name": "Teemo Space Groove Skin Material",
+   "source": "memesstyle",
+   "url": "https://pub-d81332ee385741718118505c735e2f46.r2.dev/downloads/Teemo%20Space%20Groove%20Skin%20Material.mp4",
+   "page": "https://www.memesstyle.com/",
+   "name_ja": "ティーモ スペースグルーヴ スキン 素材",
+   "tags": [
+    "ダンス",
+    "LoL",
+    "ティーモ"
+   ]
+  },
+  {
+   "id": "teemo-hit",
+   "name": "Teemo Space Groove Skin Material - Hit the spot",
+   "source": "memesstyle",
+   "url": "https://pub-d81332ee385741718118505c735e2f46.r2.dev/downloads/Teemo%20Space%20Groove%20Skin%20Material%20-%20Hit%20the%20spot%20.mp4",
+   "page": "https://www.memesstyle.com/",
+   "name_ja": "ツボに入る - ティーモ スペースグルーヴ スキン",
+   "tags": [
+    "ツボ",
+    "LoL",
+    "ティーモ"
+   ]
+  },
+  {
+   "id": "waving-cat",
+   "name": "Waving Cat",
+   "source": "memesstyle",
+   "url": "https://pub-d81332ee385741718118505c735e2f46.r2.dev/downloads%2FWaving%20Cat.mp4",
+   "page": "https://www.memesstyle.com/",
+   "name_ja": "招き猫 (Maneki Neko)",
+   "tags": [
+    "招き猫",
+    "挨拶",
+    "登場",
+    "オチ"
+   ]
+  },
+  {
+   "id": "yt-angry-cat",
+   "name": "怒っている猫",
+   "source": "youtube",
+   "url": "https://youtu.be/2834Igg4M5U",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "怒り",
+    "不機嫌",
+    "ツッコミ"
+   ],
+   "recommended": true
+  },
+  {
+   "id": "yt-big-eyes-cat",
+   "name": "大きな目の猫",
+   "source": "youtube",
+   "url": "https://youtu.be/Y3gCbbfMCQ0",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "驚き",
+    "凝視",
+    "かわいい",
+    "リアクション"
+   ],
+   "recommended": true
+  },
+  {
+   "id": "yt-bike-kitten",
+   "name": "自転車に乗る子猫",
+   "source": "youtube",
+   "url": "https://youtu.be/zRNA1WIE0Vw",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "移動",
+    "自転車",
+    "かわいい"
+   ]
+  },
+  {
+   "id": "yt-black-face-sheep",
+   "name": "黒い顔の羊",
+   "source": "youtube",
+   "url": "https://youtu.be/kikR1dNW8H0",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "羊",
+    "のんき"
+   ]
+  },
+  {
+   "id": "yt-cat-and-dog",
+   "name": "猫と犬",
+   "source": "youtube",
+   "url": "https://youtu.be/y9oMvAPG8R8",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "組み合わせ",
+    "掛け合い",
+    "犬"
+   ]
+  },
+  {
+   "id": "yt-cat-fight",
+   "name": "猫の戦い",
+   "source": "youtube",
+   "url": "https://youtu.be/67apiE1lAws",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "攻撃",
+    "喧嘩",
+    "カオス"
+   ]
+  },
+  {
+   "id": "yt-cat-hits-cat",
+   "name": "猫が別の猫を攻撃",
+   "source": "youtube",
+   "url": "https://youtu.be/N705E3s2oLE",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "name_ja": "猫が別の猫を攻撃",
+   "tags": [
+    "攻撃",
+    "叩く",
+    "ツッコミ",
+    "オチ"
+   ],
+   "recommended": true
+  },
+  {
+   "id": "yt-cat-huh",
+   "name": "猫「え？」",
+   "source": "youtube",
+   "url": "https://youtu.be/lyrzrAZFZUE",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "驚き",
+    "聞き返し",
+    "ツッコミ",
+    "定番"
+   ],
+   "recommended": true
+  },
+  {
+   "id": "yt-cat-leaves",
+   "name": "猫が家を出る",
+   "source": "youtube",
+   "url": "https://youtu.be/k4NkMg-FJhw",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "退場",
+    "出発",
+    "移動"
+   ]
+  },
+  {
+   "id": "yt-chipi-chipi",
+   "name": "チピチピチャパチャパ",
+   "source": "youtube",
+   "url": "https://youtu.be/kYWFJzNz3Es",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "name_ja": "チピチピチャパチャパ",
+   "tags": [
+    "ダンス",
+    "定番",
+    "ノリノリ",
+    "首振り"
+   ],
+   "recommended": true
+  },
+  {
+   "id": "yt-chips-cat",
+   "name": "チップスを食べる猫",
+   "source": "youtube",
+   "url": "https://youtu.be/Cnc6On-m_II",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "食べる",
+    "間食"
+   ]
+  },
+  {
+   "id": "yt-corgi-smile",
+   "name": "笑顔のコーギー犬",
+   "source": "youtube",
+   "url": "https://youtu.be/ldg44E6dQuE",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "犬",
+    "笑顔",
+    "かわいい"
+   ]
+  },
+  {
+   "id": "yt-corn-cat",
+   "name": "猫がコーンを食べる",
+   "source": "youtube",
+   "url": "https://youtu.be/9VTxfh9HnFs",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "食べる",
+    "コーン"
+   ]
+  },
+  {
+   "id": "yt-crunchy-cat",
+   "name": "カリカリ猫が食べる",
+   "source": "youtube",
+   "url": "https://youtu.be/Il1wfhYILPA",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "name_ja": "カリカリ猫が食べる",
+   "tags": [
+    "食べる",
+    "カリカリ",
+    "無視"
+   ],
+   "recommended": true
+  },
+  {
+   "id": "yt-dancing-cat",
+   "name": "猫のダンス",
+   "source": "youtube",
+   "url": "https://youtu.be/rOfcAHrJxwU",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "name_ja": "猫のダンス",
+   "tags": [
+    "ダンス",
+    "ノリノリ"
+   ]
+  },
+  {
+   "id": "yt-dancing-cat-2",
+   "name": "踊る猫",
+   "source": "youtube",
+   "url": "https://youtu.be/_TDF3RJJAeg",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "ダンス",
+    "ノリノリ"
+   ]
+  },
+  {
+   "id": "yt-dancing-dog",
+   "name": "踊る犬",
+   "source": "youtube",
+   "url": "https://youtu.be/Qt7LToujZSU",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "犬",
+    "ダンス",
+    "ノリノリ"
+   ]
+  },
+  {
+   "id": "yt-dancing-dog-2",
+   "name": "踊る犬",
+   "source": "youtube",
+   "url": "https://youtu.be/cZnMVbRKOIk",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "犬",
+    "ダンス",
+    "ノリノリ"
+   ]
+  },
+  {
+   "id": "yt-dancing-dog-3",
+   "name": "踊る犬",
+   "source": "youtube",
+   "url": "https://youtu.be/A7GKQgVfQMk",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "犬",
+    "ダンス",
+    "ノリノリ"
+   ]
+  },
+  {
+   "id": "yt-dancing-girlfriend",
+   "name": "猫はガールフレンドに合わせて踊る",
+   "source": "youtube",
+   "url": "https://youtu.be/W3oMWLl6hp4",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "name_ja": "猫はガールフレンドに合わせて踊る",
+   "tags": [
+    "ダンス",
+    "嬉しい",
+    "ノリノリ"
+   ],
+   "unavailable": true,
+   "alt": "dancing-girlfriend"
+  },
+  {
+   "id": "yt-demanding-monkey",
+   "name": "要求の厳しい猿",
+   "source": "youtube",
+   "url": "https://youtu.be/mQqgC1wc_Us",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "猿",
+    "要求",
+    "催促"
+   ]
+  },
+  {
+   "id": "yt-dj-cat",
+   "name": "DJ猫",
+   "source": "youtube",
+   "url": "https://youtu.be/w1h_UuOGNx4",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "DJ",
+    "音楽",
+    "ノリノリ",
+    "登場"
+   ],
+   "recommended": true
+  },
+  {
+   "id": "yt-dog-and-zoning-cat",
+   "name": "笑う犬と黒猫のゾーンアウト",
+   "source": "youtube",
+   "url": "https://youtu.be/cFfILqbRYNU",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "組み合わせ",
+    "煽り",
+    "放心",
+    "掛け合い"
+   ],
+   "recommended": true
+  },
+  {
+   "id": "yt-dog-at-pc",
+   "name": "パソコンを見つめる犬",
+   "source": "youtube",
+   "url": "https://youtu.be/1XsSGPpQU0M",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "犬",
+    "PC",
+    "仕事",
+    "凝視"
+   ]
+  },
+  {
+   "id": "yt-door-cat",
+   "name": "猫はドアを開けてほしい",
+   "source": "youtube",
+   "url": "https://youtu.be/yNG9W6GfCB4",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "催促",
+    "要求",
+    "ドア"
+   ]
+  },
+  {
+   "id": "yt-driving-cat",
+   "name": "猫の運転",
+   "source": "youtube",
+   "url": "https://youtu.be/QYaC8YHw238",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "移動",
+    "運転",
+    "出発"
+   ],
+   "unavailable": true,
+   "alt": "yt-bike-kitten"
+  },
+  {
+   "id": "yt-edm-dance",
+   "name": "EDMに合わせて踊る猫",
+   "source": "youtube",
+   "url": "https://youtu.be/E3RcD6LleYU",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "name_ja": "EDMに合わせて踊る猫",
+   "tags": [
+    "ダンス",
+    "EDM",
+    "ノリノリ"
+   ],
+   "unavailable": true,
+   "alt": "hodomoe-cat"
+  },
+  {
+   "id": "yt-emo-cat",
+   "name": "エモ猫ヘアフリップ",
+   "source": "youtube",
+   "url": "https://youtu.be/FNOPByKpHOw",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "エモ",
+    "ドヤ顔",
+    "登場"
+   ]
+  },
+  {
+   "id": "yt-gagging-cat",
+   "name": "えずく猫",
+   "source": "youtube",
+   "url": "https://youtu.be/igCWYupcHqQ",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "嫌悪",
+    "拒否",
+    "オチ"
+   ]
+  },
+  {
+   "id": "yt-goat-and-huh",
+   "name": "無知な猫と話すヤギ",
+   "source": "youtube",
+   "url": "https://youtu.be/B7aSDu6Qh6U",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "name_ja": "無知な猫と話すヤギ",
+   "tags": [
+    "会話",
+    "ヤギ",
+    "掛け合い",
+    "無知"
+   ],
+   "recommended": true
+  },
+  {
+   "id": "yt-goat-talking",
+   "name": "何も知らずに話すヤギ",
+   "source": "youtube",
+   "url": "https://youtu.be/vtC8kiC6F10",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "ヤギ",
+    "会話",
+    "無知",
+    "説明"
+   ],
+   "recommended": true
+  },
+  {
+   "id": "yt-happy-cat",
+   "name": "ハッピーハッピーハッピー猫",
+   "source": "youtube",
+   "url": "https://youtu.be/VccyL2tEnAc",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "name_ja": "ハッピーハッピーハッピー猫",
+   "tags": [
+    "嬉しい",
+    "ハッピー",
+    "ダンス"
+   ],
+   "unavailable": true,
+   "alt": "chipi-chipi"
+  },
+  {
+   "id": "yt-head-bob-cat",
+   "name": "リズムに合わせて首を振る猫",
+   "source": "youtube",
+   "url": "https://youtu.be/0Ogenr6hVDY",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "ダンス",
+    "首振り",
+    "ノリノリ"
+   ]
+  },
+  {
+   "id": "yt-hungry-cat",
+   "name": "お腹を空かせた猫",
+   "source": "youtube",
+   "url": "https://youtu.be/Zj_8FKalSQ8",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "空腹",
+    "催促",
+    "食べる"
+   ]
+  },
+  {
+   "id": "yt-keyboard-dog",
+   "name": "キーボードを弾く犬",
+   "source": "youtube",
+   "url": "https://youtu.be/fH_5KfV8FiM",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "犬",
+    "演奏",
+    "仕事"
+   ]
+  },
+  {
+   "id": "yt-know-nothing",
+   "name": "何も知らない猫",
+   "source": "youtube",
+   "url": "https://youtu.be/aAsYoZyLKcU",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "name_ja": "何も知らない猫",
+   "tags": [
+    "無知",
+    "とぼける",
+    "定番",
+    "ボケ"
+   ],
+   "recommended": true
+  },
+  {
+   "id": "yt-laughing-dog",
+   "name": "笑う犬",
+   "source": "youtube",
+   "url": "https://youtu.be/JiNh-go3YCs",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "name_ja": "笑う犬",
+   "tags": [
+    "犬",
+    "笑う",
+    "煽り",
+    "オチ"
+   ],
+   "recommended": true
+  },
+  {
+   "id": "yt-lookup-cat",
+   "name": "食事をしてから見上げる猫",
+   "source": "youtube",
+   "url": "https://youtu.be/Qy5trHdhKFs",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "食べる",
+    "見上げる",
+    "期待"
+   ]
+  },
+  {
+   "id": "yt-maxwell",
+   "name": "Maxwell The Cat",
+   "source": "youtube",
+   "url": "https://youtu.be/kkOWKzQa_us",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "ダンス",
+    "定番",
+    "回る",
+    "ノリノリ"
+   ],
+   "recommended": true
+  },
+  {
+   "id": "yt-meowing-cat",
+   "name": "鳴く猫",
+   "source": "youtube",
+   "url": "https://youtu.be/gLE0wR30bqg",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "鳴く",
+    "訴え"
+   ]
+  },
+  {
+   "id": "yt-meowing-cat-2",
+   "name": "鳴く猫",
+   "source": "youtube",
+   "url": "https://youtu.be/6C1Ef6XXsDM",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "鳴く",
+    "訴え"
+   ]
+  },
+  {
+   "id": "yt-monkey-cart",
+   "name": "ゴルフカートを運転する猿",
+   "source": "youtube",
+   "url": "https://youtu.be/do9Lb7iEcyk",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "猿",
+    "移動",
+    "カオス"
+   ]
+  },
+  {
+   "id": "yt-mr-fresh",
+   "name": "Mr. Fresh猫",
+   "source": "youtube",
+   "url": "https://youtu.be/EQuSQGNGNuU",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "ダンス",
+    "ノリノリ",
+    "登場"
+   ],
+   "recommended": true
+  },
+  {
+   "id": "yt-nail-file-cat",
+   "name": "猫の爪やすり",
+   "source": "youtube",
+   "url": "https://youtu.be/gOxaeuslZhU",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "作業",
+    "爪",
+    "のんき",
+    "日常"
+   ],
+   "recommended": true
+  },
+  {
+   "id": "yt-no-cat",
+   "name": "ノーと叫ぶ猫",
+   "source": "youtube",
+   "url": "https://youtu.be/lZflIhH7_nk",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "拒否",
+    "叫ぶ",
+    "ツッコミ"
+   ]
+  },
+  {
+   "id": "yt-nostalgic-cat",
+   "name": "昔の思い出を思い出す猫",
+   "source": "youtube",
+   "url": "https://youtu.be/s2y0-N_TEc8",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "回想",
+    "思い出",
+    "しんみり"
+   ]
+  },
+  {
+   "id": "yt-popcat",
+   "name": "ポップキャット",
+   "source": "youtube",
+   "url": "https://youtu.be/L6U42jIShFo",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "驚き",
+    "口パク",
+    "定番",
+    "リアクション"
+   ],
+   "recommended": true
+  },
+  {
+   "id": "yt-porcupine-dance",
+   "name": "ヤマアラシダンス",
+   "source": "youtube",
+   "url": "https://youtu.be/ek6ETx12zvQ",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "ダンス",
+    "カオス"
+   ]
+  },
+  {
+   "id": "yt-real-sheep",
+   "name": "本物の羊",
+   "source": "youtube",
+   "url": "https://youtu.be/7vOfz0nViOo",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "羊",
+    "のんき"
+   ]
+  },
+  {
+   "id": "yt-rizz-cat",
+   "name": "猫 Rizz",
+   "source": "youtube",
+   "url": "https://youtu.be/ehz3EdRhdkw",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "ドヤ顔",
+    "自信",
+    "登場"
+   ]
+  },
+  {
+   "id": "yt-sad-dog",
+   "name": "悲しい黒い犬",
+   "source": "youtube",
+   "url": "https://youtu.be/5uYHHWlj07w",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "犬",
+    "悲しい",
+    "しょんぼり"
+   ]
+  },
+  {
+   "id": "yt-screaming-cat",
+   "name": "叫ぶ猫",
+   "source": "youtube",
+   "url": "https://youtu.be/Jg2SPb-p_fc",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "name_ja": "叫ぶ猫",
+   "tags": [
+    "叫ぶ",
+    "驚き",
+    "絶叫",
+    "ツッコミ"
+   ],
+   "recommended": true
+  },
+  {
+   "id": "yt-screaming-cat-2",
+   "name": "叫ぶ猫",
+   "source": "youtube",
+   "url": "https://youtu.be/rE9T7MgQT3A",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "叫ぶ",
+    "驚き",
+    "絶叫",
+    "ツッコミ"
+   ]
+  },
+  {
+   "id": "yt-shivering-dog",
+   "name": "震える犬",
+   "source": "youtube",
+   "url": "https://youtu.be/7XkZV9xDa-A",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "犬",
+    "恐怖",
+    "震え"
+   ]
+  },
+  {
+   "id": "yt-shooting-cat",
+   "name": "シューティング猫",
+   "source": "youtube",
+   "url": "https://youtu.be/EiEs0OrLCWM",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "name_ja": "シューティング猫",
+   "tags": [
+    "攻撃",
+    "撃つ",
+    "オチ"
+   ]
+  },
+  {
+   "id": "yt-sleeping-cat",
+   "name": "眠っている猫",
+   "source": "youtube",
+   "url": "https://youtu.be/CqZ9ZXt7l4A",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "name_ja": "眠っている猫",
+   "tags": [
+    "寝る",
+    "睡眠",
+    "平和"
+   ],
+   "recommended": true
+  },
+  {
+   "id": "yt-sleeping-cat-2",
+   "name": "眠っている猫",
+   "source": "youtube",
+   "url": "https://youtu.be/X2C4YjIaYcY",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "寝る",
+    "睡眠",
+    "平和"
+   ]
+  },
+  {
+   "id": "yt-sleepy-cat",
+   "name": "眠そうな猫",
+   "source": "youtube",
+   "url": "https://youtu.be/7aL4d8_IRk4",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "name_ja": "眠そうな猫",
+   "tags": [
+    "眠い",
+    "だるい",
+    "疲れ"
+   ],
+   "recommended": true
+  },
+  {
+   "id": "yt-sleepy-cat-2",
+   "name": "眠そうな猫",
+   "source": "youtube",
+   "url": "https://youtu.be/ZJ1xq-wk8wk",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "name_ja": "眠そうな猫",
+   "tags": [
+    "眠い",
+    "だるい",
+    "疲れ"
+   ]
+  },
+  {
+   "id": "yt-sleepy-cat-3",
+   "name": "眠そうな猫",
+   "source": "youtube",
+   "url": "https://youtu.be/nDc0YtbVucc",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "眠い",
+    "だるい",
+    "疲れ"
+   ]
+  },
+  {
+   "id": "yt-snoring-dog",
+   "name": "いびきをかく犬",
+   "source": "youtube",
+   "url": "https://youtu.be/DRidyYv7tWg",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "犬",
+    "寝る",
+    "いびき"
+   ]
+  },
+  {
+   "id": "yt-spinning-cat",
+   "name": "くるくる回る猫",
+   "source": "youtube",
+   "url": "https://youtu.be/I68Ehtbu84M",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "回る",
+    "ダンス",
+    "混乱"
+   ]
+  },
+  {
+   "id": "yt-stretching-cat",
+   "name": "伸びる猫",
+   "source": "youtube",
+   "url": "https://youtu.be/qNIp7T9mDJg",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "伸び",
+    "だるい",
+    "起床"
+   ],
+   "unavailable": true,
+   "alt": "yt-sleepy-cat"
+  },
+  {
+   "id": "yt-sync-dance-cat",
+   "name": "合わせて踊る猫",
+   "source": "youtube",
+   "url": "https://youtu.be/t30aBajthtI",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "ダンス",
+    "ノリノリ"
+   ],
+   "unavailable": true,
+   "alt": "yt-head-bob-cat"
+  },
+  {
+   "id": "yt-talking-and-huh",
+   "name": "しゃべる猫と無知な猫",
+   "source": "youtube",
+   "url": "https://youtu.be/fKB_bdxIbdI",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "name_ja": "しゃべる猫と無知な猫",
+   "tags": [
+    "会話",
+    "掛け合い",
+    "無知",
+    "定番"
+   ],
+   "recommended": true
+  },
+  {
+   "id": "yt-talking-cat",
+   "name": "しゃべる猫",
+   "source": "youtube",
+   "url": "https://youtu.be/wy0X7NLRngw",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "name_ja": "しゃべる猫",
+   "tags": [
+    "会話",
+    "説明",
+    "定番"
+   ],
+   "recommended": true
+  },
+  {
+   "id": "yt-talking-cats-group",
+   "name": "しゃべる猫達",
+   "source": "youtube",
+   "url": "https://youtu.be/mjA8CSyPPCE",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "会話",
+    "複数",
+    "掛け合い"
+   ]
+  },
+  {
+   "id": "yt-talking-goat",
+   "name": "おしゃべりヤギ",
+   "source": "youtube",
+   "url": "https://youtu.be/-wTciM6HaWo",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "ヤギ",
+    "会話",
+    "説明"
+   ]
+  },
+  {
+   "id": "yt-trend-cat",
+   "name": "猫とトレンド",
+   "source": "youtube",
+   "url": "https://youtu.be/4dD-x-g34Eg",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "ダンス",
+    "トレンド",
+    "ノリノリ"
+   ]
+  },
+  {
+   "id": "yt-two-cats-face",
+   "name": "二匹の猫が向かい合う",
+   "source": "youtube",
+   "url": "https://youtu.be/OM1py5MyRNE",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "会話",
+    "掛け合い",
+    "対峙"
+   ]
+  },
+  {
+   "id": "yt-typing-cat",
+   "name": "猫のタイピング",
+   "source": "youtube",
+   "url": "https://youtu.be/kKy7VvTkTE8",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "name_ja": "猫のタイピング",
+   "tags": [
+    "仕事",
+    "PC",
+    "作業",
+    "タイピング"
+   ],
+   "recommended": true
+  },
+  {
+   "id": "yt-wet-cat",
+   "name": "カメラを見つめる濡れた猫",
+   "source": "youtube",
+   "url": "https://youtu.be/AwjllwclN48",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "name_ja": "カメラを見つめる濡れた猫",
+   "tags": [
+    "絶望",
+    "濡れる",
+    "無表情",
+    "オチ"
+   ],
+   "recommended": true
+  },
+  {
+   "id": "yt-what-now-cat",
+   "name": "どうなる猫",
+   "source": "youtube",
+   "url": "https://youtu.be/giTiWHg7DDY",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "tags": [
+    "困惑",
+    "不安"
+   ]
+  },
+  {
+   "id": "yt-zoning-out",
+   "name": "猫のゾーンアウト",
+   "source": "youtube",
+   "url": "https://youtu.be/NZ3i3uaYjF0",
+   "page": "https://neko-meme-site.vercel.app/sozai-list",
+   "name_ja": "猫のゾーンアウト",
+   "tags": [
+    "放心",
+    "無表情",
+    "遠い目",
+    "絶望"
+   ],
+   "recommended": true
+  }
+ ],
+ "recommended_note": "recommended: true は「この動画シリーズで使うと決めた素材」。nm-fetch.py list は既定でこれだけを表示し、nm-build.py はこれ以外を使うと警告する。増減させたいときはこのフラグを編集する。"
+}

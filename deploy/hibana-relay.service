@@ -1,0 +1,35 @@
+[Unit]
+Description=Hibana deploy relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hibana-deploy
+Group=hibana-deploy
+# Reads the bot's journal for /logs and the ready check.
+SupplementaryGroups=systemd-journal
+WorkingDirectory=/opt/hibana/apps/relay
+EnvironmentFile=-/etc/hibana/relay.env
+# git uses ~/.ssh/id_ed25519 (read-only GitHub deploy key) and ~/.ssh/known_hosts.
+Environment=HOME=/var/lib/hibana-relay
+Environment=BUN_INSTALL_CACHE_DIR=/var/cache/hibana-relay/bun
+ExecStart=/usr/local/bin/bun src/main.ts
+# Always: the relay exits on purpose after a deploy that changed its own code.
+Restart=always
+RestartSec=2
+# Checked-out files must stay readable by the hibana user that runs the bot.
+UMask=0022
+StateDirectory=hibana-relay
+StateDirectoryMode=0700
+CacheDirectory=hibana-relay
+# `systemctl restart hibana` goes through polkit (50-hibana-relay.rules), not
+# sudo, so NoNewPrivileges can stay on.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/hibana
+
+[Install]
+WantedBy=multi-user.target

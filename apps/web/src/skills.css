@@ -1,0 +1,25 @@
+.skills-page { width: 100%; max-width: 1240px; margin: 0 auto; padding: 44px 48px 80px; }
+.skills-page h1 { margin-bottom: 32px; }
+.skill-field, .skill-form label { display: grid; gap: 8px; font-size: 13px; font-weight: 550; }
+.skill-field { max-width: 360px; margin-bottom: 24px; }
+.skill-toolbar, .skill-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.skill-toolbar { margin: 24px 0; }
+.skill-name { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; background: transparent; color: var(--ink); border: 0; padding: 0; max-width: 100%; overflow-wrap: anywhere; text-align: left; font-size: 14px; font-weight: 600; cursor: pointer; }
+.skill-name:hover { text-decoration: underline; text-underline-offset: 4px; }
+.skill-row { display: flex; align-items: center; gap: 24px; padding: 22px 0; border-bottom: 1px solid var(--line); }
+.skill-list { border-top: 1px solid var(--line); }
+.skill-info { flex: 1; min-width: 0; }
+.skill-info p { margin: 8px 0 0; overflow-wrap: anywhere; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.skill-source { display: inline-block; font-size: 11px; margin-left: 10px; color: var(--muted); background: var(--surface-2); padding: 2px 6px; border-radius: 4px; }
+.skill-actions { flex-shrink: 0; }
+.skill-actions label { display: flex; gap: 8px; align-items: center; min-width: 72px; min-height: 40px; font-size: 12px; cursor: pointer; }
+.skill-actions input { width: 16px; height: 16px; }
+.skill-form { display: grid; gap: 20px; }
+.skill-form input, .skill-form textarea { width: 100%; min-width: 0; }
+.skill-form input { min-height: 42px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); color: inherit; font: inherit; }
+.skill-form textarea { min-height: 80px; font-weight: 400; }
+.skill-preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50dvh; overflow: auto; font-size: 13px; line-height: 1.7; padding: 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); }
+.skill-pending { color: var(--warn); font-size: 13px; }
+@media (max-width: 1200px) { .skills-page { padding: 32px 28px 64px; } }
+@media (max-width: 760px) { .skills-page { padding: 28px 20px 56px; } .skill-row { align-items: stretch; flex-direction: column; gap: 12px; } }
+@media (max-width: 360px) { .skills-page { padding-left: 16px; padding-right: 16px; } }

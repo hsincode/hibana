@@ -1,0 +1,238 @@
+# 「ブラック企業の一日」 — サンプル台本 (16:9 / 約110秒 / 23シーン)
+#
+#   python3 scripts/nm-fetch.py sync
+#   python3 scripts/nm-bg.py fetch --jpg-only --only \
+#     mc-building_hallway,mc-single_room3,mc-station_platform,mc-living2,\
+#     mc-inside_train,mc-hospital_lobby,mc-machine_room,mc-medium_office,mc-office
+#   python3 scripts/nm-build.py assets/example-black-company.yaml -o black-company.mp4
+#
+# 猫素材は neko-meme-site (猫ミーム情報局) の 74 本から選定。猫以外 (ヤギ・犬) や
+# 2 匹入りの組み合わせ素材も採用している。選定理由は references/casting.md。
+#
+# 背景は「みんちりえ」の 9 素材のみ。同じ場所の 日中 → 夕方 → 夜・照明ON →
+# 夜・照明OFF を時系列そのままに使い、画で時間の経過を語らせている。
+# 背景は静止画のまま (ズームなし)。
+
+title: ブラック企業の一日
+size: landscape        # 1920x1080
+fps: 30
+
+# 背景が実写風イラストなので、テロップは必ずボックス付き。
+# 白抜き+縁取りだけだと明るい背景 (mc-medium_office-1 など) で読めなくなる。
+text_style:
+  box: true
+  box_color: "black@0.62"
+  size: 58
+text2_style:
+  box: true
+  box_color: "black@0.62"
+  size: 50
+
+# 素材によって「フレーム内で猫が占める割合」が全然違う。crop: auto で被写体の
+# 外接矩形まで詰めておくと、scale が素直に「画面に対する猫の大きさ」として効く。
+# 被写体がフレーム内を動き回る素材 (yt-goat-talking) では自動的に無効になる。
+crop: auto
+
+# 猫素材の多くは被写体が元動画の下端で切れている (足やお尻がフレーム外)。
+# 中央に浮かせると平らな切断面が見えるので、画面の下端にぴったり付ける。
+pos: bottom-flush
+
+# 猫素材の元音はミーム由来で音量差が大きい。少し下げて張り付きを防ぐ
+volume: 0.85
+
+# この動画で使ってよい素材。ここに無い ID を cat: に書くとビルドが止まる。
+# 同じ和名で別動画がある素材 (眠そうな猫 = yt-sleepy-cat / -2 / -3) を
+# 取り違える事故を機械的に防ぐため、必ず ID で列挙する。
+allowed_materials:
+  - yt-goat-talking        # 何も知らずに話すヤギ
+  - yt-big-eyes-cat        # 大きな目の猫
+  - yt-angry-cat           # 怒っている猫
+  - yt-maxwell             # Maxwell The Cat
+  - yt-dj-cat              # DJ猫
+  - yt-dog-and-zoning-cat  # 笑う犬と黒猫のゾーンアウト
+  - yt-popcat              # ポップキャット
+  - yt-cat-huh             # 猫「え？」
+  - yt-mr-fresh            # Mr. Fresh猫
+  - yt-screaming-cat       # 叫ぶ猫
+  - yt-nail-file-cat       # 猫の爪やすり
+  - yt-know-nothing        # 何も知らない猫
+  - yt-typing-cat          # 猫のタイピング
+  - yt-zoning-out          # 猫のゾーンアウト
+  - yt-cat-hits-cat        # 猫が別の猫を攻撃
+  - yt-wet-cat             # カメラを見つめる濡れた猫
+  - yt-sleepy-cat          # 眠そうな猫
+  - yt-sleeping-cat        # 眠っている猫
+  - yt-talking-cat         # しゃべる猫
+  - yt-crunchy-cat         # カリカリ猫が食べる
+  - yt-laughing-dog        # 笑う犬
+  - yt-talking-and-huh     # しゃべる猫と無知な猫
+  - yt-chipi-chipi         # チピチピチャパチャパ
+  - yt-goat-and-huh        # 無知な猫と話すヤギ
+
+scenes:
+  # ---- つかみ ----
+  - text: "ブラック企業の一日"
+    text2: "※フィクションです"
+    text_style: { size: 84 }
+    cat: yt-maxwell          # 猫ミームで最も見かける定番。掴みに置くと何の動画か伝わる
+    bg: mc-medium_office-1
+    scale: 0.46
+    duration: 4.5
+    fade_in: 0.5
+
+  # ---- 朝 ----
+  - text: "6:00"
+    text2: "アラームは4回鳴った"
+    cat: yt-sleeping-cat
+    bg: mc-single_room3-4    # 夜・照明OFF。まだ外が暗い
+    scale: 0.25
+    duration: 5.0
+
+  - text: "起きないといけない"
+    cat: yt-popcat           # 「は？もう朝？」の口。アラームを食らった瞬間
+    bg: mc-single_room3-3    # 夜・照明ON
+    scale: 0.34
+    duration: 4.0
+
+  - text: "7:30 満員電車"
+    text2: "座れたことは一度もない"
+    cat: yt-mr-fresh         # ふてくされた顔で座り込む猫。諦めきった通勤の画
+    bg: mc-inside_train-1
+    scale: 0.38
+    duration: 5.0
+
+  - text: "8:45 出社"
+    text2: "始業まであと15分"
+    cat: yt-nail-file-cat    # 爪やすりで余裕をかます猫。始業前ののんびり感
+    bg: mc-building_hallway-1
+    scale: 0.27
+    duration: 4.5
+
+  # ---- 午前: 最初の無茶ぶり ----
+  - text: "上司「あの資料、朝イチでって言ったよね」"
+    cat: yt-talking-and-huh  # しゃべる猫 + 無知な猫。会話は 2 匹入り素材で 1 カットに収める
+    bg: mc-medium_office-1
+    scale: 0.54
+    duration: 5.5
+
+  - text: "え？"
+    text2: "聞いてない"
+    cat: yt-cat-huh          # 「え？」は 0.6s / 4.2s / 7.9s の 3 回鳴る。
+                             # 4 秒だと 1 回で終わってしまうので 5 秒取る
+    bg: mc-medium_office-1
+    scale: 0.33
+    duration: 5.0
+
+  - text: "9:30 とりあえず手を動かす"
+    cat: yt-typing-cat
+    bg: mc-medium_office-1
+    scale: 0.41
+    duration: 5.0
+
+  # ---- 昼 ----
+  - text: "12:00 昼休み"
+    text2: "デスクで5分"
+    cat: yt-crunchy-cat      # カリカリ食べる猫 = デスクで済ませる昼メシ
+    bg: mc-office-1
+    scale: 0.28
+    duration: 4.5
+
+  # ---- 午後: 障害対応 ----
+  - text: "14:00 サーバが落ちた"
+    cat: yt-angry-cat
+    bg: mc-machine_room-1    # 機械室（照明ON）
+    scale: 0.23
+    duration: 5.0
+
+  - text: "復旧要員、俺一人"
+    cat: yt-screaming-cat
+    bg: mc-machine_room-2    # 機械室（照明OFF）。同じ場所の照明違いで状況の悪化を見せる
+    scale: 0.28
+    duration: 4.5
+
+  # ---- 同僚が倒れる ----
+  - text: "16:00 同僚が運ばれた"
+    cat: yt-big-eyes-cat     # 目を見開いた猫。状況が飲み込めていない顔
+    bg: mc-hospital_lobby-1  # 病院のロビー（照明ON）
+    scale: 0.38
+    duration: 5.0
+
+  - text: "上司「で、代わりやれるよね？」"
+    cat: yt-goat-talking     # 何も知らずに話すヤギ。悪気なく無茶を言う役
+    bg: mc-hospital_lobby-2  # 病院のロビー（照明OFF）
+    scale: 0.75              # 被写体が動き回るので crop: auto が効かない。素の全画面基準
+    start: 1.5               # この素材は 8.5s 以降がタイトルカード。手前に収める
+    duration: 5.0
+
+  # ---- 夕方: 二度目の無茶ぶり ----
+  - text: "17:30"
+    text2: "上司「進捗どう？あと3件追加ね」"
+    cat: yt-goat-and-huh     # ヤギ + 無知な猫。上司側をヤギで統一している
+    bg: mc-medium_office-2   # 夕方。窓の色で時間が進んだと分かる
+    scale: 0.54
+    duration: 5.5
+
+  - text: "はい"
+    cat: yt-zoning-out       # 2 匹が横を向いて固まる素材。説教されて逆に呆れている画
+    bg: mc-medium_office-2
+    scale: 0.28
+    duration: 4.0
+
+  - text: "考えるのをやめて数で押す"
+    cat: yt-cat-hits-cat     # 猫が猫を連打する素材。仕事を雑にバシバシ捌く様子に読み替える
+    bg: mc-medium_office-2   # 自席で捌いているので、夕方のオフィスのまま
+    scale: 0.33
+    duration: 4.5
+
+  # ---- 定時、からの深夜 ----
+  - text: "18:00 定時"
+    text2: "誰も帰らない"
+    cat: yt-know-nothing
+    bg: mc-medium_office-2
+    scale: 0.24
+    duration: 4.5
+
+  - text: "22:00 まだ半分"
+    cat: yt-typing-cat       # 9:30 と同じ素材。同じ作業を延々やらされていることを示す
+    bg: mc-medium_office-3   # 夜・照明ON
+    scale: 0.41
+    duration: 5.0
+
+  - text: "25:00"
+    text2: "オフィスに残るは俺だけ"
+    cat: yt-talking-cat      # 誰もいないのに喋っている = 独り言。孤独が出る
+    bg: mc-medium_office-4   # 夜・照明OFF。一番暗い画
+    scale: 0.23
+    duration: 5.0
+
+  # ---- 終電を逃す ----
+  - text: "終電、行ったあと"
+    cat: yt-sleepy-cat       # 疲れ果てて立ち尽くす。1 匹素材なので「隣は誰？」にならない
+    bg: mc-station_platform-4
+    scale: 0.34
+    duration: 5.0
+
+  - text: "27:00 帰宅"
+    text2: "3時間後にまた起きる"
+    cat: yt-wet-cat          # 絶望顔。帰宅した瞬間の「無」がこれ以上ないほど出る
+    bg: mc-living2-4         # リビング（夜・照明OFF）
+    scale: 0.36
+    duration: 5.0
+
+  # ---- オチ ----
+  - text: "会社は今日も元気です"
+    cat: yt-laughing-dog
+    bg: mc-building_hallway-3  # 夜・照明ON。冒頭の日中の廊下と対になる
+    scale: 0.27
+    duration: 5.0
+
+  - text: "転職しよう"
+    text2: "※フィクションです"
+    cat: yt-dj-cat           # DJ猫。〆だけ明るく抜く。
+                             # 元素材が矩形に切り抜かれていて左と下が直線なので、
+                             # 画面の左下隅に寄せて切断面を隠す
+    bg: mc-living2-1         # リビング（日中）。夜で終わらず朝に戻して締める
+    pos: bottom-left-flush
+    scale: 0.34
+    duration: 5.0
+    fade_out: 0.7

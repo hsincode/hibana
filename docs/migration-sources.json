@@ -1,0 +1,24 @@
+{
+  "api": {
+    "source": "codeberg.org/xuanling/deepseeker-api",
+    "commit": "5a60cf98b39a95136eabe04e9d3b3cf6a49a120e",
+    "working_tree_changes": [
+      "src/app.test.ts",
+      "src/settings.ts"
+    ]
+  },
+  "web": {
+    "source": "codeberg.org/xuanling/deepseeker-app",
+    "commit": "f0aac7a9667dee34e1d244ce3f157bed7af76634",
+    "working_tree_changes": [
+      "src/App.tsx",
+      "src/api.ts",
+      "src/styles.css",
+      "tests/design.spec.ts"
+    ]
+  },
+  "bot": {
+    "source": "codeberg.org/xuanling/deepseeker",
+    "commit": "fdcbde92d066f70500c1426fb982991d989ecf7c"
+  }
+}

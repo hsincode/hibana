@@ -1,0 +1,4 @@
+{
+  "extends": "../apps/bot/tsconfig.json",
+  "include": ["*.ts"]
+}

@@ -1,0 +1,128 @@
+name: CI
+on:
+  push:
+    branches: [main, "rewrite/**"]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+      - run: bun install --frozen-lockfile
+      - run: make ci
+      - run: bunx playwright install --with-deps chromium
+        working-directory: apps/web
+      - run: bun run test:ui
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-test-results
+          path: apps/web/test-results
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t hibana-bot:ci .
+      - run: docker run --rm --network none -e LOG_DIR= hibana-bot:ci bun src/main.ts --check
+  changes:
+    # Runs only after all checks pass. push and workflow_dispatch on main deploy;
+    # workflow_dispatch redeploys everything (scripts/vercel-changes.sh).
+    needs: [checks, container]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      api: ${{ steps.detect.outputs.api }}
+      web: ${{ steps.detect.outputs.web }}
+      base: ${{ steps.detect.outputs.base }}
+      vercel: ${{ steps.detect.outputs.vercel }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: detect
+        run: |
+          scripts/vercel-changes.sh "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          # Vercel deploys stay skipped until the secret VERCEL_TOKEN exists.
+          echo "vercel=${{ secrets.VERCEL_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+  deploy-api:
+    # The API goes first: the dashboard and bot may send settings fields that
+    # only the new API accepts (same order as the local deploy script).
+    needs: changes
+    if: needs.changes.outputs.api == 'true' && needs.changes.outputs.vercel == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Uploads from the repo root; the project's Root Directory (apps/api) and
+      # vercel.json select the app, as with the CLI deploy in docs/production.md.
+      - run: npx --yes vercel@59.14.0 deploy --prod --yes
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: team_NI6RY3w0UOIKwEyPPiGW6pbx
+          VERCEL_PROJECT_ID: prj_7xZMMMwuGPPtmB19oS6XdqOrV3xS
+  deploy-web:
+    needs: [changes, deploy-api]
+    if: >-
+      !cancelled() && needs.changes.result == 'success'
+      && (needs.deploy-api.result == 'success' || needs.deploy-api.result == 'skipped')
+      && needs.changes.outputs.web == 'true' && needs.changes.outputs.vercel == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npx --yes vercel@59.14.0 deploy --prod --yes
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: team_NI6RY3w0UOIKwEyPPiGW6pbx
+          VERCEL_PROJECT_ID: prj_1MzLs7iPZL6S7PtJALAQb72zI2PC
+  deploy:
+    # Skipped until the relay is set up (repository variable RELAY_URL and
+    # secret RELAY_DEPLOY_TOKEN, a key with only the `deploy` scope).
+    # The workflow-level concurrency cancels this job when a newer push arrives;
+    # the relay finishes the deploy it already started and the newer run follows.
+    # The bot always deploys the main head; it waits for the API like the web.
+    needs: [changes, deploy-api]
+    if: >-
+      !cancelled() && needs.changes.result == 'success'
+      && (needs.deploy-api.result == 'success' || needs.deploy-api.result == 'skipped')
+      && vars.RELAY_URL != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/relay-deploy.sh "$GITHUB_SHA"
+        env:
+          RELAY_URL: ${{ vars.RELAY_URL }}
+          RELAY_TOKEN: ${{ secrets.RELAY_DEPLOY_TOKEN }}
+  notify:
+    # Reports every deploy, failed ones included, to Discord. Skipped until the
+    # secret DISCORD_DEPLOY_WEBHOOK exists (the script exits quietly without it).
+    needs: [changes, deploy-api, deploy-web, deploy]
+    if: >-
+      !cancelled() && needs.changes.result == 'success'
+      && (needs.deploy-api.result != 'skipped' || needs.deploy-web.result != 'skipped'
+      || needs.deploy.result != 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: scripts/deploy-notify.sh "$GITHUB_SHA"
+        env:
+          DISCORD_DEPLOY_WEBHOOK: ${{ secrets.DISCORD_DEPLOY_WEBHOOK }}
+          BASE: ${{ needs.changes.outputs.base }}
+          API_RESULT: ${{ needs.deploy-api.result }}
+          WEB_RESULT: ${{ needs.deploy-web.result }}
+          BOT_RESULT: ${{ needs.deploy.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

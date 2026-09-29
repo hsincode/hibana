@@ -1,0 +1,12 @@
+// /etc/polkit-1/rules.d/50-hibana-relay.rules
+// The relay user may restart the bot service and nothing else.
+polkit.addRule(function (action, subject) {
+  if (
+    action.id === "org.freedesktop.systemd1.manage-units" &&
+    action.lookup("unit") === "hibana.service" &&
+    action.lookup("verb") === "restart" &&
+    subject.user === "hibana-deploy"
+  ) {
+    return polkit.Result.YES;
+  }
+});

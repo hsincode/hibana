@@ -1,0 +1,13 @@
+# /etc/caddy/Caddyfile.d/hibana-relay
+# Caddy obtains and renews the Let's Encrypt certificate automatically.
+# relay-bot.hsincode.com is a first-level subdomain, so Cloudflare Universal SSL
+# covers it and the record may be proxied (orange cloud). Proxied requires SSL
+# mode Full (strict) for this host: Flexible sends plain HTTP to the origin and
+# loops on Caddy's HTTP->HTTPS redirect. Issue the first certificate while the
+# record is still DNS only (see docs/relay.md).
+relay-bot.hsincode.com {
+	request_body {
+		max_size 16KB
+	}
+	reverse_proxy 127.0.0.1:8790
+}

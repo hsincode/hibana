@@ -1,0 +1,34 @@
+{
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "installCommand": "npx --yes bun@1.4.2 install --frozen-lockfile --linker hoisted",
+  "buildCommand": "npx --yes bun@1.4.2 run build",
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": ".*\\.vercel\\.app"
+        }
+      ],
+      "destination": "https://bot.hsincode.com/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "hibana.hsincode.com"
+        }
+      ],
+      "destination": "https://bot.hsincode.com/:path*",
+      "permanent": true
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+name: hibana-image
+services:
+  worker:
+    image: hibana-image-worker:local
+    container_name: hibana-image-worker
+    # Unlike "always", this preserves an explicit stop across PC restarts.
+    restart: unless-stopped
+    init: true
+    user: '${WORKER_UID:-1000}:${WORKER_GID:-1000}'
+    group_add: ['${VIDEO_GID:-13}']
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    devices: ['/dev/kfd:/dev/kfd', '/dev/dri:/dev/dri']
+    shm_size: 2gb
+    stop_grace_period: 30s
+    ports: ['127.0.0.1:8188:8188']
+    environment:
+      HOME: /tmp/worker-home
+      HIP_VISIBLE_DEVICES: '0'
+      IMAGE_APP_DIR: '${IMAGE_APP_DIR}'
+      IMAGE_SSH_TARGET: '${IMAGE_SSH_TARGET}'
+      PYTHONPATH: '${IMAGE_APP_DIR}/.venv/lib/python3.12/site-packages'
+    volumes:
+      - '${IMAGE_APP_DIR}:${IMAGE_APP_DIR}'
+      - './secrets:/secrets:ro'
+    logging:
+      driver: json-file
+      options: {max-size: '10m', max-file: '3'}
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request,pathlib; urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8190/health', headers={'Authorization':'Bearer '+pathlib.Path('/secrets/token').read_text().strip()}), timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 90s
+      retries: 3

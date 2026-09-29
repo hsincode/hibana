@@ -1,0 +1,28 @@
+{
+  "bunVersion": "1.x",
+  "installCommand": "npx --yes bun@1.4.2 install --frozen-lockfile --linker hoisted",
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": ".*\\.vercel\\.app"
+        }
+      ],
+      "destination": "https://api.bot.hsincode.com/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "api.hibana.hsincode.com"
+        }
+      ],
+      "destination": "https://api.bot.hsincode.com/:path*",
+      "permanent": true
+    }
+  ]
+}

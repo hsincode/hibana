@@ -13,7 +13,7 @@
 
 `api.bot.hsincode.com` はCloudflare Universal SSL（`*.hsincode.com`）の対象外です。CloudflareではCNAME `api.bot` → `d9916215ed191ef6.vercel-dns-017.com` をDNS only（グレー雲）に設定し、Vercelの証明書で配信します。
 
-両アプリの `vercel.json` は旧カスタムドメインと、そのプロジェクトへ到達する `*.vercel.app` を新ドメインへ308リダイレクトします。パス・クエリとHTTPメソッドを維持するため、APIにも恒久リダイレクトを使用します。プレビューURLも本番へ転送されます（VercelのDeployment Protectionが有効なURLでは認証が先に適用されます）。OAuthのstate Cookieはホストごとのため、切り替え中のログインは新Webからやり直してください。
+両アプリの `vercel.json` は旧カスタムドメインと、そのプロジェクトへ到達する `*.vercel.app` を新ドメインへ308リダイレクトします。例外として、保護バイパスのヘッダー（`x-vercel-protection-bypass`）が付いたリクエストは `*.vercel.app` でもリダイレクトしません。配信のjobが、ドメインを切り替える前のデプロイを確かめるためです（[ADR-0005](adr/0005-verify-before-promote.md)）。パス・クエリとHTTPメソッドを維持するため、APIにも恒久リダイレクトを使用します。プレビューURLも本番へ転送されます（VercelのDeployment Protectionが有効なURLでは認証が先に適用されます）。OAuthのstate Cookieはホストごとのため、切り替え中のログインは新Webからやり直してください。
 
 旧botは停止し、自動起動を無効にしました。Hibanaは専用ユーザー `hibana` で稼働し、Dockerグループに所属します。公開サイトは既存のCaddy経由で `127.0.0.1:8787` に接続します。旧VPNコンテナを `hibana-vpn` に改名し、既存接続を継続しています。VOICEVOXサービスは既存のものを利用します。公開サイト3件はVPS内の配信でHTTP 200を確認しましたが、旧ドメイン `artifacts.xuanling.me` 経由の外部アクセスはHTTP 403のため、旧ドメイン側の確認が別途必要です。
 

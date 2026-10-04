@@ -10,6 +10,12 @@
           "value": ".*\\.vercel\\.app"
         }
       ],
+      "missing": [
+        {
+          "type": "header",
+          "key": "x-vercel-protection-bypass"
+        }
+      ],
       "destination": "https://api.bot.hsincode.com/:path*",
       "permanent": true
     },

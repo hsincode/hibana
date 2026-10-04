@@ -79,9 +79,12 @@ VercelのデプロイはリポジトリのSecret `VERCEL_TOKEN`（Vercelのア�
 
 ```sh
 make ci
-vercel deploy --prod --yes --project hibana-api
-vercel deploy --prod --yes --project hibana-web
+(cd tools/vercel && bun install --frozen-lockfile)
+tools/vercel/node_modules/.bin/vercel deploy --prod --yes --project hibana-api
+tools/vercel/node_modules/.bin/vercel deploy --prod --yes --project hibana-web
 ```
+
+CIが使うactionはcommit SHAで、Vercel CLIは `tools/vercel/bun.lock` で固定しています。更新はDependabotのPRで行います（[ADR-0002](adr/0002-pin-actions-and-vercel-cli.md)）。
 
 モノレポのルートから実行します。プロジェクト設定のRoot Directoryを変更しないでください。`VERCEL_TOKEN` に失効した値がある場合は削除し、CLIのログイン情報を使用してください。
 

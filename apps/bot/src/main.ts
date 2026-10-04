@@ -66,6 +66,13 @@ if (process.argv.includes("--check")) {
   );
   process.exit(0);
 }
+// Rollback drill (#23): this build must never report ready, so that the relay
+// has to restore the previous commit. Reverted as soon as the drill is over.
+if (process.env.HIBANA_ROLLBACK_DRILL !== "skip") {
+  log.fatal("rollback drill: this build refuses to start");
+  log.flush();
+  process.exit(1);
+}
 const bot = new Hibana(config, log);
 let closing = false;
 const close = async () => {

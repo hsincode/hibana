@@ -9,10 +9,6 @@ description: >
 
 # Video editing
 
-For Starship-style 3D outline/blueprint edits, use `outline-edits` first.
-It renders Blender scenes and code-text effects into an MP4 that this timeline
-worker can then use as an ordinary clip.
-
 Use `video_edit` (discover through workspace MCP on upstream harnesses).
 Read [references/timeline.md](references/timeline.md) before writing a timeline.
 Renderer: `/skills/video-edit/scripts/render.py` (FFmpeg + libass).

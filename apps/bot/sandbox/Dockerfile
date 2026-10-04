@@ -37,15 +37,6 @@ FROM oven/bun:${BUN_VERSION}-debian AS bun-toolchain
 FROM denoland/deno:bin-${DENO_VERSION} AS deno-toolchain
 FROM node:${NODE_VERSION}-bookworm-slim AS node-toolchain
 
-# Official Blender matching the Starship reference (Linux x86_64).
-FROM python:3.12-slim-bookworm AS blender-toolchain
-RUN apt-get update && apt-get install -y --no-install-recommends curl xz-utils ca-certificates \
-    && test "$(dpkg --print-architecture)" = amd64 \
-    && curl -fL --retry 3 https://download.blender.org/release/Blender5.2/blender-5.2.0-linux-x64.tar.xz -o /tmp/blender.tar.xz \
-    && echo '96f6c181a30f4950607839dc84d42a354b250d8a0231b098b59b7bc69c351c48  /tmp/blender.tar.xz' | sha256sum -c - \
-    && mkdir /opt/blender && tar -xJf /tmp/blender.tar.xz -C /opt/blender --strip-components=1 \
-    && rm /tmp/blender.tar.xz
-
 FROM python:3.12-slim-bookworm
 
 LABEL org.opencontainers.image.title="hibana-sandbox" \
@@ -67,9 +58,8 @@ ENV MPLBACKEND=Agg \
     BUN_INSTALL_CACHE_DIR=/tmp/bun-cache \
     npm_config_cache=/tmp/npm-cache
 
-# CPU compositing avoids thread oversubscription under the sandbox CPU limit.
+# numpy / OpenCV: avoid thread oversubscription under the sandbox CPU limit.
 ENV OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
-COPY --from=blender-toolchain /opt/blender /opt/blender
 
 # Official Go SDK from the multi-stage stage (stdlib + go/gofmt).
 COPY --from=go-toolchain /usr/local/go /usr/local/go
@@ -99,7 +89,6 @@ ENV DENO_DIR=/tmp/deno
 # Symlink go into /usr/local/bin (always on login PATH). bun is already there.
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        libegl1 libgl1 libxrender1 libxi6 libsm6 libice6 libxxf86vm1 \
         bash \
         ca-certificates \
         curl \
@@ -135,8 +124,6 @@ RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/* \
     && fc-cache -f \
-    && ln -s /opt/blender/blender /usr/local/bin/blender \
-    && blender --background --factory-startup --version \
     && ln -sf /usr/local/go/bin/go /usr/local/bin/go \
     && ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt \
     && chmod +x /usr/local/bin/bun \

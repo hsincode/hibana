@@ -1,6 +1,6 @@
 # デプロイ中継サーバー（relay）
 
-`apps/relay` はVPS上で動く小さなHTTPサーバーです。APIキーで認証し、botを最新の `main` へ更新する処理とログの返却を行います。GitHub Actionsは `main` へのpush時、CIが成功した後にこのサーバーを呼び出して自動更新します。
+`apps/relay` はVPS上で動く小さなHTTPサーバーです。APIキーで認証し、botを最新の `main` へ更新する処理とログの返却を行います。GitHub Actionsは `main` へのpush時、CIが成功し、botの動作に関わるパスが稼働中のコミットから変わっている場合に、このサーバーを呼び出して自動更新します（[本番環境](production.md)の「更新」）。
 
 対象はbotだけです。APIとWebは引き続きVercelへデプロイします。
 
@@ -94,7 +94,7 @@ gh variable set RELAY_URL --body https://relay-bot.hsincode.com --repo hsincode/
 gh secret set RELAY_DEPLOY_TOKEN --repo hsincode/hibana   # deploy スコープのトークンを貼り付け
 ```
 
-`RELAY_URL` が未設定の間、CIの `deploy` ジョブはスキップされます。`checks` と `container` が成功した `main` へのpushだけが `scripts/relay-deploy.sh` を実行します。このスクリプトは手元からも使えます。
+`RELAY_URL` が未設定の間、CIの `deploy` ジョブはスキップされます。`checks` と `container` が成功した `main` へのpushのうち、botに関わる変更があるものだけが `scripts/relay-deploy.sh` を実行します。CIの `changes` ジョブも同じキーで `/status` を呼び、稼働中のコミットを調べます。このスクリプトは手元からも使えます。
 
 ```sh
 RELAY_URL=https://relay-bot.hsincode.com RELAY_TOKEN=hbr_... scripts/relay-deploy.sh "$(git rev-parse origin/main)"

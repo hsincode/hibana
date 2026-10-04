@@ -73,6 +73,8 @@ APIとWebも `main` へのpush時、CIのチェック成功後にGitHub Actions�
 
 VercelのデプロイはリポジトリのSecret `VERCEL_TOKEN`（Vercelのアカウント設定で作成したトークン）があるときだけ実行し、未設定の間はスキップします。チームIDとプロジェクトIDは秘密情報ではないため `.github/workflows/ci.yml` に記載しています。Secretを設定した直後は、それ以前の成功した実行が基準になるため、一度 `workflow_dispatch` で全体をデプロイしてください。GitHubのVercel Appはこのリポジトリへの権限がなく、Vercel側のGit連携は使用していません。
 
+配信の記録はGitHubのDeploymentsに残ります。配信のjobは `production-api`・`production-web`・`production-bot` のEnvironmentを指定していて、配信先・コミット・成否・実行のURLがリポジトリの「Deployments」とコミットの画面から辿れます（[ADR-0004](adr/0004-record-deployments.md)）。
+
 デプロイ後は `notify` jobが `scripts/deploy-notify.sh` でDiscordのwebhookに報告します（失敗したデプロイも含みます）。報告内容は api / web / bot ごとの結果、基準コミットからのコミット一覧、Actions runと差分へのリンクです。送信者名は「Hibana」、アイコンは崩壊：スターレイルの火花です（StarRailRes の画像をコミット固定で参照し、リポジトリには含めません）。基準がない場合（`workflow_dispatch`・force push）は、HEADのコミットだけを「全体を再デプロイ」として載せます。webhook URLはリポジトリのSecret `DISCORD_DEPLOY_WEBHOOK` に置き、未設定の間は何も送りません。通知に失敗してもwarningを出すだけで、runは失敗させません。
 
 手動でデプロイする場合:

@@ -72,6 +72,11 @@ jobs:
     needs: changes
     if: needs.changes.outputs.api == 'true' && needs.changes.outputs.vercel == 'true'
     runs-on: ubuntu-latest
+    # A job with an environment leaves a GitHub Deployment: target, commit,
+    # result and this run's URL, kept without the retention limit of run logs.
+    environment:
+      name: production-api
+      url: https://api.bot.hsincode.com
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -94,6 +99,9 @@ jobs:
       && (needs.deploy-api.result == 'success' || needs.deploy-api.result == 'skipped')
       && needs.changes.outputs.web == 'true' && needs.changes.outputs.vercel == 'true'
     runs-on: ubuntu-latest
+    environment:
+      name: production-web
+      url: https://bot.hsincode.com
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -119,6 +127,10 @@ jobs:
       && (needs.deploy-api.result == 'success' || needs.deploy-api.result == 'skipped')
       && vars.RELAY_URL != '' && needs.changes.outputs.bot == 'true'
     runs-on: ubuntu-latest
+    # Recorded as successful when the relay answers `superseded` too: that run
+    # changed nothing and the newer push records the deploy that did.
+    environment:
+      name: production-bot
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: scripts/relay-deploy.sh "$GITHUB_SHA"

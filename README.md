@@ -33,7 +33,7 @@ Discord Developer PortalでMessage Content Intentを有効にしてください�
 ```sh
 make ci                  # 型検査・テスト・bot / Webビルド
 bun run test:ui          # Chromiumによる画面テスト
-make sandbox-image      # amd64。Blender等を含むため大きなイメージ
+make sandbox-image      # amd64。言語処理系・ブラウザ・メディア処理を含む大きなイメージ
 make sandbox-smoke      # Docker隔離・ファイル操作の確認
 ```
 

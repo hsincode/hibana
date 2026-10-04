@@ -9,9 +9,9 @@ make video-image
 make vpn-image
 ```
 
-イメージ名は `hibana-sandbox:latest`、`hibana-video:latest`、`hibana-vpn:latest`。レジストリへのイメージ配信は設定していません。
+イメージ名は `hibana-sandbox:latest`、`hibana-video:latest`、`hibana-vpn:latest`。`hibana-sandbox` は、`main` で `apps/bot/sandbox/` が変わるたびにGitHub Actionsがビルドし、`ghcr.io/hsincode/hibana-sandbox` へ配信します。タグはこのディレクトリのgit tree hash（`git rev-parse HEAD:apps/bot/sandbox`）なので、イメージと中身が1対1で対応します（[ADR-0007](../../../docs/adr/0007-publish-the-sandbox-image.md)）。`hibana-video` と `hibana-vpn` は手元でビルドします。
 
-bash、ripgrep、curl、git、gh、Bun、Go、Python、Node、Chromium / Playwright CLI、ffmpeg、ImageMagick、Blender、yt-dlp、pandoc、WeasyPrint、日本語フォントなどを同梱しています。詳しいバージョンと依存関係は各Dockerfileを参照してください。現在のsandboxはamd64向けです。
+bash、ripgrep、curl、git、gh、Bun、Go、Python、Node、Chromium / Playwright CLI、ffmpeg、ImageMagick、yt-dlp、pandoc、WeasyPrint、日本語フォントなどを同梱しています。詳しいバージョンと依存関係は各Dockerfileを参照してください。現在のsandboxはamd64向けです。
 
 通常の実行はread-only rootfs、cap-drop、no-new-privileges、512 MiB RAM（swap込み768 MiB）、1 CPU、128 PID、256 MiBのtmpfsです。`/workspace` だけを書き込み可能な作業領域としてマウントし、内蔵スキルは `/skills` に読み取り専用で渡します。APIキーやDockerソケットを作業コンテナへ渡しません。GitHubログイン済みの場合に限り、スコープ別の認証設定を読み取り専用で渡します。
 

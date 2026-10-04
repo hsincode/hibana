@@ -2,7 +2,7 @@
 
 - 状態: 採用
 - 決定日・判断者: 2026-10-04、持ち主
-- 判断の過程を残した Issue: #3（作り直す範囲）、#5（方式の選択。表の 1 と、コメントの 17）
+- 判断の過程を残した Issue: #3（作り直す範囲）、#5（方式の選択。表の 1 と、コメントの 17・21）
 - 置き換える／置き換えられた ADR: なし
 
 ## 要求と決定
@@ -12,6 +12,7 @@
   - 要求は、bot が動かすものに変更がない push では bot を再起動しないこと
 - 採用する構成・方式:
   - 許可リスト。`apps/bot/`、`apps/relay/`、`packages/shared/`、ルートの `package.json` と `bun.lock` のどれかが変わったときだけ bot を配信する（`scripts/deploy-changes.ts` の `BOT_PATHS`）
+  - テストのファイル（`*.test.ts` と `__tests__/` の下）は、許可リストの下にあっても数えない。動いている bot はテストを読まないので、再起動しても何も変わらない
   - 比べる相手は、本番で動いている commit。CI の `changes` job が relay の `/status` に問い合わせ、返ってきた commit と main の先頭の差分を見る
   - relay に問い合わせできない、返ってきた値が commit でない、その commit が main の履歴にない、のどれかなら配信する
   - 手動実行（`workflow_dispatch`）は、変更に関係なくすべて配信する
@@ -28,6 +29,7 @@
 - 得られる効果: 文書、API、Web、CI、`deploy/` だけの変更では bot が再起動しない
 - 費用・運用の負荷・残る制約:
   - 許可リストに漏れがあると、必要な変更が本番に出ないまま気付きにくい。bot が新しく読むようになったパスは `BOT_PATHS` に足す
+  - 本体のコードが読むファイルを、テストのファイルと同じ名前の付け方（`*.test.ts`、`__tests__/`）で置くと、その変更は本番に出ない
   - 本番の commit が main の先頭より古いままになることがある。本番の commit は relay の `/status` で分かる
   - `changes` job が relay に依存する。つながらないときは配信する側に倒すので、そのあいだは不要な再起動が起きる
   - `apps/bot/sandbox/` の変更でも bot を再起動するが、sandbox イメージは作り直されない（#1 の観察 8。別の項目で扱う）
@@ -39,7 +41,7 @@
 ## 実装と検証
 - 適用した commit・構成図: この ADR を追加した PR
 - 要求ごとの検証記録:
-  - 判定の規則: `scripts/deploy-changes.test.ts` の `touches`・`decide`
+  - 判定の規則: `scripts/deploy-changes.test.ts` の `touches`・`touchesBot`・`decide`
   - スクリプト全体: 同じファイルの `deploy-changes.ts`。実際の git の履歴、`gh` の代わりのスクリプト、relay の代わりのローカルサーバーで動かす
   - 比べる相手を「直近で成功した実行」に変えると、`the bot is compared with production, not with the last successful run` などのテストが失敗する（2026-10-04 に確認）
 - 実際の運用・CI/CD の実行記録: マージ後に、文書だけの変更で `deploy` job がスキップされた実行と、bot の変更で配信された実行を追記する

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BOT_PATHS, decide, touches } from "./deploy-changes";
+import { BOT_PATHS, decide, touches, touchesBot } from "./deploy-changes";
 
 describe("touches", () => {
   test("a directory entry matches files below it, anchored at the repository root", () => {
@@ -33,6 +33,23 @@ describe("touches", () => {
   });
 });
 
+describe("touchesBot", () => {
+  test("tests under the bot's paths do not count", () => {
+    expect(touchesBot(["apps/relay/src/relay.test.ts"])).toBe(false);
+    expect(touchesBot(["apps/bot/src/__tests__/core.test.ts", "apps/bot/src/__tests__/helpers.ts"])).toBe(false);
+    expect(touchesBot(["packages/shared/src/__tests__/settings.test.ts"])).toBe(false);
+  });
+
+  test("a source file next to a changed test still counts", () => {
+    expect(touchesBot(["apps/relay/src/relay.test.ts", "apps/relay/src/keys.ts"])).toBe(true);
+  });
+
+  test("a name that only resembles a test counts", () => {
+    expect(touchesBot(["apps/bot/src/contest.ts"])).toBe(true);
+    expect(touchesBot(["apps/bot/src/tests-helper.ts"])).toBe(true);
+  });
+});
+
 describe("decide", () => {
   const vercel = { base: "a".repeat(40), changed: ["docs/relay.md"] };
   const bot = { deployed: "b".repeat(40), changed: ["docs/relay.md"] };
@@ -48,6 +65,11 @@ describe("decide", () => {
       bot: { deployed: bot.deployed, changed: ["apps/web/src/App.tsx", "apps/bot/src/llm.ts"] },
     });
     expect(result).toEqual({ api: false, web: true, bot: true, base: vercel.base });
+  });
+
+  test("a test-only change under the bot's paths does not deploy the bot", () => {
+    const changed = ["apps/relay/src/relay.test.ts"];
+    expect(decide({ event: "push", vercel: { base: vercel.base, changed }, bot: { deployed: bot.deployed, changed } }).bot).toBe(false);
   });
 
   test("the shared workspace deploys every target", () => {

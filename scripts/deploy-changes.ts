@@ -27,6 +27,16 @@ export const WEB_PATHS = ["apps/web/", ...SHARED_PATHS];
  * the bot starts to read has to be added here, or its changes never deploy.
  */
 export const BOT_PATHS = ["apps/bot/", "apps/relay/", ...SHARED_PATHS];
+/**
+ * The running bot does not load its tests, so a change to them alone is not a
+ * reason to restart it. A fixture that production code reads must not live in
+ * a file this matches.
+ */
+const TEST_FILE = /(^|\/)__tests__\/|\.test\.[cm]?[jt]sx?$/;
+
+export function touchesBot(changed: readonly string[]): boolean {
+  return touches(BOT_PATHS, changed.filter((file) => !TEST_FILE.test(file)));
+}
 
 /** An entry ending in `/` is a directory; any other entry is one file at the repository root. */
 export function touches(paths: readonly string[], changed: readonly string[]): boolean {
@@ -53,7 +63,7 @@ export function decide(facts: Facts): Decision {
   return {
     api: facts.vercel ? touches(API_PATHS, facts.vercel.changed) : true,
     web: facts.vercel ? touches(WEB_PATHS, facts.vercel.changed) : true,
-    bot: facts.bot ? touches(BOT_PATHS, facts.bot.changed) : true,
+    bot: facts.bot ? touchesBot(facts.bot.changed) : true,
     base: facts.vercel?.base ?? "",
   };
 }

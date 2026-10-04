@@ -67,7 +67,7 @@ VPSのTCP 18443待受を閉じます。ESP32はWi-Fiには接続したまま約1
 
 ## 更新
 
-botは `main` へのpush時に、botの動作に関わるパスが本番のコミットから変わっている場合だけ、GitHub Actionsからデプロイ中継サーバー経由で自動更新します。対象は `apps/bot/`・`apps/relay/` と共通の `packages/shared/`・`package.json`・`bun.lock` です（`scripts/deploy-changes.ts` の `BOT_PATHS`）。文書やAPI・Webだけの変更ではbotを再起動しません。比較の相手は直近のCI実行ではなく、relayの `/status` が返す稼働中のコミットです。relayに問い合わせできない場合や、稼働中のコミットが `main` の履歴にない場合はデプロイします。判断の経緯は [ADR-0001](adr/0001-deploy-bot-only-when-affected.md) にあります。構成とセットアップは [relay](relay.md) を参照してください。
+botは `main` へのpush時に、botの動作に関わるパスが本番のコミットから変わっている場合だけ、GitHub Actionsからデプロイ中継サーバー経由で自動更新します。対象は `apps/bot/`・`apps/relay/` と共通の `packages/shared/`・`package.json`・`bun.lock` です（`scripts/deploy-changes.ts` の `BOT_PATHS`）。文書やAPI・Webだけの変更、テストのファイル（`*.test.ts`・`__tests__/`）だけの変更ではbotを再起動しません。比較の相手は直近のCI実行ではなく、relayの `/status` が返す稼働中のコミットです。relayに問い合わせできない場合や、稼働中のコミットが `main` の履歴にない場合はデプロイします。判断の経緯は [ADR-0001](adr/0001-deploy-bot-only-when-affected.md) にあります。構成とセットアップは [relay](relay.md) を参照してください。
 
 APIとWebも `main` へのpush時、CIのチェック成功後にGitHub ActionsからVercel CLIでデプロイします。`scripts/deploy-changes.ts` が直近で成功した `main` のCI実行のコミットとの差分を調べ、`apps/api/`・`apps/web/` と共通の `packages/shared/`・`package.json`・`bun.lock` に変更があるアプリだけを対象にします。前回のpushではなく成功した実行を基準にするため、キャンセルやデプロイ失敗で漏れた変更も次のpushで反映されます。基準が見つからない場合やforce pushの後は両方をデプロイします。順序はローカルと同じくAPIが先で、botとWebはAPIのデプロイ成功（または不要）後に進みます。Actionsの「Run workflow」（`workflow_dispatch`）で `main` を実行すると、変更に関係なく全体をデプロイします。
 

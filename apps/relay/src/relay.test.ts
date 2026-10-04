@@ -75,11 +75,24 @@ async function setup(host = fakeHost(), onSelfUpdate?: () => void) {
   return { env, keys, deployer, req, host, deployToken: deploy.token, logsToken: logs.token, stateDir };
 }
 
+/**
+ * The part of `hbr_<id>_<secret>` after the second underscore. The secret is
+ * base64url, whose alphabet includes `_`, so splitting on `_` would return only
+ * its beginning: a piece of zero to two characters that the key file contains
+ * by chance.
+ */
+const secretOf = (token: string) => token.slice(token.indexOf("_", "hbr_".length) + 1);
+
 describe("KeyStore", () => {
+  test("the secret is taken whole even when it contains an underscore", () => {
+    expect(secretOf("hbr_0123456789ab_6_rest-of_the-secret")).toBe("6_rest-of_the-secret");
+    expect(secretOf("hbr_0123456789ab__starts-with-an-underscore")).toBe("_starts-with-an-underscore");
+  });
+
   test("stores only a hash, verifies tokens and honours revocation", async () => {
     const { keys, deployToken, stateDir } = await setup();
     const file = await Bun.file(join(stateDir, "keys.json")).text();
-    expect(file).not.toContain(deployToken.split("_")[2]!);
+    expect(file).not.toContain(secretOf(deployToken));
     expect((await stat(join(stateDir, "keys.json"))).mode & 0o777).toBe(0o600);
 
     const key = await keys.verify(deployToken);

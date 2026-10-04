@@ -1,0 +1,8 @@
+{
+  "name": "hibana-vercel-cli",
+  "private": true,
+  "description": "Pins the Vercel CLI and its dependency tree for the deploy jobs. Not a workspace: a CLI update must not change the root lockfile that the bot is deployed from.",
+  "dependencies": {
+    "vercel": "59.14.0"
+  }
+}

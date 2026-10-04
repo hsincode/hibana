@@ -13,8 +13,8 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.0"
       - run: bun install --frozen-lockfile
@@ -22,7 +22,7 @@ jobs:
       - run: bunx playwright install --with-deps chromium
         working-directory: apps/web
       - run: bun run test:ui
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: browser-test-results
@@ -30,7 +30,7 @@ jobs:
   container:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: docker build -t hibana-bot:ci .
       - run: docker run --rm --network none -e LOG_DIR= hibana-bot:ci bun src/main.ts --check
   changes:
@@ -49,10 +49,10 @@ jobs:
       base: ${{ steps.detect.outputs.base }}
       vercel: ${{ steps.detect.outputs.vercel }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.0"
       - id: detect
@@ -73,10 +73,16 @@ jobs:
     if: needs.changes.outputs.api == 'true' && needs.changes.outputs.vercel == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.0"
+      # The CLI and its dependency tree are pinned by tools/vercel/bun.lock.
+      - run: bun install --frozen-lockfile
+        working-directory: tools/vercel
       # Uploads from the repo root; the project's Root Directory (apps/api) and
       # vercel.json select the app, as with the CLI deploy in docs/production.md.
-      - run: npx --yes vercel@59.14.0 deploy --prod --yes
+      - run: tools/vercel/node_modules/.bin/vercel deploy --prod --yes
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: team_NI6RY3w0UOIKwEyPPiGW6pbx
@@ -89,8 +95,13 @@ jobs:
       && needs.changes.outputs.web == 'true' && needs.changes.outputs.vercel == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: npx --yes vercel@59.14.0 deploy --prod --yes
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.0"
+      - run: bun install --frozen-lockfile
+        working-directory: tools/vercel
+      - run: tools/vercel/node_modules/.bin/vercel deploy --prod --yes
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: team_NI6RY3w0UOIKwEyPPiGW6pbx
@@ -109,7 +120,7 @@ jobs:
       && vars.RELAY_URL != '' && needs.changes.outputs.bot == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: scripts/relay-deploy.sh "$GITHUB_SHA"
         env:
           RELAY_URL: ${{ vars.RELAY_URL }}
@@ -124,7 +135,7 @@ jobs:
       || needs.deploy.result != 'skipped')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
       - run: scripts/deploy-notify.sh "$GITHUB_SHA"

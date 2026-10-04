@@ -35,7 +35,7 @@ jobs:
       - run: docker run --rm --network none -e LOG_DIR= hibana-bot:ci bun src/main.ts --check
   changes:
     # Runs only after all checks pass. push and workflow_dispatch on main deploy;
-    # workflow_dispatch redeploys everything (scripts/vercel-changes.sh).
+    # workflow_dispatch redeploys everything (scripts/deploy-changes.ts).
     needs: [checks, container]
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
@@ -45,19 +45,27 @@ jobs:
     outputs:
       api: ${{ steps.detect.outputs.api }}
       web: ${{ steps.detect.outputs.web }}
+      bot: ${{ steps.detect.outputs.bot }}
       base: ${{ steps.detect.outputs.base }}
       vercel: ${{ steps.detect.outputs.vercel }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
       - id: detect
+        # The relay is asked which commit production runs (docs/adr/0001); its
+        # key is the deploy key, which may read /status but not the bot's logs.
         run: |
-          scripts/vercel-changes.sh "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          bun scripts/deploy-changes.ts "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
           # Vercel deploys stay skipped until the secret VERCEL_TOKEN exists.
           echo "vercel=${{ secrets.VERCEL_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
         env:
           GH_TOKEN: ${{ github.token }}
+          RELAY_URL: ${{ vars.RELAY_URL }}
+          RELAY_TOKEN: ${{ secrets.RELAY_DEPLOY_TOKEN }}
   deploy-api:
     # The API goes first: the dashboard and bot may send settings fields that
     # only the new API accepts (same order as the local deploy script).
@@ -92,12 +100,13 @@ jobs:
     # secret RELAY_DEPLOY_TOKEN, a key with only the `deploy` scope).
     # The workflow-level concurrency cancels this job when a newer push arrives;
     # the relay finishes the deploy it already started and the newer run follows.
-    # The bot always deploys the main head; it waits for the API like the web.
+    # The bot deploys the main head, and only when a path it runs from changed
+    # since the commit in production; it waits for the API like the web.
     needs: [changes, deploy-api]
     if: >-
       !cancelled() && needs.changes.result == 'success'
       && (needs.deploy-api.result == 'success' || needs.deploy-api.result == 'skipped')
-      && vars.RELAY_URL != ''
+      && vars.RELAY_URL != '' && needs.changes.outputs.bot == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -98,6 +98,10 @@ VPSでは新コードを `/opt/hibana` に配置した後、`bun install --froze
 
 ## ロールバック
 
+botのデプロイが失敗すると、relayがbotだけを前のコミットに戻します。APIとWebは戻しません。そのため、APIは1つ前の版のbot・Webと互換に保ち、DBのスキーマ変更は追加だけにします。規則と、項目や列を削るときの手順は [ADR-0006](adr/0006-roll-back-the-bot-alone.md) にあります。APIの契約の一覧は `apps/api/src/contract.json` で、項目を足したら `bun apps/api/src/contract.ts --write` で更新します。
+
+以下は、TypeScript版への切り替え（2026-09-19）を旧実装へ戻す場合の手順です。
+
 botを旧実装へ戻す場合は、まず `systemctl stop hibana`。新旧botを同じトークンで同時稼働させないでください。VPNコンテナが稼働していれば `docker rename hibana-vpn deepseeker-vpn` で旧名に戻し、`systemctl enable --now deepseeker`、`systemctl disable hibana` を実行します。旧APIはHTTP 402のため、旧botでもAPI接続を無効にするか正常なAPIを別途設定する必要があります。
 
 新旧の状態ファイル・チェックポイントは異なる形式です。切り替え後の変更を旧データへ無条件に上書きしないでください。必要な設定はバックアップと比較して移してください。

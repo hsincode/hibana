@@ -28,8 +28,11 @@
 
 ## 実装と検証
 - 適用した commit・構成図: この ADR を追加した PR
-- 要求ごとの検証記録: 手元では確かめられない。マージ後の配信で、3 つの Environment に記録ができることを確かめる
-- 実際の運用・CI/CD の実行記録: マージ後に、最初の Deployment の URL を追記する
+- 要求ごとの検証記録（2026-10-04）:
+  - 配信した job は記録を作る: `production-bot` に `32f6253`、`production-api` と `production-web` に `b51de5d`、`production-api` に `a8542da`。状態は queued → in_progress → success と遷移し、実行のログへのリンクが付く
+  - 失敗した配信は失敗として残る: `production-api` の `a13bbee` は failure（#18 の件）
+  - スキップされた job は記録を作らない: #7・#8・#9 のマージでは記録が増えなかった
+- 実際の運用・CI/CD の実行記録: https://github.com/hsincode/hibana/deployments
 
 ## 見直す条件
 - 変更の一覧を配信の記録と一緒に残したくなったとき（タグと Release を足す）

@@ -7,13 +7,16 @@ import react from "@vitejs/plugin-react";
  * - canonical / OGP 画像は絶対 URL でないと Discord / X が解決しない。
  * - preconnect は HTML パース時点で TCP/TLS を張るためのもの。JS の
  *   ダウンロードと並列になり、初回の /api/me が 1RTT 前倒しになる。
+ * - hibana-commit は配信の job が渡すコミット。本番に切り替える前に、
+ *   scripts/verify-deployment.ts がこのビルドかどうかを確かめるのに使う。
  */
-function htmlMeta(siteUrl: string, apiBase: string | undefined) {
+function htmlMeta(siteUrl: string, apiBase: string | undefined, commit: string | undefined) {
   return {
     name: "html-meta",
     transformIndexHtml(html: string) {
       let out = html.replaceAll("%SITE_URL%", siteUrl);
       if (apiBase) out = out.replace("</head>", `  <link rel="preconnect" href="${apiBase}" crossorigin />\n  </head>`);
+      if (commit) out = out.replace("</head>", `  <meta name="hibana-commit" content="${commit}" />\n  </head>`);
       return out;
     },
   };
@@ -30,9 +33,11 @@ export default defineConfig(({ mode }) => {
   ).replace(/\/$/, "");
   // ローカル（未設定 = 同一 origin プロキシ）では preconnect を足さない
   const apiBase = env.VITE_API_BASE_URL?.replace(/\/$/, "") || undefined;
+  // 形式を確かめてから HTML に書く（環境変数の値をそのまま埋め込まない）
+  const commit = /^[0-9a-f]{40}$/.test(env.HIBANA_COMMIT ?? "") ? env.HIBANA_COMMIT : undefined;
 
   return {
-    plugins: [react(), htmlMeta(siteUrl, apiBase)],
+    plugins: [react(), htmlMeta(siteUrl, apiBase, commit)],
     server: {
       port: 5173,
       proxy: {

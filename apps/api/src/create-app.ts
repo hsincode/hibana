@@ -220,6 +220,8 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
       return { error: "internal error" };
     })
     .get("/healthz", () => "ok")
+    // Not a secret: the repository is public and the commit is on GitHub.
+    .get("/version", () => ({ commit: env.commit }))
     .group("/api/chatgpt", app => app
       .onBeforeHandle(async ({ cookie, request, set }) => {
         set.headers["cache-control"] = "no-store";

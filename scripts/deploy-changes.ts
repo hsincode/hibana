@@ -26,7 +26,7 @@ export const WEB_PATHS = ["apps/web/", ...SHARED_PATHS];
  * are installed by hand) leave the running bot unchanged. A new top-level path
  * the bot starts to read has to be added here, or its changes never deploy.
  */
-export const BOT_PATHS = ["apps/bot/", "apps/relay/", ...SHARED_PATHS];
+export const BOT_PATHS = ["apps/bot/", ...SHARED_PATHS];
 /**
  * The running bot does not load its tests, so a change to them alone is not a
  * reason to restart it. A fixture that production code reads must not live in

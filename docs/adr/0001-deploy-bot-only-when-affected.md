@@ -44,7 +44,13 @@
   - 判定の規則: `scripts/deploy-changes.test.ts` の `touches`・`touchesBot`・`decide`
   - スクリプト全体: 同じファイルの `deploy-changes.ts`。実際の git の履歴、`gh` の代わりのスクリプト、relay の代わりのローカルサーバーで動かす
   - 比べる相手を「直近で成功した実行」に変えると、`the bot is compared with production, not with the last successful run` などのテストが失敗する（2026-10-04 に確認）
-- 実際の運用・CI/CD の実行記録: マージ後に、文書だけの変更で `deploy` job がスキップされた実行と、bot の変更で配信された実行を追記する
+- 実際の運用・CI/CD の実行記録（2026-10-04）:
+  - 直す前: #4（文書とテンプレートだけ）のマージで bot が再起動した（https://github.com/hsincode/hibana/actions/runs/37190718526）
+  - この ADR の変更（#6、`e81906d`）: ルートの `package.json` を変えたので、API・Web・bot をすべて配信した。`changes` job は relay に問い合わせて `bot: 8 files since dc06605 in production` と判定した（https://github.com/hsincode/hibana/actions/runs/37191008843）
+  - テストだけの変更（#12）: `deploy` がスキップされ、本番の commit と bot の起動時刻は変わらなかった（https://github.com/hsincode/hibana/actions/runs/37191252068）
+  - ワークフロー・文書だけの変更（#7・#8・#9）: `deploy` がスキップされた（https://github.com/hsincode/hibana/actions/runs/37191456680、https://github.com/hsincode/hibana/actions/runs/37191644887）
+  - bot の変更（#14、`32f6253`）: bot だけを配信し、API・Web はスキップした（https://github.com/hsincode/hibana/actions/runs/37191837987）
+  - API だけの変更（#13、`a8542da`）: API だけを配信し、bot はスキップした。本番の bot は `32f6253` のまま（https://github.com/hsincode/hibana/actions/runs/37193079759）
 
 ## 見直す条件
 - 許可リストの漏れが原因で、必要な変更が本番に出なかったとき

@@ -45,7 +45,10 @@
   - 確認の規則: `scripts/verify-deployment.test.ts`（起動しない、別の commit、commit を返さない、スクリプトがない、保護にかかった、起動中の再試行）
   - `/version`: `apps/api/src/app.test.ts` の `version`
   - Web の meta: `HIBANA_COMMIT` を渡してビルドすると `dist/index.html` に入り、渡さないと入らない（2026-10-04 に手元で確認）
-- 実際の運用・CI/CD の実行記録: マージ後に、確認を通って切り替えた最初の実行と、確認で止まった実行（訓練）を追記する
+- 実際の運用・CI/CD の実行記録（2026-10-04）:
+  - 確認で止まった実行（訓練ではなく、実際に起きた失敗）: #10 のマージ後の最初の配信で、確認が HTTP 308 で失敗し、切り替えは行われなかった。本番は前の版のまま動き続けた（https://github.com/hsincode/hibana/actions/runs/37192252354、調査は #18）
+  - 確認を通って切り替えた最初の実行: #19 のマージ後。`ok: api serves b51de5d…`、`ok: web serves b51de5d…` のあと `promote` が成功し、本番の `/version` と `hibana-commit` が同じ commit を返した（https://github.com/hsincode/hibana/actions/runs/37192815027）
+  - 2 回目: #13 のマージ後、API だけを同じ手順で配信した（https://github.com/hsincode/hibana/actions/runs/37193079759）
 
 ## 見直す条件
 - ドメインを切り替えた後だけに起きる問題で本番が壊れたとき（切り替え後の確認と切り戻しを足す）

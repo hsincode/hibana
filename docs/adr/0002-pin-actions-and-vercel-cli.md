@@ -32,7 +32,7 @@
   - 配信の job に `bun install`（286 パッケージ）が加わる
   - アプリの依存（ルートの `bun.lock`）は Dependabot の対象にしていない。更新すると bot が再配信されるため、持ち主が時期を選んで手で行う
   - `Dockerfile` のベースイメージ（`oven/bun:1.4.0`）と、Vercel 側の `installCommand`（`npx --yes bun@1.4.2`）は、タグと版の指定のまま
-  - Dependabot が SHA とコメントの両方を更新するかは、最初の更新 PR で確かめる
+  - Dependabot は SHA とコメントの両方を更新する（#16・#17 で確かめた）
 - セキュリティ・障害時の挙動:
   - action の作者がタグを付け替えても、実行する commit は変わらない
   - `tools/vercel/bun.lock` と `package.json` が食い違うと、`--frozen-lockfile` が配信の前に失敗する
@@ -42,7 +42,10 @@
 - 要求ごとの検証記録:
   - 固定の検査: `scripts/workflow-pins.test.ts`。1 か所をタグ指定に戻すと失敗する（2026-10-04 に確認）
   - CLI: `tools/vercel/` で install したあと `vercel --version` が 59.14.0 を返し、ルートの `bun.lock` は変わらない（2026-10-04 に確認）
-- 実際の運用・CI/CD の実行記録: マージ後に、固定した CLI で API・Web を配信した実行と、Dependabot の最初の PR を追記する
+- 実際の運用・CI/CD の実行記録（2026-10-04）:
+  - 固定した action での最初の実行: #7 のマージ後（https://github.com/hsincode/hibana/actions/runs/37191456680）
+  - 固定した Vercel CLI での最初の配信: https://github.com/hsincode/hibana/actions/runs/37192815027 （API・Web）
+  - Dependabot: #7 のマージの直後に #16（checkout 4.4.0 → 7.0.1）と #17（upload-artifact 4.6.2 → 7.0.1）を開いた。差分は commit SHA と版のコメントの両方を更新していた。持ち主の決定で 2 件ともマージし、マージ後の検査は成功した（https://github.com/hsincode/hibana/actions/runs/37193353942）
 
 ## 見直す条件
 - Dependabot の PR が多すぎて読めなくなったとき（グループ化するか、頻度を下げる）

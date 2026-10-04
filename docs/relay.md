@@ -105,4 +105,4 @@ curl -H "Authorization: Bearer $LOGS_TOKEN" 'https://relay-bot.hsincode.com/logs
 
 - 単体テスト（`apps/relay/src/relay.test.ts`）では、git・systemctl・journalctlを模擬して次の動作を確認しています: キー認証、スコープの判定、SHAの検証、`superseded`、ロールバック、同時実行の拒否、relay自身の再起動判定。
 - ローカルの結合確認では、一時的なbareリポジトリに対してrelayを実際に起動し、`scripts/relay-deploy.sh` から次の結果を確認しました: 開始、`superseded`、再起動失敗時のロールバック、不正なキーでの401。
-- 実際のsystemd・polkit・Caddy上の動作は、VPSでセットアップした後に確認が必要です。
+- 実際のsystemd・polkit・Caddy上の動作は、本番で確認済みです。通常の配信は2026-09-29から、切り戻しは2026-10-04の訓練（#23）で動いています。訓練では、起動に失敗する版を配信してから前のコミットでreadyになるまで116秒でした。

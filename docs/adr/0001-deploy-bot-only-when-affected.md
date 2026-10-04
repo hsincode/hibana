@@ -50,6 +50,7 @@
   - テストだけの変更（#12）: `deploy` がスキップされ、本番の commit と bot の起動時刻は変わらなかった（https://github.com/hsincode/hibana/actions/runs/37191252068）
   - ワークフロー・文書だけの変更（#7・#8・#9）: `deploy` がスキップされた（https://github.com/hsincode/hibana/actions/runs/37191456680、https://github.com/hsincode/hibana/actions/runs/37191644887）
   - bot の変更（#14、`32f6253`）: bot だけを配信し、API・Web はスキップした（https://github.com/hsincode/hibana/actions/runs/37191837987）
+  - 打ち消し合う変更（#24 とその revert の #25）: 本番は切り戻しで `32f6253` に戻っていた。revert のマージ後、本番と main の差分に bot に関わるパスがなかったので、配信はスキップされた。本番の commit と比べる方式の効果で、再起動が 1 回減った（https://github.com/hsincode/hibana/actions/runs/37194801917）
   - API だけの変更（#13、`a8542da`）: API だけを配信し、bot はスキップした。本番の bot は `32f6253` のまま（https://github.com/hsincode/hibana/actions/runs/37193079759）
 
 ## 見直す条件

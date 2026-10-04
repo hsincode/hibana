@@ -40,11 +40,15 @@ async function get(base: string, path: string, bypass: string | undefined): Prom
 }
 
 function unexpected(path: string, response: Response): Check {
-  const protectedHint =
-    response.status === 401 || (response.status >= 300 && response.status < 400)
-      ? " (the deployment is protected: VERCEL_BYPASS is missing or wrong)"
-      : "";
-  return { ok: false, detail: `${path} answered HTTP ${response.status}${protectedHint}` };
+  const location = response.headers.get("location") ?? "";
+  let hint = "";
+  if (response.status === 401 || location.startsWith("https://vercel.com/")) {
+    hint = " (the deployment is protected: VERCEL_BYPASS is missing or wrong)";
+  } else if (response.status >= 300 && response.status < 400) {
+    // The app's own redirect rules answered instead of the deployment.
+    hint = ` (redirected to ${location})`;
+  }
+  return { ok: false, detail: `${path} answered HTTP ${response.status}${hint}` };
 }
 
 async function checkApi(base: string, sha: string, bypass: string | undefined): Promise<Check> {

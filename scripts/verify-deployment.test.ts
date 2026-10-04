@@ -99,6 +99,16 @@ describe("deployment protection", () => {
     expect(result.detail).toContain("VERCEL_BYPASS");
   });
 
+  test("a redirect to another host is reported as a redirect, not as protection", async () => {
+    // What the first real run hit: the app's own vercel.json sent every
+    // *.vercel.app request on to the production domain.
+    const url = serve({}, () => new Response(null, { status: 308, headers: { location: "https://api.bot.hsincode.com/healthz" } }));
+    const result = await verify("api", url, SHA, { ...once, bypass: "secret" });
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain("redirected to https://api.bot.hsincode.com/healthz");
+    expect(result.detail).not.toContain("VERCEL_BYPASS");
+  });
+
   test("the bypass secret is sent on every request", async () => {
     expect((await verify("api", serve(api(SHA), guard), SHA, { ...once, bypass: "secret" })).ok).toBe(true);
     expect((await verify("web", serve(web(SHA), guard), SHA, { ...once, bypass: "secret" })).ok).toBe(true);

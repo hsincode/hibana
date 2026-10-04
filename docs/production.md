@@ -69,7 +69,7 @@ VPSのTCP 18443待受を閉じます。ESP32はWi-Fiには接続したまま約1
 
 botは `main` へのpush時に、botの動作に関わるパスが本番のコミットから変わっている場合だけ、GitHub Actionsからデプロイ中継サーバー経由で自動更新します。対象は `apps/bot/`・`apps/relay/` と共通の `packages/shared/`・`package.json`・`bun.lock` です（`scripts/deploy-changes.ts` の `BOT_PATHS`）。文書やAPI・Webだけの変更、テストのファイル（`*.test.ts`・`__tests__/`）だけの変更ではbotを再起動しません。比較の相手は直近のCI実行ではなく、relayの `/status` が返す稼働中のコミットです。relayに問い合わせできない場合や、稼働中のコミットが `main` の履歴にない場合はデプロイします。判断の経緯は [ADR-0001](adr/0001-deploy-bot-only-when-affected.md) にあります。構成とセットアップは [relay](relay.md) を参照してください。
 
-APIとWebも `main` へのpush時、CIのチェック成功後にGitHub ActionsからVercel CLIでデプロイします。`scripts/deploy-changes.ts` が直近で成功した `main` のCI実行のコミットとの差分を調べ、`apps/api/`・`apps/web/` と共通の `packages/shared/`・`package.json`・`bun.lock` に変更があるアプリだけを対象にします。前回のpushではなく成功した実行を基準にするため、キャンセルやデプロイ失敗で漏れた変更も次のpushで反映されます。基準が見つからない場合やforce pushの後は両方をデプロイします。順序はローカルと同じくAPIが先で、botとWebはAPIのデプロイ成功（または不要）後に進みます。Actionsの「Run workflow」（`workflow_dispatch`）で `main` を実行すると、変更に関係なく全体をデプロイします。
+APIとWebも `main` へのpush時、CIのチェック成功後にGitHub ActionsからVercel CLIでデプロイします。デプロイは3段階です。まず本番用のビルドを、ドメインを向けない状態で作ります（`vercel deploy --prod --skip-domain`）。次に `scripts/verify-deployment.ts` が、そのデプロイ固有のURLで起動とコミットを確かめます（APIは `/healthz` と `/version`、Webはページの `hibana-commit` とスクリプトの取得）。確認に通った場合だけ `vercel promote` で本番のドメインを切り替えます。確認に失敗すると実行は失敗し、本番は前の版のままです（[ADR-0005](adr/0005-verify-before-promote.md)）。デプロイ固有のURLにはDeployment Protectionがかかるため、各プロジェクトのProtection Bypass for Automationのsecretを、リポジトリのSecret `VERCEL_BYPASS_API`・`VERCEL_BYPASS_WEB` に登録します。`scripts/deploy-changes.ts` が直近で成功した `main` のCI実行のコミットとの差分を調べ、`apps/api/`・`apps/web/` と共通の `packages/shared/`・`package.json`・`bun.lock` に変更があるアプリだけを対象にします。前回のpushではなく成功した実行を基準にするため、キャンセルやデプロイ失敗で漏れた変更も次のpushで反映されます。基準が見つからない場合やforce pushの後は両方をデプロイします。順序はローカルと同じくAPIが先で、botとWebはAPIのデプロイ成功（または不要）後に進みます。Actionsの「Run workflow」（`workflow_dispatch`）で `main` を実行すると、変更に関係なく全体をデプロイします。
 
 VercelのデプロイはリポジトリのSecret `VERCEL_TOKEN`（Vercelのアカウント設定で作成したトークン）があるときだけ実行し、未設定の間はスキップします。チームIDとプロジェクトIDは秘密情報ではないため `.github/workflows/ci.yml` に記載しています。Secretを設定した直後は、それ以前の成功した実行が基準になるため、一度 `workflow_dispatch` で全体をデプロイしてください。GitHubのVercel Appはこのリポジトリへの権限がなく、Vercel側のGit連携は使用していません。
 
@@ -85,6 +85,8 @@ make ci
 tools/vercel/node_modules/.bin/vercel deploy --prod --yes --project hibana-api
 tools/vercel/node_modules/.bin/vercel deploy --prod --yes --project hibana-web
 ```
+
+この手動の手順は、確認を挟まずに本番のドメインを切り替えます。CIと同じ手順にする場合は `--skip-domain` を付けてデプロイし、表示されたURLを `VERCEL_BYPASS=... bun scripts/verify-deployment.ts <api|web> <URL> <コミット>` で確かめてから `vercel promote <URL>` を実行します（コミットは `--env HIBANA_COMMIT=...`、Webは `--build-env` で渡します）。
 
 CIが使うactionはcommit SHAで、Vercel CLIは `tools/vercel/bun.lock` で固定しています。更新はDependabotのPRで行います（[ADR-0002](adr/0002-pin-actions-and-vercel-cli.md)）。
 

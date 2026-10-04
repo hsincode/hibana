@@ -85,10 +85,25 @@ jobs:
       # The CLI and its dependency tree are pinned by tools/vercel/bun.lock.
       - run: bun install --frozen-lockfile
         working-directory: tools/vercel
+      # Stage, verify, promote (docs/adr/0005): the build is made for production
+      # but no domain points at it until scripts/verify-deployment.ts has passed.
       # Uploads from the repo root; the project's Root Directory (apps/api) and
       # vercel.json select the app, as with the CLI deploy in docs/production.md.
-      - run: tools/vercel/node_modules/.bin/vercel deploy --prod --yes
+      - id: stage
+        run: |
+          url=$(tools/vercel/node_modules/.bin/vercel deploy --prod --skip-domain --yes --env HIBANA_COMMIT="$GITHUB_SHA")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
         env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: team_NI6RY3w0UOIKwEyPPiGW6pbx
+          VERCEL_PROJECT_ID: prj_7xZMMMwuGPPtmB19oS6XdqOrV3xS
+      - run: bun scripts/verify-deployment.ts api "$STAGED_URL" "$GITHUB_SHA"
+        env:
+          STAGED_URL: ${{ steps.stage.outputs.url }}
+          VERCEL_BYPASS: ${{ secrets.VERCEL_BYPASS_API }}
+      - run: tools/vercel/node_modules/.bin/vercel promote "$STAGED_URL" --yes
+        env:
+          STAGED_URL: ${{ steps.stage.outputs.url }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: team_NI6RY3w0UOIKwEyPPiGW6pbx
           VERCEL_PROJECT_ID: prj_7xZMMMwuGPPtmB19oS6XdqOrV3xS
@@ -109,8 +124,22 @@ jobs:
           bun-version: "1.4.0"
       - run: bun install --frozen-lockfile
         working-directory: tools/vercel
-      - run: tools/vercel/node_modules/.bin/vercel deploy --prod --yes
+      # The commit goes in at build time: the page is static HTML.
+      - id: stage
+        run: |
+          url=$(tools/vercel/node_modules/.bin/vercel deploy --prod --skip-domain --yes --build-env HIBANA_COMMIT="$GITHUB_SHA")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
         env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: team_NI6RY3w0UOIKwEyPPiGW6pbx
+          VERCEL_PROJECT_ID: prj_1MzLs7iPZL6S7PtJALAQb72zI2PC
+      - run: bun scripts/verify-deployment.ts web "$STAGED_URL" "$GITHUB_SHA"
+        env:
+          STAGED_URL: ${{ steps.stage.outputs.url }}
+          VERCEL_BYPASS: ${{ secrets.VERCEL_BYPASS_WEB }}
+      - run: tools/vercel/node_modules/.bin/vercel promote "$STAGED_URL" --yes
+        env:
+          STAGED_URL: ${{ steps.stage.outputs.url }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: team_NI6RY3w0UOIKwEyPPiGW6pbx
           VERCEL_PROJECT_ID: prj_1MzLs7iPZL6S7PtJALAQb72zI2PC

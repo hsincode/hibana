@@ -53,6 +53,21 @@ function req(path: string, init: RequestInit & { cookie?: string } = {}) {
   return new Request(`http://127.0.0.1${path}`, { ...init, headers });
 }
 
+describe("version", () => {
+  test("reports the commit the deployment was built from", async () => {
+    const commit = "c".repeat(40);
+    const { app } = await setup({ commit });
+    const res = await app.handle(req("/version"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ commit });
+  });
+
+  test("reports null outside a deploy", async () => {
+    const { app } = await setup();
+    expect(await (await app.handle(req("/version"))).json()).toEqual({ commit: null });
+  });
+});
+
 describe("authz", () => {
   test("guild MCP settings survive PATCH and snapshot, reset independently, and require auth", async () => {
     const { app } = await setup();

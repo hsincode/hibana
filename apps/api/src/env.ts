@@ -20,6 +20,12 @@ export type WebEnv = {
    * is what kept compute busy after snapshot polling stopped.
    */
   logsEnabled: boolean;
+  /**
+   * Commit this deployment was built from (`HIBANA_COMMIT`, set by the deploy
+   * job). `/version` reports it so the job can tell this build from the one
+   * that currently serves production.
+   */
+  commit: string | null;
 };
 
 function req(name: string, fallback?: string): string {
@@ -63,6 +69,7 @@ export function loadEnv(): WebEnv {
     adminIds,
     botControlUrl: opt("BOT_CONTROL_URL", ""),
     logsEnabled: optBool("WEB_LOGS_ENABLED", false),
+    commit: (process.env.HIBANA_COMMIT ?? "").trim() || null,
   };
 }
 
@@ -80,6 +87,7 @@ export function loadTestEnv(overrides: Partial<WebEnv> = {}): WebEnv {
     adminIds: ["1"],
     botControlUrl: "",
     logsEnabled: false,
+    commit: null,
     ...overrides,
   };
 }

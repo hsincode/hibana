@@ -5,7 +5,7 @@ Discord AI bot・設定API・WebダッシュボードをまとめたBun / TypeSc
 | パス | 内容 |
 | --- | --- |
 | `apps/bot` | Discord gateway、LLM / ツールループ、履歴・再開、Docker sandbox、スキル、通話 |
-| `apps/api` | Elysia、Discord OAuth、ロール管理、Neon Postgres、設定のSSE同期 |
+| `apps/api` | Elysia、Discord OAuth、ロール管理、Neon Postgres、botとの設定同期 |
 | `apps/web` | React / Viteの設定ダッシュボード |
 | `packages/shared` | 設定スキーマ・モデルカタログ・トリガー |
 

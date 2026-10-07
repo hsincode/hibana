@@ -58,17 +58,11 @@ export const sleep = (ms: number, signal?: AbortSignal) =>
     signal?.addEventListener("abort", abort, { once: true });
   });
 
-/** Fetch / SSE abort and Bun's node-to-web adapter both surface as these. */
-export function isAbortError(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const name = (error as { name?: string }).name;
-  return name === "AbortError" || name === "TimeoutError";
-}
-
 /**
  * Bun 1.4.x throws this uncaught from `webstreams_adapters` when a fetch body
- * (Vercel SSE idle-kill is the production trigger) is reset after the web
- * controller already closed. try/catch around `reader.read()` does not see it.
+ * is reset after the web controller already closed. Vercel cutting the settings
+ * stream was the production trigger while the bot still held one open; the
+ * guard in main.ts stays for any other body the peer resets.
  */
 export function isClosedControllerError(error: unknown): boolean {
   if (!(error instanceof TypeError)) return false;

@@ -359,6 +359,10 @@ export function parseCompletion(
     incomplete: choice.finish_reason === "length",
   };
 }
+/** One key per channel: a child agent's requests stay on the machines that
+ *  hold its root's prefix. A digest keeps Discord ids out of provider requests. */
+export const promptCacheKey = (channel: string) =>
+  new Bun.CryptoHasher("sha256").update(`hibana:${channel}`).digest("hex").slice(0, 32);
 /** One completed provider request. It carries counts and sizes only, so it
  *  can be logged without exposing prompts. */
 export type RequestRecord = {
@@ -451,6 +455,12 @@ export class LlmClient {
         delete body.max_output_tokens;
         body.include = ["reasoning.encrypted_content"];
       }
+      // Without a key OpenAI routes by the first tokens only, which every
+      // Hibana conversation shares, so consecutive requests of one channel can
+      // land on machines that never saw its prefix. Other Responses-compatible
+      // gateways may reject the field.
+      if (options.trace && (isChatgpt || selection.provider === "openai"))
+        body.prompt_cache_key = promptCacheKey(options.trace.channel);
     } else if (protocol === "anthropic") {
       path = "/messages";
       const { system, messages: turns } = toAnthropic(

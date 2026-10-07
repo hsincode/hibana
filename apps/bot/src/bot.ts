@@ -688,6 +688,7 @@ export class Hibana {
       if (!this.shutdown.signal.aborted) {
         const failureCode = classifyFailure(error, failurePhase);
         const httpStatus = httpStatusOf(error);
+        if (error instanceof ProviderError && error.kind === "context_length") this.history.shrink(ctx.channelId);
         const failureReport: FailureReport = {
           failure_code: failureCode,
           failure_phase: failurePhase,

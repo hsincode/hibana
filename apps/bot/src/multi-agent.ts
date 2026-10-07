@@ -164,20 +164,28 @@ export class MultiAgentSession {
     );
     // Role and triage notes describe one live tree; stale copies from history
     // or a checkpoint would point the model at agents that no longer exist.
+    // Root's own role note is the same every turn, so the copy already in
+    // history stays where it was sent.
+    const role = this.roleMessage(root);
     const messages = options.messages.filter(
-      (m) => !/^<multi_agent_(role|triage)>/.test(m.content ?? ""),
+      (m) => m.content === role.content || !/^<multi_agent_(role|triage)>/.test(m.content ?? ""),
     );
-    // A resumed checkpoint contains history, not live processes. Make stale
-    // paths explicit so the model recreates work instead of polling dead ids.
-    root.messages = [
-      ...messages,
-      this.roleMessage(root),
+    // Standing notes stay in history and are added again only when missing.
+    // Appending them on every turn would put them between the previous turn's
+    // user message and its answer, so no turn could extend the last request.
+    const standing: Message[] = [
+      { ...role, sticky: true },
       {
         role: "developer",
         internal: true,
+        sticky: true,
         content:
-          "This task starts a fresh agent tree. Agent paths mentioned in earlier conversation/checkpoints are historical; use spawn_agent for new live agents. Workflow runs from earlier turns are no longer running; relaunch one with resumeFromRunId to reuse its completed agents.",
+          "Each user turn starts a fresh agent tree. Agent paths mentioned in earlier turns or checkpoints are historical; use spawn_agent for new live agents. Workflow runs from earlier turns are no longer running; relaunch one with resumeFromRunId to reuse its completed agents.",
       },
+    ];
+    root.messages = [
+      ...messages,
+      ...standing.filter((note) => !messages.some((m) => m.content === note.content)),
     ];
     this.workflows = new WorkflowManager({
       root: () => ({ context: root.context, selection: options.selection, messages: root.messages }),

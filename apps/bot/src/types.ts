@@ -17,6 +17,9 @@ export type Message = {
   /** Local history markers; never sent as provider message fields. */
   turnStart?: boolean;
   internal?: boolean;
+  /** A state note that stays in the conversation and is added again only when
+   *  its state changes, so later turns keep extending the same prefix. */
+  sticky?: boolean;
 };
 export type ToolDef = {
   type: "function";

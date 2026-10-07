@@ -204,10 +204,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     skillsEnabled: flag(env, "SKILLS_ENABLED", true),
     webApiUrl,
     internalToken: env.WEB_INTERNAL_TOKEN || "",
-    historyLimit: numberEnv(env, "HISTORY_LIMIT", 5, 1),
-    historyAge: numberEnv(env, "HISTORY_MAX_AGE_SECS", 3600),
+    // History is trimmed by size, in one step from max down to keep, so the
+    // conversation head (and with it the provider's prompt cache) moves rarely.
+    historyMaxTokens: numberEnv(env, "HISTORY_MAX_TOKENS", 160000, 1000),
+    // Capped at half the limit: a keep size near the limit would trim, and so
+    // move the head, on almost every turn.
+    historyKeepTokens: Math.min(
+      numberEnv(env, "HISTORY_KEEP_TOKENS", 80000, 0),
+      Math.floor(numberEnv(env, "HISTORY_MAX_TOKENS", 160000, 1000) / 2),
+    ),
     threadHistoryAge: numberEnv(env, "THREAD_HISTORY_MAX_AGE_SECS", 3600),
-    historyIdle: numberEnv(env, "HISTORY_CACHE_IDLE_SECS", 1800),
     compactionTokens: numberEnv(env, "THREAD_COMPACTION_TOKENS", 100000, 1000),
     extraTriggers: (env.EXTRA_TRIGGERS || "")
       .split(",")

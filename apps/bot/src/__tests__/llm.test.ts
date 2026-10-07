@@ -492,3 +492,42 @@ test("OpenAI-style usage keeps prompt_tokens as the cached-inclusive total", () 
   expect(normalizeUsage({ prompt_tokens: 100, completion_tokens: 3, prompt_tokens_details: { cached_tokens: 60 } }))
     .toEqual({ prompt_tokens: 100, completion_tokens: 3, total_tokens: 103, cached_tokens: 60, cache_write_tokens: 0 });
 });
+describe("prompt cache routing", () => {
+  const chatgpt = { provider: "chatgpt", model: "gpt-6-luna", effort: "low" };
+  const sse = () => new Response(
+    `data: ${JSON.stringify({ type: "response.completed", response: { status: "completed", output: [], usage: {} } })}\n\n`,
+    { headers: { "content-type": "text/event-stream" } },
+  );
+  async function sentBody(selection: typeof chatgpt, trace?: { channel: string; agent: string; round: number }) {
+    let body: Json = {};
+    const client = new LlmClient(
+      loadConfig({
+        PROVIDER: "custom", LLM_BASE_URL: "https://example.com/v1", LLM_API_KEY: "secret-test", LLM_MODEL: "test-model",
+        WEB_API_URL: "https://api.example.com", WEB_INTERNAL_TOKEN: "internal",
+      }),
+      async (url, init) => {
+        if (url.endsWith("/internal/chatgpt/credential"))
+          return Response.json({ access_token: "token", account_id: "account" });
+        body = JSON.parse(String(init?.body));
+        return url.endsWith("/responses") ? sse() : response({ role: "assistant", content: "ok" });
+      },
+    );
+    await client.complete(selection, [{ role: "user", content: "hi" }], [], { trace });
+    return body;
+  }
+  test("a ChatGPT conversation sends one stable key per channel", async () => {
+    const root = await sentBody(chatgpt, { channel: "111", agent: "root", round: 0 });
+    const later = await sentBody(chatgpt, { channel: "111", agent: "child-ab12cd34", round: 3 });
+    const other = await sentBody(chatgpt, { channel: "222", agent: "root", round: 0 });
+    expect(root.prompt_cache_key).toMatch(/^[0-9a-f]{32}$/);
+    expect(later.prompt_cache_key).toBe(root.prompt_cache_key);
+    expect(other.prompt_cache_key).not.toBe(root.prompt_cache_key);
+    // The provider gets a digest, never the Discord channel id.
+    expect(String(root.prompt_cache_key)).not.toContain("111");
+  });
+  test("requests outside a conversation and other protocols carry no key", async () => {
+    expect((await sentBody(chatgpt)).prompt_cache_key).toBeUndefined();
+    const custom = await sentBody({ provider: "custom", model: "test-model", effort: "none" }, { channel: "111", agent: "root", round: 0 });
+    expect(custom.prompt_cache_key).toBeUndefined();
+  });
+});

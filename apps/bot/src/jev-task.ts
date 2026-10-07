@@ -47,7 +47,7 @@ export const jevRequiredActionTools = new Set([
 
 export function jevTaskModeMessage(enabled: boolean) {
   return {
-    role: "developer" as const, internal: true,
+    role: "developer" as const, internal: true, sticky: true,
     content: enabled
       ? "Jev action-selection mode is ON for the root agent's own workspace/search/browser operations. The current multi_agent_mode policy still governs chat subagents. This mode does not change whether or when to delegate. Follow only the current multi_agent_mode and user instructions for delegation. All agents__ coordination tools remain directly callable and must not be Jev candidates. Children use their normal tools; Jev cannot replace their research, implementation or independent review. You plan your own branch; Jev selects its actions and Hibana executes them. Direct execution of the required workspace/search/browser tools is unavailable. Use mcp__agent__run_jev_task with a bounded objective, concise observed state and several useful authorized actions with exact arguments and explicit prerequisites. The tool description contains schemas for hidden operations; other eligible tools already have exposed schemas. Mark independent search/read actions parallel=true so their I/O overlaps the next decision; declare prerequisites in depends_on. Mutations and browser actions remain sequential. Batch known useful work; do not split a prepared plan into one request per operation. Replan on exhausted candidates, missing or changed evidence/arguments, errors or budget return. Review observations and avoid repeating completed operations. Native provider search is disabled for the root so its search follows this loop. Simple conversation needs no tools. Other available non-coordination tools, including delivery, publishing and integrations, remain directly callable and may be candidates with existing permissions; do not use them to bypass required operations. Recursive run_jev and run_jev_task candidates are excluded. Jev cannot grant permission, invent arguments or change delegation policy. If the task tool is unavailable, report the blocker. Ordinary run_jev evaluations have an independent setting; batch useful evidence checks without duplicating a plan's judgments. Review evidence before the final answer; Jev finish is not proof of completion."
       : "Jev action-selection mode is OFF. Use normal tools directly; run_jev_task is unavailable. Ordinary run_jev evaluations follow their independent setting. Earlier instructions requiring the Jev task loop no longer apply.",
@@ -314,4 +314,14 @@ export async function runJevTask(input: Task, options: {
     // Delivery tools may set this even when a later action fails or aborts.
     options.context.delivered ||= ctx.delivered;
   }
+}
+
+/** The mode the model was last told. Off is the default and needs no note. */
+export function jevTaskModeIn(messages: readonly { content: string | null }[]): boolean {
+  const on = jevTaskModeMessage(true).content, off = jevTaskModeMessage(false).content;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]!.content === on) return true;
+    if (messages[i]!.content === off) return false;
+  }
+  return false;
 }

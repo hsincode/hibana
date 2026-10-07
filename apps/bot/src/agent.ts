@@ -2,7 +2,7 @@ import { StopHookExhaustedError, type StopHook } from "./stop-hook";
 import type { ServiceTier } from "@hibana/shared/settings";
 import { LlmClient } from "./llm";
 import type { Selection } from "./config";
-import { jevTaskModeMessage } from "./jev-task";
+import { jevTaskModeIn, jevTaskModeMessage } from "./jev-task";
 import { Serial } from "./io";
 import { runToolBatch, supportsParallelTool } from "./tool-concurrency";
 import {
@@ -60,7 +60,9 @@ export class Agent {
     // run: its path carries a model-chosen task name, which must not be logged.
     const lineage = o.context.depth === 0 ? "root"
       : `${o.context.workflowAgent ? "workflow" : "child"}-${crypto.randomUUID().slice(0, 8)}`;
-    let lastTaskMode: boolean | undefined;
+    // The note stays in history, so a turn repeats it only when the mode
+    // changed. Re-sending it every turn would split each turn from the last.
+    let lastTaskMode = jevTaskModeIn(messages);
     let nudges = 0;
     let stopContinuations = 0;
     // The soft budget is refilled once, matching the original loop's completion guarantee.
@@ -71,8 +73,8 @@ export class Agent {
       if (steer.length) messages.push(...steer);
       const taskMode = o.jevTaskMode?.(o.context) ?? false;
       if (o.jevTaskMode && taskMode !== lastTaskMode) {
-        // Fresh mode policy also overrides instructions restored from a
-        // checkpoint. Re-read at each planning boundary for live settings.
+        // Re-read at each planning boundary for live settings. A checkpoint
+        // drops developer notes, so a resumed task is told an active mode again.
         messages.push(jevTaskModeMessage(taskMode));
         lastTaskMode = taskMode;
       }

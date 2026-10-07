@@ -44,7 +44,7 @@ Claude Code は、入力されたプロンプトに `<system-reminder>` を添�
 | 入力にキーワード `ultracode` がある | `The user included the keyword "ultracode", opting this turn into multi-agent orchestration — use the Workflow tool to fulfill the request.` |
 
 - リマインダーは会話履歴に残ります。次の入力では、モデルが最後に受け取ったのがオンかオフかを履歴から判定します。
-- 通常チャンネルの履歴は既定で直近5ターンです。そのため、10回ごとの短い文面より先に、開始時の全文が再送されることがあります。
+- 通常チャンネルの履歴は、推定トークン数が上限（既定 `HISTORY_MAX_TOKENS=160000`）を超えたときに、古いターンからまとめて削ります（既定 `HISTORY_KEEP_TOKENS=80000` まで）。開始時のリマインダーが削られた後は、10回ごとの短い文面より先に、開始時の全文が再送されることがあります。
 - `/retry` による再開にはリマインダーを付けません。
 - `WORKFLOWS_ENABLED=false` やサブエージェント off のときは、リマインダーもキーワードも無効です。Claude Code でワークフローを無効にしたときと同じです。
 

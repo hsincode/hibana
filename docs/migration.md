@@ -41,7 +41,7 @@ bun scripts/migrate-state.ts /backup/runtime_state.json /var/lib/hibana/runtime_
 
 旧Rustの会話メモリ・再開チェックポイント・公開サイトメタデータは新形式と互換性がありません。進行中の作業を完了してから切り替えてください。必要な成果物・カスタムスキル・動画プロジェクトは旧データを残したうえで新しいディレクトリ構成にコピーし、サイトは再公開してください。既存URLを残す場合は旧静的サイト配信を移行期間中維持します。
 
-`RUNTIME_STATE_PATH`、`WEB_API_URL`、`WEB_INTERNAL_TOKEN`、各 `*_API_KEY` / `*_BASE_URL`、主要LLM・履歴設定は継続します。保存先は `HIBANA_DATA_DIR` を起点とします。旧 `ADVISOR_*` / `ROUTER_*` は削除してください。個別の旧sandboxリソース変数はそのまま使わず、[現行の制限](../apps/bot/sandbox/README.md)と `config.ts` を確認してください。`SANDBOX_TTL_HOURS` と公開サイトのTTL・容量・件数設定は引き継げます。
+`RUNTIME_STATE_PATH`、`WEB_API_URL`、`WEB_INTERNAL_TOKEN`、各 `*_API_KEY` / `*_BASE_URL`、主要LLM・履歴設定は継続します。保存先は `HIBANA_DATA_DIR` を起点とします。旧 `ADVISOR_*` / `ROUTER_*` は削除してください。履歴の `HISTORY_LIMIT` / `HISTORY_MAX_AGE_SECS` / `HISTORY_CACHE_IDLE_SECS` は廃止し、`HISTORY_MAX_TOKENS` / `HISTORY_KEEP_TOKENS`（推定トークン数による上限と、削った後に残す量）に置き換えました。個別の旧sandboxリソース変数はそのまま使わず、[現行の制限](../apps/bot/sandbox/README.md)と `config.ts` を確認してください。`SANDBOX_TTL_HOURS` と公開サイトのTTL・容量・件数設定は引き継げます。
 
 OAuth Cookieは `hibana_session` に変更しました。利用者は再ログインが必要です。Discord Developer PortalのリダイレクトURLと、Web/APIの許可オリジンを新URLに合わせて変更します。
 

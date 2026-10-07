@@ -4,6 +4,8 @@ import { loadConfig } from "../config";
 import { History } from "../history";
 import { jevTaskModeMessage } from "../jev-task";
 import { LlmClient, type RequestRecord } from "../llm";
+import { MultiAgentSession } from "../multi-agent";
+import { Runtime } from "../runtime";
 import { emptyUsage, type Context, type Message, type ToolDef } from "../types";
 
 // A `gpt-` model keeps developer notes in place on the chat protocol, like the
@@ -28,7 +30,7 @@ const turn = (text: string, size = 30): Message[] => [
 afterEach(() => { setSystemTime(); });
 
 /** Runs turns the way Hibana.turn does: seed from history, run, store the tail. */
-async function conversation(turns: number, taskMode: boolean) {
+async function conversation(turns: number, taskMode: boolean, team = false) {
   const records: RequestRecord[] = [];
   let call = 0;
   const client = new LlmClient(config(), async () => Response.json({
@@ -44,26 +46,32 @@ async function conversation(turns: number, taskMode: boolean) {
     const messages: Message[] = [...prefix, ...history.get(ctx.channelId, undefined, "key", false, 3600)];
     const seed = messages.length;
     messages.push({ role: "user", content: `request ${i}`, turnStart: true });
-    const result = await new Agent(client).run({
+    const agent = new Agent(client);
+    const options = {
       selection, messages, tools: [tool], context: { ...ctx }, maxRounds: 4, temperature: 0.7, nativeSearch: false,
       jevTaskMode: () => taskMode,
       // Longer than the 8000 characters history used to keep.
       execute: async () => "y".repeat(20000),
-    });
+    };
+    // Subagents are on by default, so the usual root runs inside a session.
+    const result = team
+      ? await new MultiAgentSession(new Runtime(config()), agent, () => [tool]).runRoot(options)
+      : await agent.run(options);
     history.put(ctx.channelId, result.messages.slice(seed), result.usage);
   }
   return records;
 }
 
 describe("turn boundary", () => {
-  for (const taskMode of [false, true])
-    test(`a new turn only appends to the previous turn's last request (Jev task mode ${taskMode ? "on" : "off"})`, async () => {
-      const records = await conversation(8, taskMode);
-      expect(records).toHaveLength(16);
-      // Every request after the first repeats the whole previous request,
-      // including the first request of each later turn.
-      expect(records.slice(1).map(r => r.prefix!.diverged)).toEqual(Array(15).fill(null));
-    });
+  for (const team of [false, true])
+    for (const taskMode of [false, true])
+      test(`a new turn only appends to the previous turn's last request (${team ? "Multi-Agent root" : "single agent"}, Jev task mode ${taskMode ? "on" : "off"})`, async () => {
+        const records = await conversation(8, taskMode, team);
+        expect(records).toHaveLength(16);
+        // Every request after the first repeats the whole previous request,
+        // including the first request of each later turn.
+        expect(records.slice(1).map(r => [r.prefix!.against, r.prefix!.diverged])).toEqual(Array(15).fill(["lineage", null]));
+      });
 });
 
 describe("history window", () => {
@@ -107,6 +115,36 @@ describe("history window", () => {
     setSystemTime(new Date("2026-10-01T01:00:00Z"));
     expect(h.get("1", undefined, "key", true, 60)).toEqual([]);
   });
+  test("a keep size near the limit is capped, so a trim always frees room", () => {
+    expect(config({ HISTORY_MAX_TOKENS: "1000", HISTORY_KEEP_TOKENS: "990" }).historyKeepTokens).toBe(500);
+  });
+  test("Japanese text counts about one token a character", () => {
+    const h = new History(config());
+    h.get("1", undefined, "key", false, 3600);
+    h.put("1", [{ role: "user", content: "あ".repeat(900), turnStart: true }], emptyUsage());
+    expect(h.info("1").estimated_tokens).toBeGreaterThan(900);
+  });
+  test("a rejected conversation is halved from its oldest turns", () => {
+    const h = new History(config());
+    h.get("1", undefined, "key", false, 3600);
+    for (let i = 0; i < 8; i++) h.put("1", turn(`t${i}`, 600), emptyUsage());
+    h.shrink("1");
+    const kept = h.get("1", undefined, "key", false, 3600).filter(m => m.turnStart).map(m => m.content);
+    expect(kept).toEqual(["t4", "t5", "t6", "t7"]);
+  });
+  test("a thread over the limit is summarized before anything is dropped", async () => {
+    const h = new History(config({ HISTORY_MAX_TOKENS: "1000", THREAD_COMPACTION_TOKENS: "1000" }));
+    let summarized = "";
+    const llm = { complete: async (_s: unknown, messages: Message[]) => {
+      summarized = messages[1]!.content!;
+      return { message: { role: "assistant", content: "summary" }, usage: emptyUsage(), incomplete: false };
+    } };
+    h.get("1", undefined, "key", true, 3600);
+    for (let i = 0; i < 9; i++) h.put("1", turn(`t${i}`, 600), emptyUsage());
+    h.get("1", undefined, "key", true, 3600);
+    await h.compact("1", llm as never, selection);
+    expect(summarized).toContain("t0");
+  });
   test("tool results are stored as they were sent", () => {
     const h = new History(config());
     h.get("1", undefined, "key", false, 3600);
@@ -138,6 +176,19 @@ describe("thread compaction", () => {
     expect(summaries).toBe(1);
     // The head is unchanged, so later turns still extend the same prefix.
     expect(h.get("1", undefined, "key", true, 3600)[0]).toEqual(afterFirst[0]!);
+  });
+  test("a summary followed by one oversized turn is left alone", async () => {
+    const h = new History(config({ THREAD_COMPACTION_TOKENS: "1000" }));
+    let summaries = 0;
+    const llm = { complete: async () => (summaries++, { message: { role: "assistant", content: "summary" }, usage: emptyUsage(), incomplete: false }) };
+    h.get("1", undefined, "key", true, 3600);
+    h.put("1", turn("small"), emptyUsage());
+    h.put("1", turn("huge", 6000), emptyUsage());
+    await h.compact("1", llm as never, selection);
+    expect(summaries).toBe(1);
+    // Only the summary precedes the oversized turn now: nothing new to fold in.
+    await h.compact("1", llm as never, selection);
+    expect(summaries).toBe(1);
   });
 });
 

@@ -411,7 +411,7 @@
     "type": "function",
     "function": {
       "name": "set_thread_history",
-      "description": "Set how long Discord **thread** conversation history is kept (process-wide; default 3600s / 1 hour). Regular channels keep using HISTORY_MAX_AGE_SECS and are not changed. seconds=0 disables age prune (keep until token compaction, old behaviour). reset=true restores env THREAD_HISTORY_MAX_AGE_SECS. Does not wipe history; the new window applies on the next snapshot. Only call this when the user explicitly asks to change thread history TTL. Discord `/thread-history` is the same setting.",
+      "description": "Set how long Discord **thread** conversation history is kept (process-wide; default 3600s / 1 hour). A thread that stays idle longer than this starts over; an active thread keeps all its turns. Regular channels do not expire by time and are trimmed by size only. seconds=0 disables the idle reset (keep until token compaction). reset=true restores env THREAD_HISTORY_MAX_AGE_SECS. Does not wipe history; the new window applies on the next snapshot. Only call this when the user explicitly asks to change thread history TTL. Discord `/thread-history` is the same setting.",
       "parameters": {
         "type": "object",
         "properties": {

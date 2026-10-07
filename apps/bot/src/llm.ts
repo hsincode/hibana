@@ -84,7 +84,7 @@ export function outputBudget(
   );
 }
 export function toChat(m: Message, supportsDeveloper = false): Json {
-  const { images, providerBlocks, turnStart, internal, ...rest } = m;
+  const { images, providerBlocks, turnStart, internal, sticky, ...rest } = m;
   const out: Json = {
     ...rest,
     // OpenAI's newer GPT chat models accept `developer`; older compatible APIs

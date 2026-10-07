@@ -1,61 +1,45 @@
+import { createHash } from "node:crypto";
 import { Runtime, type Snapshot } from "./runtime";
 import { ToolRegistry } from "./tools";
-import {
-  sleep,
-  Serial,
-  isAbortError,
-  isClosedControllerError,
-} from "./io";
+import { sleep, Serial } from "./io";
 import type { Context } from "./types";
 
 /**
- * Vercel serverless `/internal/events` is killed at maxDuration (300s). Closing
- * the client first avoids Bun 1.4.2's uncaught `Controller is already closed`
- * when the platform RSTs the body under an active reader.
+ * How often the bot asks the settings API whether anything changed. An
+ * unchanged snapshot answers 304 after one indexed read.
+ *
+ * The bot used to hold `/internal/events` (SSE) open instead. On Vercel an open
+ * response keeps the function instance provisioned, so a stream that was always
+ * connected was billed for memory around the clock (#27). A dashboard change
+ * now reaches the bot within this interval instead of within seconds.
  */
-export const SSE_CLIENT_BUDGET_MS = 240_000;
+export const SNAPSHOT_POLL_MS = 30_000;
 
-/** Read SSE frames until the body ends. Never throws on a double-cancel. */
-export async function consumeSse(
-  body: ReadableStream<Uint8Array>,
-  onFrame: (event: string) => Promise<void>,
-) {
-  // Decode ourselves: `pipeThrough(TextDecoderStream)` plus `reader.cancel()`
-  // races Bun's node-to-web adapter when the peer RSTs the socket.
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      if (buffer.length > 65536) throw new Error("Oversized SSE event");
-      let boundary;
-      while ((boundary = buffer.indexOf("\n\n")) >= 0) {
-        const event = buffer.slice(0, boundary);
-        buffer = buffer.slice(boundary + 2);
-        await onFrame(event);
-      }
-    }
-  } finally {
-    try {
-      await reader.cancel();
-    } catch {
-      // Already closed by idle timeout / abort; cancel must not crash the bot.
-    }
-  }
+/** Longest wait between attempts while the settings API keeps failing. */
+export const SNAPSHOT_RETRY_MAX_MS = 300_000;
+
+/** Wait before the next poll: the interval, doubled per consecutive failure. */
+export function retryDelay(failures: number, pollMs: number, maxMs: number) {
+  return Math.min(pollMs * 2 ** failures, maxMs);
 }
+
+const digest = (data: string | Uint8Array) =>
+  createHash("sha256").update(data).digest("hex");
 
 export class WebSync {
   private assetQueue = new Serial();
   private etag?: string;
   private abort = new AbortController();
   private queue = new Serial();
+  /** Capabilities and assets reached the API since this process started. */
+  private announced = false;
+  /** Digests of the lists the API last accepted. */
+  private published: { sites?: string; skills?: string } = {};
   constructor(
     private runtime: Runtime,
     private tools: ToolRegistry,
     private onError: (e: unknown) => void,
+    private timing = { pollMs: SNAPSHOT_POLL_MS, maxMs: SNAPSHOT_RETRY_MAX_MS },
   ) {}
   async pull() {
     return this.queue.run(async () => {
@@ -128,79 +112,82 @@ export class WebSync {
   async publishAssets() {
     return this.assetQueue.run(async () => {
       if (!this.runtime.config.webApiUrl) return;
-      await this.runtime.remote("/internal/artifacts", "POST", {
-        sites: this.tools.sites.list(),
-      });
+      // Runs after every turn, because a turn may publish a site or edit a
+      // skill. Most turns change neither, so a list is uploaded only when it
+      // differs from what the API last accepted.
+      const sites = this.tools.sites.list();
+      const sitesDigest = digest(JSON.stringify(sites));
+      if (sitesDigest !== this.published.sites) {
+        await this.runtime.remote("/internal/artifacts", "POST", { sites });
+        this.published.sites = sitesDigest;
+      }
       const catalog = await this.tools.skills.export(
         Object.keys(this.runtime.snapshot.guilds),
       );
       const bytes = Buffer.from(JSON.stringify(catalog));
+      const skillsDigest = digest(bytes);
+      if (skillsDigest === this.published.skills) return;
       if (bytes.length < 180000) {
         await this.runtime.remote("/internal/skills", "POST", {
           skills: catalog,
         });
-        return;
+      } else {
+        const total = Math.ceil(bytes.length / 180000),
+          id = crypto.randomUUID().replaceAll("-", "").slice(0, 16);
+        if (total > 128) throw new Error("Skill catalog exceeds upload limit");
+        for (let index = 0; index < total; index++)
+          await this.runtime.remote("/internal/skills/chunk", "POST", {
+            id,
+            index,
+            total,
+            data: bytes
+              .subarray(index * 180000, (index + 1) * 180000)
+              .toString("base64"),
+          });
       }
-      const total = Math.ceil(bytes.length / 180000),
-        id = crypto.randomUUID().replaceAll("-", "").slice(0, 16);
-      if (total > 128) throw new Error("Skill catalog exceeds upload limit");
-      for (let index = 0; index < total; index++)
-        await this.runtime.remote("/internal/skills/chunk", "POST", {
-          id,
-          index,
-          total,
-          data: bytes
-            .subarray(index * 180000, (index + 1) * 180000)
-            .toString("base64"),
-        });
+      this.published.skills = skillsDigest;
     });
   }
   async start() {
     if (!this.runtime.config.webApiUrl) return;
+    let failures = 0;
+    try {
+      await this.refresh();
+    } catch (e) {
+      // A snapshot the API once served (restored by runtime.load()) carries the
+      // block list and the roles, so an API outage must not keep the bot from
+      // starting. Without one there is nothing to enforce them from.
+      if (this.runtime.snapshot.version === undefined) throw e;
+      this.onError(e);
+      failures = 1;
+    }
+    void this.watch(failures);
+  }
+  /** One round: the snapshot, then what this process still owes the API. */
+  private async refresh() {
     await this.pull();
+    if (this.announced) return;
     await this.runtime.remote("/internal/capabilities", "POST", {
       available_presets: this.runtime.available(),
     });
+    // Set before the upload: a catalog the API keeps refusing must not turn
+    // every poll into another attempt. The next turn publishes again.
+    this.announced = true;
     await this.publishAssets();
-    void this.watch();
   }
-  private async watch() {
-    const c = this.runtime.config;
+  private async watch(failures: number) {
+    const { pollMs, maxMs } = this.timing;
     while (!this.abort.signal.aborted) {
-      const cycle = AbortSignal.any([
-        this.abort.signal,
-        AbortSignal.timeout(SSE_CLIENT_BUDGET_MS),
-      ]);
+      await sleep(retryDelay(failures, pollMs, maxMs), this.abort.signal).catch(
+        () => {},
+      );
+      if (this.abort.signal.aborted) return;
       try {
-        const response = await fetch(c.webApiUrl + "/internal/events", {
-          headers: {
-            Authorization: `Bearer ${c.internalToken}`,
-            Accept: "text/event-stream",
-          },
-          signal: cycle,
-          redirect: "error",
-        });
-        if (!response.ok || !response.body)
-          throw new Error(`Settings stream HTTP ${response.status}`);
-        await this.pull();
-        await consumeSse(response.body, async (event) => {
-          if (/^event: (hello|update)/m.test(event)) await this.pull();
-        });
+        await this.refresh();
+        failures = 0;
       } catch (e) {
-        if (
-          !this.abort.signal.aborted &&
-          !isAbortError(e) &&
-          !isClosedControllerError(e)
-        )
-          this.onError(e);
-      }
-      if (!this.abort.signal.aborted) {
-        try {
-          await this.pull();
-        } catch (e) {
-          this.onError(e);
-        }
-        await sleep(5000, this.abort.signal).catch(() => {});
+        failures++;
+        if (!this.abort.signal.aborted) this.onError(e);
       }
     }
   }

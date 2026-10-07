@@ -85,7 +85,7 @@ export class History {
         { role: "user", content: JSON.stringify(old) },
       ],
       [],
-      { signal },
+      { signal, trace: { channel: channelId, agent: "compaction", round: 0 } },
     );
     if (!summary.message.content) return;
     e.turns = [

@@ -5,6 +5,7 @@ import type { Json, Message, ToolCall, ToolDef, Usage } from "./types";
 import { apiFailure, ProviderError } from "./llm-errors";
 import { readCompletion } from "./llm-stream";
 import { requestCompletion, type RequestHooks, type RetryNotice } from "./llm-request";
+import { PrefixAudit, type PrefixReport, type RequestTrace } from "./prefix-audit";
 export { retryDelay } from "./llm-request";
 
 // Claude Opus 5.5, Sonnet 5.5 and the Fable / Mythos 5 line reject a fixed
@@ -358,14 +359,32 @@ export function parseCompletion(
     incomplete: choice.finish_reason === "length",
   };
 }
+/** One completed provider request. It carries counts and sizes only, so it
+ *  can be logged without exposing prompts. */
+export type RequestRecord = {
+  provider: string;
+  model: string;
+  protocol: "chat" | "responses" | "anthropic";
+  channel?: string;
+  agent?: string;
+  round?: number;
+  usage: Usage;
+  /** False when the provider sent no usage: the zeros are then unknown, not free. */
+  usage_reported: boolean;
+  /** Whole call, including reconnect backoff and credential lookup. */
+  latency_ms: number;
+  prefix?: PrefixReport;
+};
+export type LlmHooks = RequestHooks & { onCompletion?: (record: RequestRecord) => void };
 export class LlmClient {
+  private audit = new PrefixAudit();
   constructor(
     private config: Config,
     private fetcher: (
       input: string,
       init?: RequestInit,
     ) => Promise<Response> = fetch,
-    private hooks: RequestHooks = {},
+    private hooks: LlmHooks = {},
   ) {}
   async complete(
     selection: Selection,
@@ -377,6 +396,7 @@ export class LlmClient {
       nativeSearch?: boolean;
       signal?: AbortSignal;
       onRetry?: (notice: RetryNotice) => Promise<void> | void;
+      trace?: RequestTrace;
     } = {},
   ): Promise<Completion> {
     const isChatgpt = selection.provider === "chatgpt";
@@ -506,8 +526,11 @@ export class LlmClient {
         ["openai", "codex_plus", "codex_pro", "chatgpt"].includes(selection.provider)) {
       body.service_tier = options.serviceTier;
     }
+    const started = Date.now();
+    const audit = this.hooks.onCompletion && options.trace ? this.audit.observe(options.trace, body) : undefined;
+    let usageReported = false;
     try {
-      return await requestCompletion({
+      const completion = await requestCompletion({
         fetch: async (signal) => {
           const requestHeaders = { ...headers };
           if (isChatgpt) {
@@ -527,6 +550,7 @@ export class LlmClient {
           const response = await this.fetcher(endpoint.baseUrl + path, {
             method: "POST", headers: requestHeaders, body: JSON.stringify(body), signal, redirect: "error",
           });
+          if (response.ok) audit?.commit();
           // The subscription endpoint may omit Content-Type despite returning
           // SSE. We explicitly requested streaming; preserve error envelopes.
           if (isChatgpt && response.ok && !response.headers.get("content-type")) {
@@ -536,9 +560,11 @@ export class LlmClient {
           }
           return response;
         },
-        read: async (response, signal, activity) => parseCompletion(
-          await readCompletion(response, protocol, signal, activity), protocol,
-        ),
+        read: async (response, signal, activity) => {
+          const data = await readCompletion(response, protocol, signal, activity);
+          usageReported = Object.keys((data.usage ?? {}) as Json).length > 0;
+          return parseCompletion(data, protocol);
+        },
         signal: options.signal,
         requestRetries: this.config.llmRequestRetries,
         streamRetries: this.config.llmStreamRetries,
@@ -548,6 +574,17 @@ export class LlmClient {
         }) },
         onRetry: options.onRetry,
       });
+      try {
+        this.hooks.onCompletion?.({
+          provider: selection.provider, model: selection.model, protocol,
+          channel: options.trace?.channel, agent: options.trace?.agent, round: options.trace?.round,
+          usage: completion.usage, usage_reported: usageReported, latency_ms: Date.now() - started,
+          prefix: audit?.report,
+        });
+      } catch {
+        // Measurement must never discard a completion the provider already billed.
+      }
+      return completion;
     } catch (error) {
       if (error instanceof ProviderError) {
         error.diagnostics = { ...error.diagnostics, provider: selection.provider, model: selection.model };

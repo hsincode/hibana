@@ -56,6 +56,10 @@ export class Agent {
       usage = emptyUsage(),
       seen = new Map<string, number>();
     o.observeMessages?.(messages);
+    // Names one request chain in the usage log. A child gets a random id per
+    // run: its path carries a model-chosen task name, which must not be logged.
+    const lineage = o.context.depth === 0 ? "root"
+      : `${o.context.workflowAgent ? "workflow" : "child"}-${crypto.randomUUID().slice(0, 8)}`;
     let lastTaskMode: boolean | undefined;
     let nudges = 0;
     let stopContinuations = 0;
@@ -84,6 +88,7 @@ export class Agent {
           temperature: o.temperature,
           nativeSearch: !taskMode && o.nativeSearch,
           signal: o.requestSignal?.() ?? o.context.signal,
+          trace: { channel: o.context.channelId, agent: lineage, round, child: o.context.depth > 0 },
           onRetry: async ({ attempt, maxRetries, status }) => {
             await o.context.progress?.(
               `応答を再接続しています（${attempt}/${maxRetries}${status ? `・HTTP ${status}` : ""}）。進捗は保持しています。`,

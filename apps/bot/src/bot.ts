@@ -105,6 +105,7 @@ export class Hibana {
     this.runtime = new Runtime(config);
     this.llm = new LlmClient(config, fetch, {
       onRetry: notice => this.log.warn(notice, "LLM reconnecting"),
+      onCompletion: record => this.log.info(record, "LLM request completed"),
     });
     this.agent = new Agent(this.llm);
     this.history = new History(config);

@@ -124,20 +124,19 @@ test("authenticated CONNECT preserves bytes and closes both peers", async () => 
 // The home line's own WAN address is public, so the range checks pass it, yet
 // from inside the LAN it is the router itself (#39).
 test("a destination equal to the device's own address is denied before the device hears of it", async () => {
-  const target = (ip: number[]) => async () => Buffer.from([72, 69, ...ip, 1, 187]);
   let ip = [127, 0, 0, 1]; // the test device connects from loopback
   const relay = createHomeEgress({
     ca: pem(relayEnv, "HOME_RELAY_CA_B64"), cert: pem(relayEnv, "HOME_RELAY_CERT_B64"), key: pem(relayEnv, "HOME_RELAY_KEY_B64"),
     username: relayEnv.HOME_RELAY_USERNAME, controlPath: join(dir, `control-${crypto.randomUUID()}.sock`),
     tunnelHost: "127.0.0.1", tunnelPort: 0, proxyHost: "127.0.0.1", proxyPort: 0, waitMs: 200,
-    destination: (...args) => target(ip)(...args),
+    destination: async () => Buffer.from([72, 69, ...ip, 1, 187]),
   });
   await relay.listen(); await relay.connect(relayEnv.HOME_RELAY_PASSWORD);
   let home: TLSSocket | undefined;
   try {
     home = await device(relay);
     const headers: Buffer[] = [];
-    home.on("data", data => { headers.push(data); home!.write(Buffer.from([0])); });
+    home.on("data", (data: Buffer) => { headers.push(data); home!.write(Buffer.from([0])); });
     while (relay.status().idle !== 1) await new Promise(r => setTimeout(r, 5));
     const denied = await browser(relay);
     expect(denied.status).toBe(503); denied.socket.destroy();

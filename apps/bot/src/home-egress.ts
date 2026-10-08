@@ -57,8 +57,18 @@ export function createHomeEgress(options: HomeEgressOptions) {
   const activity = new Map<TLSSocket, number>();
   const clients = new Set<Duplex>();
   const transports = new Set<Duplex>();
+  // Addresses the home devices connected from during this lease. The home
+  // line's own WAN address is public, so the range checks pass it, yet from
+  // inside the LAN it is the router itself (#39).
+  const homes = new Set<string>();
   const waiters: Array<{ resolve: (s: TLSSocket) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }> = [];
   let closing = false;
+  // Hands a free lane to the oldest queued request, or keeps it for the next.
+  const park = (device: TLSSocket) => {
+    const next = waiters.shift();
+    if (next) { clearTimeout(next.timer); next.resolve(device); }
+    else { idle.push(device); device.setTimeout(90000, () => device.destroy()); }
+  };
   const authorized = (req: IncomingMessage) => {
     if (!lease) return false;
     const expected = Buffer.from("Basic " + Buffer.from(`${options.username}:${lease.token}`).toString("base64"));
@@ -82,8 +92,13 @@ export function createHomeEgress(options: HomeEgressOptions) {
     if (!session) throw new Error("Home disconnected");
     const header = await (options.destination ?? homeDestination)(host, port);
     if (session !== lease) throw new Error("Home disconnected");
+    const target = [...header.subarray(2, 6)].join(".");
+    if (homes.has(target)) throw new Error("Destination denied");
     const device = await take();
     if (session !== lease) { device.destroy(); throw new Error("Home disconnected"); }
+    // Checked again: the first lane may have connected while this request
+    // waited. The lane has not been told anything, so it stays usable.
+    if (homes.has(target)) { park(device); throw new Error("Destination denied"); }
     // Every TLS connection carries one target only. Closing either end releases
     // the device slot; it reconnects with a fresh authenticated TLS session.
     return new Promise<TLSSocket>((resolve, reject) => {
@@ -110,6 +125,7 @@ export function createHomeEgress(options: HomeEgressOptions) {
     handshakeTimeout: 10000,
   }, device => {
     if (!device.authorized || !lease || closing || devices.size >= 8) { device.destroy(); return; }
+    homes.add((device.remoteAddress || "").replace(/^::ffff:/i, ""));
     devices.add(device); device.pause(); device.setNoDelay(true); device.setKeepAlive(true, 15000);
     // Small records bound the ESP32's receive memory. Browser TLS stays nested
     // inside this transport and is still verified by Chromium end to end.
@@ -118,9 +134,7 @@ export function createHomeEgress(options: HomeEgressOptions) {
     device.on("close", () => {
       devices.delete(device); activity.delete(device); const i = idle.indexOf(device); if (i >= 0) idle.splice(i, 1);
     });
-    const next = waiters.shift();
-    if (next) { clearTimeout(next.timer); next.resolve(device); }
-    else { idle.push(device); device.setTimeout(90000, () => device.destroy()); }
+    park(device);
   });
   tunnel.on("tlsClientError", () => {}); // Authentication failures never include peer certificates in logs.
   tunnel.on("connection", socket => {
@@ -205,7 +219,7 @@ export function createHomeEgress(options: HomeEgressOptions) {
     lease = undefined;
     for (const waiter of waiters.splice(0)) { clearTimeout(waiter.timer); waiter.reject(new Error("Home disconnected")); }
     for (const socket of [...devices, ...transports, ...clients]) socket.destroy();
-    idle.length = 0; activity.clear();
+    idle.length = 0; activity.clear(); homes.clear();
     if (tunnel.listening) await new Promise<void>(r => tunnel.close(() => r()));
   }
   const connect = (token: string) => lock.run(async () => {

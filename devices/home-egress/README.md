@@ -45,6 +45,8 @@ This is an application proxy, not a WireGuard gateway or a Tailscale exit node.
 - DNS is resolved and checked on the VPS. The device receives the pinned
   public IPv4, with another private/reserved-address check on the ESP32. This
   prevents pages from reaching home LAN devices or rebinding a checked hostname.
+  The VPS also denies the address the device connected from: the home line's
+  own public IPv4 is the router when reached from inside the LAN.
 - Six device lanes, eight accepted device sessions, 24 queued requests, 32
   proxy connections. Queue timeout 15 s; connect timeout 12 s; idle TCP timeout
   60 s. Each completed connection gets a fresh authenticated TLS session.

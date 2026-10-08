@@ -342,7 +342,10 @@ describe("authz", () => {
     );
     expect(
       ((await snap0.json()) as { premium_presets: string[] }).premium_presets,
-    ).toEqual(["fable-5", "max-opus-5-5"]);
+    ).toEqual([
+      "fable-5", "max-opus-5-5",
+      "anthropic-auto", "anthropic-haiku-5-5", "anthropic-sonnet-5-5", "anthropic-opus-5-5",
+    ]);
 
     const denied = await app.handle(
       req("/api/catalog/presets/opus-5", {

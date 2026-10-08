@@ -8,12 +8,15 @@ export type Selection = {
   provider: string;
   model: string;
   effort?: string | null;
+  /** Chosen by auto routing: requests for it never use the max effort. */
+  routed?: boolean;
 };
 export type Endpoint = { baseUrl: string; apiKey: string };
 const providers: Record<string, [string, string]> = {
   chatgpt: ["https://chatgpt.com/backend-api/codex", "gpt-6.1-sol"],
   deepseek: ["https://api.deepseek.com", "deepseek-flash"],
   openai: ["https://api.openai.com/v1", "gpt-4o-mini"],
+  anthropic: ["https://api.anthropic.com/v1", "claude-sonnet-5-5"],
   xai: ["https://api.x.ai/v1", "grok-3-mini"],
   openrouter: ["https://openrouter.ai/api/v1", ""],
   orca_router: ["https://api.orcarouter.ai/v1", "obsidian/Qwen3.8-27B"],

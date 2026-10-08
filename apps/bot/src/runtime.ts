@@ -1,6 +1,9 @@
 import {
   MODEL_PRESETS,
   canonicalPresetId,
+  isAutoRoute,
+  serverShared,
+  subagentsUnsupported,
   unpublishedPresetIds,
   premiumPresetIds,
 } from "@hibana/shared/catalog";
@@ -139,6 +142,23 @@ export class Runtime {
       this.providerAvailable(p.provider)
     );
   }
+  /** Whether this user's turns may run the preset. Picking a preset needs
+   *  canSelect; a `server_shared` preset that a server selected also serves
+   *  every member (#35). The auto preset covers the models it routes to. */
+  canUse(preset: string, guildId: string | undefined, userId: string) {
+    if (this.canSelect(preset, userId)) return true;
+    const p = MODEL_PRESETS.find((p) => p.id === preset);
+    const chosen = guildId ? this.guild(guildId).selection : undefined;
+    const server = chosen && MODEL_PRESETS.find(
+      (x) => x.provider === chosen.provider && x.model === chosen.model,
+    );
+    return Boolean(
+      p && server && serverShared(p.id) && serverShared(server.id) &&
+      (server.id === p.id || (isAutoRoute(server) && p.provider === server.provider)) &&
+      !this.snapshot.unpublished_presets.includes(p.id) &&
+      this.providerAvailable(p.provider),
+    );
+  }
   available() {
     return MODEL_PRESETS.filter(
       (p) => this.providerAvailable(p.provider),
@@ -162,9 +182,13 @@ export class Runtime {
     const preset = MODEL_PRESETS.find(
       (p) => p.provider === selection.provider && p.model === selection.model,
     );
+    // A member without the plan keeps a server's `server_shared` pick, but
+    // not one stored on their own row (e.g. after losing the plan).
+    const shared = preset && user.selection == null && guildId && serverShared(preset.id);
     const unavailable = (
       preset &&
       userId &&
+      !shared &&
       this.snapshot.premium_presets.includes(preset.id) &&
       !["premium", "moderator", "administrator"].includes(this.role(userId))
     );
@@ -175,7 +199,9 @@ export class Runtime {
     const multiAgent = pick(user.multi_agent, guild.multi_agent!);
     const context = user.context ??
       (guildId ? guild.context : this.snapshot.user_contexts[userId || ""] ?? null);
-    const subagentEnabled = pick(user.subagent_enabled, guild.subagent_enabled!);
+    // The stored switches are kept; they apply again under another provider.
+    const subagentEnabled = !subagentsUnsupported(selection.provider) &&
+      pick(user.subagent_enabled, guild.subagent_enabled!);
     const ultraMode = multiAgent || pick(user.ultra_mode, guild.ultra_mode!);
     return {
       ...guild,

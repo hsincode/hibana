@@ -441,6 +441,20 @@ export const PROVIDERS: Record<string, ProviderMeta> = {
         </g>,
       ),
   },
+  // Anthropic 直結（従量課金）: 芯のないアスタリスクを輪で囲み、Kiro / Max と区別する。
+  anthropic: {
+    label: "Anthropic",
+    color: "#d97757",
+    mark: ({ size = 18, className }) =>
+      mark(
+        size,
+        className,
+        <g stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" fill="none">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 6.5v11M7.2 9.25l9.6 5.5M7.2 14.75l9.6-5.5" />
+        </g>,
+      ),
+  },
   // Claude Max: Kiro と同じアスタリスクに芯を足して、課金先が一目で分かるようにしてある。
   claude_max: {
     label: "Claude Max",

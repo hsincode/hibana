@@ -102,6 +102,41 @@ export const MODEL_PRESETS = [
     label: "Claude Max / Claude Opus 5.5",
     min_role: "premium",
   },
+  // Anthropic's own API (`ANTHROPIC_API_KEY`), billed per token. A Premium /
+  // Moderator / Administrator picks it; `server_shared` then lets every
+  // member of a server use the server's pick (decision record: #35).
+  {
+    id: "anthropic-auto",
+    provider: "anthropic",
+    model: "auto",
+    label: "Anthropic / Auto (Jev)",
+    min_role: "premium",
+    server_shared: true,
+  },
+  {
+    id: "anthropic-haiku-5-5",
+    provider: "anthropic",
+    model: "claude-haiku-5-5",
+    label: "Anthropic / Claude Haiku 5.5",
+    min_role: "premium",
+    server_shared: true,
+  },
+  {
+    id: "anthropic-sonnet-5-5",
+    provider: "anthropic",
+    model: "claude-sonnet-5-5",
+    label: "Anthropic / Claude Sonnet 5.5",
+    min_role: "premium",
+    server_shared: true,
+  },
+  {
+    id: "anthropic-opus-5-5",
+    provider: "anthropic",
+    model: "claude-opus-5-5",
+    label: "Anthropic / Claude Opus 5.5",
+    min_role: "premium",
+    server_shared: true,
+  },
   {
     id: "gemini-3.7-flash",
     provider: "codex_gemini",
@@ -221,6 +256,32 @@ export function canonicalModel(provider: string, model: string): string {
   return alias && alias.providers.includes(provider) ? alias.model : model;
 }
 
+/** Not a wire id: Jev picks one of `AUTO_ROUTE_LEVELS` for the conversation. */
+export const AUTO_ROUTE_PROVIDER = "anthropic";
+export const AUTO_ROUTE_MODEL = "auto";
+
+/** Easiest to hardest, as the owner listed them (#35). `max` never appears. */
+export const AUTO_ROUTE_LEVELS = [
+  { model: "claude-haiku-5-5", effort: "medium" },
+  { model: "claude-haiku-5-5", effort: "high" },
+  { model: "claude-sonnet-5-5", effort: "medium" },
+  { model: "claude-sonnet-5-5", effort: "high" },
+  { model: "claude-sonnet-5-5", effort: "xhigh" },
+  { model: "claude-opus-5-5", effort: "medium" },
+] as const;
+
+/** Used whenever Jev cannot classify the request. */
+export const AUTO_ROUTE_FALLBACK = { model: "claude-haiku-5-5", effort: "high" } as const;
+
+/** Anthropic turns, auto included, run without subagents (#35). */
+export function subagentsUnsupported(provider: string | undefined): boolean {
+  return provider === AUTO_ROUTE_PROVIDER;
+}
+
+export function isAutoRoute(selection: { provider: string; model: string }): boolean {
+  return selection.provider === AUTO_ROUTE_PROVIDER && selection.model === AUTO_ROUTE_MODEL;
+}
+
 export const REASONING_EFFORTS = [
   "none",
   "low",
@@ -279,7 +340,14 @@ export function minRoleForPreset(id: string): string | null {
   return r || null;
 }
 
-type CatalogFlags = { published?: boolean };
+type CatalogFlags = { published?: boolean; server_shared?: boolean };
+
+/** The Premium floor of these presets applies to whoever saves the setting,
+ *  not to the members of a server that selected one. */
+export function serverShared(id: string): boolean {
+  const p = MODEL_PRESETS.find((x) => x.id === id) as CatalogFlags | undefined;
+  return p?.server_shared === true;
+}
 
 /** Catalog default. Missing `published` = public. Grok Free is not selectable. */
 export function catalogPublished(id: string): boolean {

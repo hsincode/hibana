@@ -27,6 +27,8 @@ import {
   workflowToolDescription,
   type ReferenceOptions,
 } from "../workflow/prompts";
+import { evaluateRoute, isAutoRoute, ROUTE_TIMEOUT_MS } from "../auto-route";
+type RouteDecision = Awaited<ReturnType<typeof evaluateRoute>>;
 import { evaluateTriage, shouldPrestartExplorer, TRIAGE_TIMEOUT_MS, type Triage } from "../jev-triage";
 import definitions from "./definitions.json";
 import codexDefinitions from "./codex-definitions.json";
@@ -233,6 +235,44 @@ export class ToolRegistry {
         } : {}),
         elapsed_ms: Math.round(performance.now() - started),
       }, "Jev triage finished");
+    }
+  }
+  /** Auto routing: Jev scores the request's difficulty once, before the turn.
+   *  Silent like the triage. Any failure returns undefined and the caller
+   *  uses the fallback model. */
+  async route(ctx: Context, messages: readonly Message[]): Promise<RouteDecision | undefined> {
+    const enabled = () => {
+      const settings = this.runtime.resolve(ctx.guildId, ctx.userId);
+      return this.runtime.config.toolsEnabled && this.runtime.config.subagentEnabled &&
+        !!this.runtime.config.jevApiKey && settings.jev_enabled && isAutoRoute(settings.selection);
+    };
+    const started = performance.now();
+    let verdict = "disabled";
+    let result: RouteDecision | undefined;
+    try {
+      if (!enabled()) return undefined;
+      verdict = "unavailable";
+      // The deadline includes waiting for the shared Jev slot.
+      const signal = AbortSignal.any([
+        ...(ctx.signal ? [ctx.signal] : []),
+        AbortSignal.timeout(ROUTE_TIMEOUT_MS),
+      ]);
+      result = await withAbort(this.subagents.run(async () => {
+        signal.throwIfAborted();
+        return evaluateRoute(messages, this.jev.decide.bind(this.jev), signal);
+      }), signal);
+      verdict = "classified";
+      return result;
+    } catch {
+      ctx.signal?.throwIfAborted();
+      return undefined;
+    } finally {
+      // The level only; never the request text or the API response body.
+      this.log?.info({
+        channel: ctx.channelId, message_id: ctx.messageId, verdict,
+        ...(result ? { level: result.level, requested: result.requested ?? null, model: result.selection.model, effort: result.selection.effort } : {}),
+        elapsed_ms: Math.round(performance.now() - started),
+      }, "Jev route finished");
     }
   }
   base(ctx: Context): ToolDef[] {

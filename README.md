@@ -9,7 +9,7 @@ Discord AI bot・設定API・WebダッシュボードをまとめたBun / TypeSc
 | `apps/web` | React / Viteの設定ダッシュボード |
 | `packages/shared` | 設定スキーマ・モデルカタログ・トリガー |
 
-Advisor、自動モデルRouter、品質検証（verify）、速度優先（fast）は削除済みです。モデルは明示的な選択（ユーザー → サーバー → 移行済み既定値 / 環境変数）で決まります。OpenRouterプロバイダー、サブエージェント、Reactの画面遷移は引き続き利用できます。
+Advisor、旧来の自動モデルRouter、品質検証（verify）、速度優先（fast）は削除済みです。モデルは明示的な選択（ユーザー → サーバー → 移行済み既定値 / 環境変数）で決まります。例外は Anthropic プロバイダーの「Anthropic / Auto (Jev)」プリセットで、これを選んだときだけ Jev が難易度に応じて Haiku 5.5 / Sonnet 5.5 / Opus 5.5 と effort を決めます（[docs/jev.md](docs/jev.md#anthropic-の-auto-routing)）。OpenRouterプロバイダー、サブエージェント、Reactの画面遷移は引き続き利用できます。
 
 ## 開発
 

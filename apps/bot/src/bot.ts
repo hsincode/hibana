@@ -11,7 +11,7 @@ import {
 import { join } from "node:path";
 import type { Logger } from "pino";
 import { MODEL_PRESETS } from "@hibana/shared/catalog";
-import type { Config } from "./config";
+import type { Config, Selection } from "./config";
 import { Runtime } from "./runtime";
 import { LlmClient, nativeSearchFor } from "./llm";
 import { providerFailureNotice, ProviderError } from "./llm-errors";
@@ -32,7 +32,8 @@ import {
   type FailureCode,
   type FailurePhase,
 } from "./failure";
-import { emptyUsage, type Context, type Message, type Usage } from "./types";
+import { addUsage, emptyUsage, type Context, type Message, type Usage } from "./types";
+import { isAutoRoute, routeFallback, RouteMemory } from "./auto-route";
 import {
   hasUltracodeKeyword,
   systemReminder,
@@ -75,6 +76,7 @@ export class Hibana {
   readonly llm: LlmClient;
   readonly agent: Agent;
   readonly history: History;
+  routes = new RouteMemory();
   readonly tools: ToolRegistry;
   readonly sync: WebSync;
   readonly voice: Voice;
@@ -521,7 +523,8 @@ export class Hibana {
     // off changes the effort sent, not the conversation (Claude Code keeps it).
     const key = JSON.stringify(settings.selection);
     const ultracode = settings.ultracode;
-    const selection = turnSelection(settings.selection, ultracode);
+    // An auto preset is replaced below, once the history is known.
+    let selection = turnSelection(settings.selection, ultracode);
     const started = Date.now();
     this.log.info({ channel: ctx.channelId, message_id: ctx.messageId,
       settings_version: this.runtime.snapshot.version, provider: selection.provider,
@@ -562,6 +565,12 @@ export class Hibana {
           true,
           settings.thread_history_max_age_secs ?? this.config.threadHistoryAge,
         );
+      }
+      let routeUsage: Usage | undefined;
+      if (isAutoRoute(settings.selection)) {
+        const route = await this.autoRoute(ctx, text, prior, pending);
+        routeUsage = route.usage;
+        selection = turnSelection(route.selection, ultracode);
       }
       failurePhase = "prompt_assembly";
       const prefix = await assemblePrompt(
@@ -626,6 +635,9 @@ export class Hibana {
           workflows: { journals: this.tools.workflowJournals, files: this.tools.workflowFiles },
         }).runRoot(options)
         : await this.agent.run(options);
+      if (routeUsage) addUsage(result.usage, routeUsage);
+      // The turn's last request renewed the cache this route is kept for.
+      this.routes.touch(ctx.channelId);
       state.accepting = false;
       for (const pending of state.pending.splice(0))
         this.track(
@@ -650,8 +662,8 @@ export class Hibana {
       this.log.info(
         {
           channel: ctx.channelId,
-          provider: settings.selection.provider,
-          model: settings.selection.model,
+          provider: selection.provider,
+          model: selection.model,
           usage: result.usage,
           latency_ms: Date.now() - started,
         },
@@ -669,8 +681,8 @@ export class Hibana {
                 username: ctx.userId,
                 prompt: text ?? "/retry",
                 reply: result.text,
-                provider: settings.selection.provider,
-                model: settings.selection.model,
+                provider: selection.provider,
+                model: selection.model,
                 error: null,
                 failure_phase: null,
                 failure_code: null,
@@ -708,8 +720,8 @@ export class Hibana {
                   username: ctx.userId,
                   prompt: text ?? "/retry",
                   reply: null,
-                  provider: settings.selection.provider,
-                  model: settings.selection.model,
+                  provider: selection.provider,
+                  model: selection.model,
                   error: failureCode,
                   failure_phase: failurePhase,
                   failure_code: failureCode,
@@ -740,6 +752,29 @@ export class Hibana {
       clearInterval(timer);
       this.active.delete(ctx.channelId);
     }
+  }
+  /** Auto routing (#35). A route Jev chose stays while the conversation and
+   *  its prompt cache can still be continued; the fallback is never kept, so
+   *  the next turn asks Jev again. */
+  private async autoRoute(ctx: Context, text: string | undefined, prior: Message[], pending?: Checkpoint) {
+    const carried = prior.length > 0 || Boolean(pending);
+    const kept = carried ? this.routes.live(ctx.channelId) : undefined;
+    let usage: Usage | undefined;
+    let selection = kept;
+    let source = "kept";
+    if (!selection) {
+      const decided = await this.tools.route(ctx, text
+        ? [...prior, { role: "user", content: text, images: ctx.images }]
+        : pending?.messages ?? prior);
+      usage = decided?.usage;
+      source = decided ? "jev" : "fallback";
+      selection = decided?.selection ?? routeFallback();
+      if (decided) this.routes.set(ctx.channelId, selection);
+      else this.routes.clear(ctx.channelId);
+    }
+    this.log.info({ channel: ctx.channelId, message_id: ctx.messageId, source,
+      model: selection.model, effort: selection.effort ?? null }, "Auto route selected");
+    return { selection, usage };
   }
   async close() {
     this.shutdown.abort(new Error("Shutdown"));

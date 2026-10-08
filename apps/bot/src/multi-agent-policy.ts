@@ -2,7 +2,9 @@ import {
   EFFORTS,
   MODEL_PRESETS,
   canonicalPresetId,
+  isAutoRoute,
 } from "@hibana/shared/catalog";
+import { routeFallback } from "./auto-route";
 import { effortSchema, subagentMode } from "@hibana/shared/settings";
 import { AGENT_ROLE_IDS, roleCatalogText, roleEffort, type AgentRole } from "./agent-roles";
 import type { Runtime } from "./runtime";
@@ -143,6 +145,9 @@ export function selectChild(
         "Unknown or ambiguous subagent model; use an available preset id",
       );
     selection = { provider: preset.provider, model: preset.model };
+    // The auto preset is not a model: a child keeps its parent's route, and
+    // under any other parent it runs the fallback without asking Jev again.
+    if (isAutoRoute(selection)) selection = parent.routed ? { ...parent } : routeFallback();
   }
   assertChildSelection(runtime, ctx, selection);
   const changed =
@@ -180,7 +185,7 @@ export function assertChildSelection(
   // are incorrectly rejected before their first model request.
   if (
     !runtime.providerAvailable(selection.provider) ||
-    (preset && !runtime.canSelect(preset.id, ctx.userId))
+    (preset && !runtime.canUse(preset.id, ctx.guildId, ctx.userId))
   )
     throw new Error("Subagent model is unavailable for your account");
 }

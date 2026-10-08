@@ -10,7 +10,7 @@
 
 RustのアプリケーションをBun / TypeScriptへ置き換えました。APIとWebは既存のTypeScript実装を統合・更新しています。Pythonのメディア生成スキル、Dockerfile、ブラウザのJSヘルパーは既存資産として保持しています。
 
-Advisorと自動モデルRouterのコマンド、ツール、設定、UIを削除しました。旧DB内の該当キーは読み込み時に除外され、PATCHでは拒否されます。OpenRouter等のプロバイダー名やReact Routerは別用途なので保持しています。モデルの切り替えは明示的に行います。
+Advisorと自動モデルRouterのコマンド、ツール、設定、UIを削除しました。旧DB内の該当キーは読み込み時に除外され、PATCHでは拒否されます。OpenRouter等のプロバイダー名やReact Routerは別用途なので保持しています。モデルの切り替えは明示的に行います。2026-10 に追加した「Anthropic / Auto (Jev)」プリセットは、削除した Router の復活ではなく別の実装です（#35、[jev.md](jev.md#anthropic-の-auto-routing)）。
 
 ## 設定とデータ
 

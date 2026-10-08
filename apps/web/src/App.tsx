@@ -12,7 +12,7 @@ import {
   type RoleModel,
   type SubagentMode,
 } from "@hibana/shared/settings";
-import { REASONING_EFFORTS } from "@hibana/shared/catalog";
+import { REASONING_EFFORTS, isAutoRoute } from "@hibana/shared/catalog";
 import { Select, ThemeMenu } from "./controls";
 import {
   useCallback,
@@ -1222,6 +1222,8 @@ function OverlayPanels({
               ? "デフォルトはサーバーの effort です。モデルを変えるとそのモデルの推奨値になります。"
               : "推論の深さ。モデルを変えるとそのモデルの推奨値になります。"}${ultracode
               ? " サブエージェントが ultra（Ultracode）の間は xhigh で動き、この値は ultra を外すと使われます。"
+              : ""}${s.selection?.provider && s.selection.model && isAutoRoute({ provider: s.selection.provider, model: s.selection.model })
+              ? " Anthropic / Auto では Jev の判定でモデルと effort（max は使いません）が決まり、この値は使われません。"
               : ""}`}
           >
             {(fid) => (

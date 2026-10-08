@@ -3,6 +3,7 @@ import type { Config, Selection } from "./config";
 import { recommendedEffort } from "./config";
 import type { Json, Message, ToolCall, ToolDef, Usage } from "./types";
 import { apiFailure, ProviderError } from "./llm-errors";
+import { concreteSelection, routedEffort } from "./auto-route";
 import { readCompletion } from "./llm-stream";
 import { requestCompletion, type RequestHooks, type RetryNotice } from "./llm-request";
 import { PrefixAudit, type PrefixReport, type RequestTrace } from "./prefix-audit";
@@ -44,7 +45,7 @@ export function protocolFor(
   selection: Selection,
   nativeSearch = false,
 ): "chat" | "responses" | "anthropic" {
-  if (selection.provider === "claude_max") return "anthropic";
+  if (["claude_max", "anthropic"].includes(selection.provider)) return "anthropic";
   if (selection.provider === "deepseek" && nativeSearch) return "responses";
   if (selection.provider === "chatgpt") return "responses";
   if (selection.provider === "openai" && /^gpt-6/.test(selection.model))
@@ -403,6 +404,7 @@ export class LlmClient {
       trace?: RequestTrace;
     } = {},
   ): Promise<Completion> {
+    selection = concreteSelection(selection);
     const isChatgpt = selection.provider === "chatgpt";
     // This provider only uses registered master credentials. Never reuse an
     // environment API key or a configurable endpoint for ChatGPT OAuth tokens.
@@ -412,11 +414,10 @@ export class LlmClient {
     if (!endpoint?.apiKey)
       throw new Error(`Missing API key for ${selection.provider}`);
     const protocol = protocolFor(selection, options.nativeSearch);
-    const effort = wireEffort(
-      selection.model,
-      selection.effort ??
-        recommendedEffort(selection.model, selection.provider),
-    );
+    const stored = selection.effort ?? recommendedEffort(selection.model, selection.provider);
+    // Auto routing forbids max, also for a child that inherited the route and
+    // was given max by a subagent effort policy.
+    const effort = wireEffort(selection.model, selection.routed ? routedEffort(stored) : stored);
     let max = outputBudget(selection.model, effort, this.config.maxTokens);
     const temperature = selection.model.startsWith("stealth/ox-alpha")
       ? Math.round(
@@ -487,6 +488,9 @@ export class LlmClient {
       };
       headers["anthropic-version"] = "2023-06-01";
       headers["x-api-key"] = endpoint.apiKey;
+      // Anthropic's own API reads a Bearer token as OAuth; the gateway behind
+      // Claude Max accepts either header.
+      if (selection.provider === "anthropic") delete headers.Authorization;
       // Claude Max serves only 4.7+ models, which reject `budget_tokens` and
       // sampling parameters; adaptive thinking plus effort is the only shape.
       if (effort === "none") body.thinking = { type: "disabled" };

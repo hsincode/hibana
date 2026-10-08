@@ -77,6 +77,7 @@ export class Hibana {
   readonly agent: Agent;
   readonly history: History;
   routes = new RouteMemory();
+  private fallbackAnnounced = new Set<string>();
   readonly tools: ToolRegistry;
   readonly sync: WebSync;
   readonly voice: Voice;
@@ -572,8 +573,9 @@ export class Hibana {
         routeUsage = route.usage;
         selection = turnSelection(route.selection, ultracode);
         // Its own message, sent as soon as the route is known, so it precedes
-        // the turn's progress messages and the reply.
-        await send(routeHeader(selection));
+        // the turn's progress messages and the reply. Turns that continue on
+        // the same route say nothing.
+        if (route.announce) await send(routeHeader(selection));
       }
       failurePhase = "prompt_assembly";
       const prefix = await assemblePrompt(
@@ -783,9 +785,15 @@ export class Hibana {
       else if (!kept) this.routes.clear(ctx.channelId);
     }
     selection ??= routeFallback();
-    this.log.info({ channel: ctx.channelId, message_id: ctx.messageId, source,
+    // A fallback is chosen again on every turn while Jev is unavailable, so
+    // only the first of a run in one conversation is announced.
+    const repeated = source === "fallback" && carried && this.fallbackAnnounced.has(ctx.channelId);
+    if (source === "fallback") this.fallbackAnnounced.add(ctx.channelId);
+    else if (source !== "kept") this.fallbackAnnounced.delete(ctx.channelId);
+    const announce = source !== "kept" && !repeated;
+    this.log.info({ channel: ctx.channelId, message_id: ctx.messageId, source, announced: announce,
       model: selection.model, effort: selection.effort ?? null }, "Auto route selected");
-    return { selection, usage };
+    return { selection, usage, announce };
   }
   async close() {
     this.shutdown.abort(new Error("Shutdown"));

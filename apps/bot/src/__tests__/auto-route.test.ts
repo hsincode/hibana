@@ -243,7 +243,8 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
   })) as never;
   const sent: string[] = [];
   const order: string[] = [];
-  const notice = () => sent.filter((text) => text.startsWith("Auto Routing")).at(-1);
+  const notices = () => sent.filter((text) => text.startsWith("Auto Routing"));
+  const notice = () => notices().at(-1);
   bot.tools.tools = () => [];
   let now = Date.now();
   bot.routes = new RouteMemory(() => now);
@@ -275,9 +276,12 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
     await bot.respond("ありがとう", { ...ctx });
     expect(used.at(-1)).toBe("claude-opus-5-5/medium");
     expect(routings).toBe(1);
+    // Only a newly chosen route is announced, not a turn that keeps it.
+    expect(notices()).toHaveLength(1);
     // Naming a model asks Jev again; a mention keeps the route, a request replaces it.
     await bot.respond("Sonnet と Opus の違いは？", { ...ctx });
     expect(used.at(-1)).toBe("claude-opus-5-5/medium");
+    expect(notices()).toHaveLength(1);
     requested = "sonnet";
     await bot.respond("ここからは Sonnet で答えて", { ...ctx });
     expect(used.at(-1)).toBe("claude-sonnet-5-5/medium");
@@ -286,6 +290,7 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
     await bot.respond("続けて", { ...ctx });
     expect(used.at(-1)).toBe("claude-sonnet-5-5/medium");
     expect(routings).toBe(3);
+    expect(notices()).toHaveLength(2);
     requested = "opus";
     score = 5;
     await bot.respond("Opus に戻して", { ...ctx });
@@ -297,10 +302,16 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
     now += ROUTE_CACHE_TTL_MS - 1;
     await bot.respond("続き", { ...ctx });
     expect(routings).toBe(1);
+    expect(notices()).toHaveLength(3);
+    // Past the cache TTL the conversation is routed, and announced, again.
     now += ROUTE_CACHE_TTL_MS;
     await bot.respond("こんにちは", { ...ctx });
     expect(used.at(-1)).toBe("claude-haiku-5-5/medium");
     expect(routings).toBe(2);
+    expect(notices()).toEqual([
+      "Auto Routing: **Opus 5.5 Medium**", "Auto Routing: **Sonnet 5.5 Medium**",
+      "Auto Routing: **Opus 5.5 Medium**", "Auto Routing: **Haiku 5.5 Medium**",
+    ]);
     // Cleared history has no cache to keep.
     bot.history.clear(ctx.channelId);
     score = new Error("Jev: HTTP 503");
@@ -308,10 +319,18 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
     expect(used.at(-1)).toBe("claude-haiku-5-5/high");
     expect(notice()).toBe("Auto Routing: **Haiku 5.5 High**");
     expect(routings).toBe(3);
+    expect(notices()).toHaveLength(5);
+    // While Jev stays down every turn falls back; only the first one says so.
+    await bot.respond("まだ？", { ...ctx });
+    expect(used.at(-1)).toBe("claude-haiku-5-5/high");
+    expect(routings).toBe(4);
+    expect(notices()).toHaveLength(5);
     score = 4;
     await bot.respond("実装して", { ...ctx });
     expect(used.at(-1)).toBe("claude-sonnet-5-5/xhigh");
-    expect(routings).toBe(4);
+    expect(routings).toBe(5);
+    expect(notice()).toBe("Auto Routing: **Sonnet 5.5 XHigh**");
+    expect(notices()).toHaveLength(6);
     expect(new Set(used).has("auto/high")).toBe(false);
   } finally { await bot.close(); await rm(dir, { recursive: true, force: true }); }
 });

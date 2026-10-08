@@ -11,6 +11,7 @@ import {
   RouteMemory,
   concreteSelection,
   evaluateRoute,
+  routeHeader,
   routeFallback,
   routeInput,
 } from "../auto-route";
@@ -163,6 +164,8 @@ test("a routed selection never sends max, and the auto preset never reaches the 
   expect(bodies[0]!.output_config).toEqual({ effort: "xhigh" });
   await client.complete({ provider: "anthropic", model: "auto", effort: "max" }, ask, []);
   expect(bodies[1]).toMatchObject({ model: "claude-haiku-5-5", output_config: { effort: "high" } });
+  expect(routeHeader({ provider: "anthropic", model: "claude-sonnet-5-5", effort: "xhigh", routed: true }))
+    .toBe("Auto Routing: **Sonnet 5.5 XHigh**");
   expect(concreteSelection({ provider: "codex_plus", model: "gpt-6-luna" })).toEqual({ provider: "codex_plus", model: "gpt-6-luna" });
 });
 
@@ -213,8 +216,9 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
   bot.runtime.snapshot.user_roles[ctx.userId] = "premium";
   bot.client.channels.fetch = (async () => ({
     id: ctx.channelId, isSendable: () => true, sendTyping: async () => {},
-    send: async () => ({ id: "40000", edit: async () => {} }),
+    send: async (value: { content: string }) => { sent.push(value.content); return { id: "40000", edit: async () => {} }; },
   })) as never;
+  const sent: string[] = [];
   bot.tools.tools = () => [];
   let now = Date.now();
   bot.routes = new RouteMemory(() => now);
@@ -234,6 +238,9 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
   try {
     await bot.respond("難しい設計の相談", { ...ctx });
     expect(used.at(-1)).toBe("claude-opus-5-5/medium");
+    // The reply names the route; the stored history does not.
+    expect(sent.at(-1)).toBe("Auto Routing: **Opus 5.5 Medium**\nok");
+    expect(JSON.stringify(bot.history.get(ctx.channelId, undefined, JSON.stringify(bot.runtime.resolve(undefined, ctx.userId).selection), false, 0))).not.toContain("Auto Routing");
     // An easy follow-up stays on the routed model without asking Jev.
     score = 0;
     await bot.respond("ありがとう", { ...ctx });
@@ -252,6 +259,7 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
     score = new Error("Jev: HTTP 503");
     await bot.respond("もう一度", { ...ctx });
     expect(used.at(-1)).toBe("claude-haiku-5-5/high");
+    expect(sent.at(-1)).toBe("Auto Routing: **Haiku 5.5 High**\nok");
     expect(routings).toBe(3);
     score = 4;
     await bot.respond("実装して", { ...ctx });

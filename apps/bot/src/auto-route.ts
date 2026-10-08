@@ -2,6 +2,7 @@ import {
   AUTO_ROUTE_FALLBACK,
   AUTO_ROUTE_LEVELS,
   AUTO_ROUTE_PROVIDER,
+  MODEL_PRESETS,
   isAutoRoute,
 } from "@hibana/shared/catalog";
 import type { Selection } from "./config";
@@ -78,6 +79,18 @@ export async function evaluateRoute(
   // Jev scores a position on the scale with a fraction; the nearest level wins.
   const level = Math.round(answer.score);
   return { level, selection: routeLevel(level), usage: result.usage };
+}
+
+const effortNames: Record<string, string> = { low: "Low", medium: "Medium", high: "High", xhigh: "XHigh" };
+
+/** First line of an auto-routed reply, e.g. "Auto Routing: **Opus 5.5 Medium**".
+ *  It shows what the turn ran, so Ultra's xhigh appears instead of the level's
+ *  effort. Discord only: it is not stored in the history. */
+export function routeHeader(selection: Selection): string {
+  const preset = MODEL_PRESETS.find((p) => p.provider === selection.provider && p.model === selection.model);
+  const model = preset ? preset.label.split("/").slice(1).join("/").trim().replace(/^Claude /, "") : selection.model;
+  const effort = routedEffort(selection.effort) ?? "";
+  return `Auto Routing: **${[model, effortNames[effort] ?? effort].filter(Boolean).join(" ")}**`;
 }
 
 type Route = { selection: Selection; at: number };

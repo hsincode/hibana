@@ -33,7 +33,7 @@ import {
   type FailurePhase,
 } from "./failure";
 import { addUsage, emptyUsage, type Context, type Message, type Usage } from "./types";
-import { isAutoRoute, routeFallback, RouteMemory } from "./auto-route";
+import { isAutoRoute, routeFallback, routeHeader, RouteMemory } from "./auto-route";
 import {
   hasUltracodeKeyword,
   systemReminder,
@@ -567,10 +567,12 @@ export class Hibana {
         );
       }
       let routeUsage: Usage | undefined;
+      let header: string | undefined;
       if (isAutoRoute(settings.selection)) {
         const route = await this.autoRoute(ctx, text, prior, pending);
         routeUsage = route.usage;
         selection = turnSelection(route.selection, ultracode);
+        header = routeHeader(selection);
       }
       failurePhase = "prompt_assembly";
       const prefix = await assemblePrompt(
@@ -649,7 +651,7 @@ export class Hibana {
           }),
         );
       failurePhase = "discord_send";
-      await send(result.text);
+      await send(header ? `${header}\n${result.text}` : result.text);
       failurePhase = "history_store";
       this.history.put(
         ctx.channelId,

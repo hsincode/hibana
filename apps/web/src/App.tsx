@@ -12,7 +12,7 @@ import {
   type RoleModel,
   type SubagentMode,
 } from "@hibana/shared/settings";
-import { REASONING_EFFORTS, isAutoRoute } from "@hibana/shared/catalog";
+import { REASONING_EFFORTS, isAutoRoute, subagentsUnsupported } from "@hibana/shared/catalog";
 import { Select, ThemeMenu } from "./controls";
 import {
   useCallback,
@@ -1362,7 +1362,9 @@ function SubagentPanel({
       id="agents"
       icon={<Icon.cpu />}
       title="サブエージェント"
-      desc="変更は次のメッセージから反映され、処理中の応答には適用されません。"
+      desc={`変更は次のメッセージから反映され、処理中の応答には適用されません。${subagentsUnsupported(s.selection?.provider)
+        ? " Anthropic のモデル（Auto を含む）ではサブエージェントは常に off で動き、この設定は他のモデルに切り替えると使われます。"
+        : ""}`}
     >
       <div className={`mode-grid${inherit ? " has-inherit" : ""}`} role="radiogroup" aria-label="サブエージェント">
         {modeChoices.map((o) => (

@@ -33,7 +33,7 @@ import {
   type FailurePhase,
 } from "./failure";
 import { addUsage, emptyUsage, type Context, type Message, type Usage } from "./types";
-import { isAutoRoute, routeFallback, routeHeader, RouteMemory } from "./auto-route";
+import { isAutoRoute, namesModel, routeFallback, routeHeader, RouteMemory } from "./auto-route";
 import {
   hasUltracodeKeyword,
   systemReminder,
@@ -764,16 +764,24 @@ export class Hibana {
     let usage: Usage | undefined;
     let selection = kept;
     let source = "kept";
-    if (!selection) {
+    // While a route is kept, Jev is asked only when the message names a
+    // model, and only a model the user requested replaces the route.
+    if (!kept || namesModel(text)) {
       const decided = await this.tools.route(ctx, text
         ? [...prior, { role: "user", content: text, images: ctx.images }]
         : pending?.messages ?? prior);
       usage = decided?.usage;
-      source = decided ? "jev" : "fallback";
-      selection = decided?.selection ?? routeFallback();
-      if (decided) this.routes.set(ctx.channelId, selection);
-      else this.routes.clear(ctx.channelId);
+      if (!kept) {
+        source = decided ? decided.requested ? "requested" : "jev" : "fallback";
+        selection = decided?.selection ?? routeFallback();
+      } else if (decided?.requested && decided.selection.model !== kept.model) {
+        source = "requested";
+        selection = decided.selection;
+      }
+      if (selection && source !== "fallback" && source !== "kept") this.routes.set(ctx.channelId, selection);
+      else if (!kept) this.routes.clear(ctx.channelId);
     }
+    selection ??= routeFallback();
     this.log.info({ channel: ctx.channelId, message_id: ctx.messageId, source,
       model: selection.model, effort: selection.effort ?? null }, "Auto route selected");
     return { selection, usage };

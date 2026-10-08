@@ -3,6 +3,7 @@ import {
   canonicalPresetId,
   isAutoRoute,
   serverShared,
+  subagentsUnsupported,
   unpublishedPresetIds,
   premiumPresetIds,
 } from "@hibana/shared/catalog";
@@ -198,7 +199,9 @@ export class Runtime {
     const multiAgent = pick(user.multi_agent, guild.multi_agent!);
     const context = user.context ??
       (guildId ? guild.context : this.snapshot.user_contexts[userId || ""] ?? null);
-    const subagentEnabled = pick(user.subagent_enabled, guild.subagent_enabled!);
+    // The stored switches are kept; they apply again under another provider.
+    const subagentEnabled = !subagentsUnsupported(selection.provider) &&
+      pick(user.subagent_enabled, guild.subagent_enabled!);
     const ultraMode = multiAgent || pick(user.ultra_mode, guild.ultra_mode!);
     return {
       ...guild,

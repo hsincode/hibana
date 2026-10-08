@@ -28,7 +28,7 @@ import {
   type ReferenceOptions,
 } from "../workflow/prompts";
 import { evaluateRoute, isAutoRoute, ROUTE_TIMEOUT_MS } from "../auto-route";
-import type { Selection } from "../config";
+type RouteDecision = Awaited<ReturnType<typeof evaluateRoute>>;
 import { evaluateTriage, shouldPrestartExplorer, TRIAGE_TIMEOUT_MS, type Triage } from "../jev-triage";
 import definitions from "./definitions.json";
 import codexDefinitions from "./codex-definitions.json";
@@ -240,7 +240,7 @@ export class ToolRegistry {
   /** Auto routing: Jev scores the request's difficulty once, before the turn.
    *  Silent like the triage. Any failure returns undefined and the caller
    *  uses the fallback model. */
-  async route(ctx: Context, messages: readonly Message[]): Promise<{ level: number; selection: Selection; usage: Usage } | undefined> {
+  async route(ctx: Context, messages: readonly Message[]): Promise<RouteDecision | undefined> {
     const enabled = () => {
       const settings = this.runtime.resolve(ctx.guildId, ctx.userId);
       return this.runtime.config.toolsEnabled && this.runtime.config.subagentEnabled &&
@@ -248,7 +248,7 @@ export class ToolRegistry {
     };
     const started = performance.now();
     let verdict = "disabled";
-    let result: { level: number; selection: Selection; usage: Usage } | undefined;
+    let result: RouteDecision | undefined;
     try {
       if (!enabled()) return undefined;
       verdict = "unavailable";
@@ -270,7 +270,7 @@ export class ToolRegistry {
       // The level only; never the request text or the API response body.
       this.log?.info({
         channel: ctx.channelId, message_id: ctx.messageId, verdict,
-        ...(result ? { level: result.level, model: result.selection.model, effort: result.selection.effort } : {}),
+        ...(result ? { level: result.level, requested: result.requested ?? null, model: result.selection.model, effort: result.selection.effort } : {}),
         elapsed_ms: Math.round(performance.now() - started),
       }, "Jev route finished");
     }

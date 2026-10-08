@@ -34,7 +34,8 @@ test("every catalog model keeps Ultra, Jev evaluation and Jev actions independen
   const ctx = { ...context(), team: {} as Context["team"] };
   runtime.snapshot.user_roles[ctx.userId] = "administrator";
   try {
-    for (const preset of MODEL_PRESETS) {
+    // Anthropic turns always run without subagents (auto-route.test.ts).
+    for (const preset of MODEL_PRESETS.filter(p => p.provider !== "anthropic")) {
       runtime.config.selection = { provider: preset.provider, model: preset.model, effort: "low" };
       for (const ultra of [false, true]) for (const evaluation of [false, true]) for (const actions of [false, true]) {
         runtime.config.ultraMode = ultra;

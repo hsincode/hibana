@@ -11,6 +11,7 @@ import {
   RouteMemory,
   concreteSelection,
   evaluateRoute,
+  namesModel,
   routeHeader,
   routeFallback,
   routeInput,
@@ -38,9 +39,12 @@ const context = (): Context => ({
   guildId: "g1", channelId: "c1", userId: "member", botId: "bot", thread: false, depth: 0, delivered: false,
 });
 const usage = { prompt_tokens: 4, completion_tokens: 1, total_tokens: 5, cached_tokens: 0, cache_write_tokens: 0 };
-const scored = (score: number) => async () => ({
+const scored = (score: number, requested = "none") => async () => ({
   model: "~typesafe/jev-latest",
-  answers: { difficulty: { type: "score" as const, score } },
+  answers: {
+    difficulty: { type: "score" as const, score },
+    requested_model: { type: "choice" as const, choice: requested },
+  },
   usage,
   cost: 0,
 });
@@ -65,7 +69,7 @@ test("Jev's difficulty score picks the nearest level", async () => {
   const input = routeInput(request);
   expect(input.questions.difficulty.criteria).toHaveLength(AUTO_ROUTE_LEVELS.length);
   expect(input.state.latest_user_request).toBe("この関数のバグを直して");
-  expect(JSON.stringify(input.questions)).not.toMatch(/haiku|sonnet|opus/i);
+  expect(JSON.stringify(input.questions.difficulty)).not.toMatch(/haiku|sonnet|opus/i);
   for (const [score, model, effort] of [
     [0, "claude-haiku-5-5", "medium"], [1.4, "claude-haiku-5-5", "high"],
     [1.6, "claude-sonnet-5-5", "medium"], [5, "claude-opus-5-5", "medium"],
@@ -75,6 +79,25 @@ test("Jev's difficulty score picks the nearest level", async () => {
   await expect(evaluateRoute(request, async () => ({
     model: "x", answers: { difficulty: { type: "noul" as const, noul: 1 } }, usage, cost: 0,
   }), never)).rejects.toThrow("Invalid Jev route decision");
+  await expect(evaluateRoute(request, async () => ({
+    model: "x", answers: { difficulty: { type: "score" as const, score: 1 } }, usage, cost: 0,
+  }), never)).rejects.toThrow("Invalid Jev route decision");
+});
+
+test("a model the user asks for wins, at its level nearest to the difficulty", async () => {
+  for (const [score, requested, model, effort] of [
+    [0, "opus", "claude-opus-5-5", "medium"], [5, "haiku", "claude-haiku-5-5", "high"],
+    [0, "sonnet", "claude-sonnet-5-5", "medium"], [3, "sonnet", "claude-sonnet-5-5", "high"],
+    [5, "sonnet", "claude-sonnet-5-5", "xhigh"], [0, "haiku", "claude-haiku-5-5", "medium"],
+  ] as const) {
+    const decided = await evaluateRoute(request, scored(score, requested), never);
+    expect(decided.requested).toBe(requested);
+    expect(decided.selection).toEqual({ provider: "anthropic", model, effort, routed: true });
+  }
+  expect((await evaluateRoute(request, scored(5), never)).requested).toBeUndefined();
+  expect(namesModel("Opusで答えて")).toBe(true);
+  expect(namesModel("ソネットにして")).toBe(true);
+  expect(namesModel("ありがとう")).toBe(false);
   await expect(evaluateRoute([], scored(1), never)).rejects.toThrow("No user request");
 });
 
@@ -222,13 +245,13 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
   bot.tools.tools = () => [];
   let now = Date.now();
   bot.routes = new RouteMemory(() => now);
-  let score: number | Error = 5, routings = 0;
+  let score: number | Error = 5, routings = 0, requested = "none";
   bot.tools.jev.decide = (async (input: { questions: Json }) => {
     // The completion check shares this client; only routing is under test.
     if (!input.questions.difficulty) throw new Error("not routing");
     routings++;
     if (score instanceof Error) throw score;
-    return scored(score)();
+    return scored(score, requested)();
   }) as never;
   const used: string[] = [];
   bot.llm.complete = async (selection) => {
@@ -246,6 +269,24 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
     await bot.respond("ありがとう", { ...ctx });
     expect(used.at(-1)).toBe("claude-opus-5-5/medium");
     expect(routings).toBe(1);
+    // Naming a model asks Jev again; a mention keeps the route, a request replaces it.
+    await bot.respond("Sonnet と Opus の違いは？", { ...ctx });
+    expect(used.at(-1)).toBe("claude-opus-5-5/medium");
+    requested = "sonnet";
+    await bot.respond("ここからは Sonnet で答えて", { ...ctx });
+    expect(used.at(-1)).toBe("claude-sonnet-5-5/medium");
+    expect(sent.at(-1)).toBe("Auto Routing: **Sonnet 5.5 Medium**\nok");
+    requested = "none";
+    await bot.respond("続けて", { ...ctx });
+    expect(used.at(-1)).toBe("claude-sonnet-5-5/medium");
+    expect(routings).toBe(3);
+    requested = "opus";
+    score = 5;
+    await bot.respond("Opus に戻して", { ...ctx });
+    expect(used.at(-1)).toBe("claude-opus-5-5/medium");
+    routings = 1;
+    requested = "none";
+    score = 0;
     // The turn above renewed the cache, so the hour counts from it.
     now += ROUTE_CACHE_TTL_MS - 1;
     await bot.respond("続き", { ...ctx });
@@ -267,4 +308,17 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
     expect(routings).toBe(4);
     expect(new Set(used).has("auto/high")).toBe(false);
   } finally { await bot.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test("Anthropic turns run without subagents, whatever the stored mode", async () => {
+  const runtime = new Runtime(config({ MULTI_AGENT: "true" }));
+  runtime.snapshot.user_roles.owner = "premium";
+  expect(runtime.resolve("g1", "member")).toMatchObject({ subagent_enabled: true, multi_agent: true });
+  for (const preset of ["anthropic-auto", "anthropic-haiku-5-5", "anthropic-sonnet-5-5", "anthropic-opus-5-5"]) {
+    await runtime.patch("g1", { preset, subagent_enabled: true, ultra_mode: true }, "owner");
+    expect(runtime.resolve("g1", "member")).toMatchObject({ subagent_enabled: false, ultracode: false });
+  }
+  // The stored switch applies again under another provider.
+  await runtime.patch("g1", { preset: "sol" }, "owner");
+  expect(runtime.resolve("g1", "member").subagent_enabled).toBe(true);
 });

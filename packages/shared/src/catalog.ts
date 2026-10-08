@@ -273,6 +273,11 @@ export const AUTO_ROUTE_LEVELS = [
 /** Used whenever Jev cannot classify the request. */
 export const AUTO_ROUTE_FALLBACK = { model: "claude-haiku-5-5", effort: "high" } as const;
 
+/** Anthropic turns, auto included, run without subagents (#35). */
+export function subagentsUnsupported(provider: string | undefined): boolean {
+  return provider === AUTO_ROUTE_PROVIDER;
+}
+
 export function isAutoRoute(selection: { provider: string; model: string }): boolean {
   return selection.provider === AUTO_ROUTE_PROVIDER && selection.model === AUTO_ROUTE_MODEL;
 }

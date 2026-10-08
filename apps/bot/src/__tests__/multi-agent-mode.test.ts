@@ -57,7 +57,8 @@ test("every catalog model keeps the four subagent modes and both Jev switches in
   const ctx = { ...context(), team: {} as Context["team"] };
   runtime.snapshot.user_roles[ctx.userId] = "administrator";
   try {
-    for (const preset of MODEL_PRESETS)
+    // Anthropic turns always run without subagents (auto-route.test.ts).
+    for (const preset of MODEL_PRESETS.filter((p) => p.provider !== "anthropic"))
       for (const mode of SUBAGENT_MODES) for (const evaluation of [false, true]) for (const actions of [false, true]) {
         runtime.snapshot.user_overrides[ctx.userId] = {
           ...emptyUserOverride(),

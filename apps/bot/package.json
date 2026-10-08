@@ -7,7 +7,8 @@
     "start": "bun src/main.ts",
     "build": "bun build src/main.ts --target=bun --outdir=dist --packages=external",
     "typecheck": "tsc --noEmit",
-    "test": "bun test src"
+    "test": "bun test src",
+    "route-eval": "bun src/route-eval.ts"
   },
   "dependencies": {
     "@hibana/shared": "workspace:*",

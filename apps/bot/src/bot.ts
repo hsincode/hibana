@@ -567,12 +567,13 @@ export class Hibana {
         );
       }
       let routeUsage: Usage | undefined;
-      let header: string | undefined;
       if (isAutoRoute(settings.selection)) {
         const route = await this.autoRoute(ctx, text, prior, pending);
         routeUsage = route.usage;
         selection = turnSelection(route.selection, ultracode);
-        header = routeHeader(selection);
+        // Its own message, sent as soon as the route is known, so it precedes
+        // the turn's progress messages and the reply.
+        await send(routeHeader(selection));
       }
       failurePhase = "prompt_assembly";
       const prefix = await assemblePrompt(
@@ -651,7 +652,7 @@ export class Hibana {
           }),
         );
       failurePhase = "discord_send";
-      await send(header ? `${header}\n${result.text}` : result.text);
+      await send(result.text);
       failurePhase = "history_store";
       this.history.put(
         ctx.channelId,

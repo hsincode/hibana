@@ -239,9 +239,11 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
   bot.runtime.snapshot.user_roles[ctx.userId] = "premium";
   bot.client.channels.fetch = (async () => ({
     id: ctx.channelId, isSendable: () => true, sendTyping: async () => {},
-    send: async (value: { content: string }) => { sent.push(value.content); return { id: "40000", edit: async () => {} }; },
+    send: async (value: { content: string }) => { sent.push(value.content); order.push("notice"); return { id: "40000", edit: async () => {} }; },
   })) as never;
   const sent: string[] = [];
+  const order: string[] = [];
+  const notice = () => sent.filter((text) => text.startsWith("Auto Routing")).at(-1);
   bot.tools.tools = () => [];
   let now = Date.now();
   bot.routes = new RouteMemory(() => now);
@@ -255,14 +257,18 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
   }) as never;
   const used: string[] = [];
   bot.llm.complete = async (selection) => {
+    if (order.length < 2) order.push("model");
     used.push(`${selection.model}/${selection.effort}`);
     return { message: { role: "assistant", content: "ok" }, usage, incomplete: false };
   };
   try {
     await bot.respond("難しい設計の相談", { ...ctx });
     expect(used.at(-1)).toBe("claude-opus-5-5/medium");
-    // The reply names the route; the stored history does not.
-    expect(sent.at(-1)).toBe("Auto Routing: **Opus 5.5 Medium**\nok");
+    // The route is announced before the model runs, as its own message, and
+    // the stored history does not carry it.
+    // (The failing completion-check mock adds a progress message in between.)
+    expect([sent[0], sent.at(-1)]).toEqual(["Auto Routing: **Opus 5.5 Medium**", "ok"]);
+    expect(order.slice(0, 2)).toEqual(["notice", "model"]);
     expect(JSON.stringify(bot.history.get(ctx.channelId, undefined, JSON.stringify(bot.runtime.resolve(undefined, ctx.userId).selection), false, 0))).not.toContain("Auto Routing");
     // An easy follow-up stays on the routed model without asking Jev.
     score = 0;
@@ -275,7 +281,7 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
     requested = "sonnet";
     await bot.respond("ここからは Sonnet で答えて", { ...ctx });
     expect(used.at(-1)).toBe("claude-sonnet-5-5/medium");
-    expect(sent.at(-1)).toBe("Auto Routing: **Sonnet 5.5 Medium**\nok");
+    expect(notice()).toBe("Auto Routing: **Sonnet 5.5 Medium**");
     requested = "none";
     await bot.respond("続けて", { ...ctx });
     expect(used.at(-1)).toBe("claude-sonnet-5-5/medium");
@@ -300,7 +306,7 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
     score = new Error("Jev: HTTP 503");
     await bot.respond("もう一度", { ...ctx });
     expect(used.at(-1)).toBe("claude-haiku-5-5/high");
-    expect(sent.at(-1)).toBe("Auto Routing: **Haiku 5.5 High**\nok");
+    expect(notice()).toBe("Auto Routing: **Haiku 5.5 High**");
     expect(routings).toBe(3);
     score = 4;
     await bot.respond("実装して", { ...ctx });

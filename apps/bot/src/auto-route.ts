@@ -26,9 +26,9 @@ const criteria = [
   "Greeting, small talk, or a one-line factual answer.",
   "A short explanation, translation, summary or rewrite of supplied text, or a simple lookup.",
   "Ordinary multi-step work: writing or changing code, research across several sources, or a structured document.",
-  "Demanding work that needs careful reasoning: debugging, design trade-offs, or analysis with many constraints.",
-  "Long or intricate work where mistakes are costly: large changes across files, or deep multi-source investigation.",
-  "The hardest requests: novel problems, subtle proofs or architecture, or expert judgment under ambiguity.",
+  "Demanding but familiar work that needs careful reasoning: debugging a failure that can be reproduced, weighing design trade-offs, or analysis with several constraints.",
+  "Large work that follows established practice: big changes across many files, long documents, or a broad investigation, where the difficulty is volume rather than insight.",
+  "Work that needs deep or original reasoning, where one subtle mistake invalidates the result: proofs and formal arguments, root causes of rare concurrency or distributed-system failures, novel algorithms or protocols, security analysis of a design, or expert judgment under conflicting or ambiguous constraints.",
 ];
 if (criteria.length !== AUTO_ROUTE_LEVELS.length)
   throw new Error("Auto route criteria must match AUTO_ROUTE_LEVELS");
@@ -113,9 +113,8 @@ export async function evaluateRoute(
 
 const effortNames: Record<string, string> = { low: "Low", medium: "Medium", high: "High", xhigh: "XHigh" };
 
-/** First line of an auto-routed reply, e.g. "Auto Routing: **Opus 5.5 Medium**".
- *  It shows what the turn ran, so Ultra's xhigh appears instead of the level's
- *  effort. Discord only: it is not stored in the history. */
+/** Notice posted once a turn's route is known, e.g. "Auto Routing: **Opus 5.5
+ *  Medium**". Discord only: it is not stored in the history. */
 export function routeHeader(selection: Selection): string {
   const preset = MODEL_PRESETS.find((p) => p.provider === selection.provider && p.model === selection.model);
   const model = preset ? preset.label.split("/").slice(1).join("/").trim().replace(/^Claude /, "") : selection.model;

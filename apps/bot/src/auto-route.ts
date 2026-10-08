@@ -24,8 +24,7 @@ export const ROUTE_CACHE_TTL_MS = 3600000;
 // request only; Jev never sees model names.
 const criteria = [
   "Greeting, small talk, or a one-line factual answer.",
-  "A short explanation, translation, summary or rewrite of supplied text.",
-  "A routine task with a few steps: a simple lookup, a small script, or light use of tools.",
+  "A short explanation, translation, summary or rewrite of supplied text, or a simple lookup.",
   "Ordinary multi-step work: writing or changing code, research across several sources, or a structured document.",
   "Demanding work that needs careful reasoning: debugging, design trade-offs, or analysis with many constraints.",
   "Long or intricate work where mistakes are costly: large changes across files, or deep multi-source investigation.",

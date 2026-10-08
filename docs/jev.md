@@ -166,17 +166,18 @@ Discord への通知は出さず、Jev の使用回数表示にも数えませ�
 
 判断記録は #35 です。プリセット「Anthropic / Auto (Jev)」（`anthropic-auto`）を選ぶと、Jev が依頼の難易度を判定し、Anthropic の API（`ANTHROPIC_API_KEY`）で使うモデルと effort を決めます。他のプリセットの動作は変わりません。
 
-判定は `score` 型の質問 1 問で、難易度の説明を易しい順に 7 つ並べます。Jev が返す位置（端数あり）を四捨五入し、次の表の段に対応させます。Jev にはモデル名を渡しません。入力は Multi-Agent のトリアージと同じで、最新の依頼（4,000字まで）、画像の枚数、直前2往復の会話だけです。
+判定は `score` 型の質問 1 問で、難易度の説明を易しい順に 6 つ並べます。Jev が返す位置（端数あり）を四捨五入し、次の表の段に対応させます。Jev にはモデル名を渡しません。入力は Multi-Agent のトリアージと同じで、最新の依頼（4,000字まで）、画像の枚数、直前2往復の会話だけです。
 
 | 段 | モデル | effort |
 |---|---|---|
 | 0 | Haiku 5.5 | medium |
 | 1 | Haiku 5.5 | high |
-| 2 | Haiku 5.5 | xhigh |
-| 3 | Sonnet 5.5 | medium |
-| 4 | Sonnet 5.5 | high |
-| 5 | Sonnet 5.5 | xhigh |
-| 6 | Opus 5.5 | medium |
+| 2 | Sonnet 5.5 | medium |
+| 3 | Sonnet 5.5 | high |
+| 4 | Sonnet 5.5 | xhigh |
+| 5 | Opus 5.5 | medium |
+
+当初の表にあった Haiku 5.5 / xhigh は、本人の指示で routing の対象から外しました（#35、2026-10-08）。Ultra が ON の間に Haiku へ routing された場合は、既存の Ultra の仕様で xhigh になります。
 
 - **max は使いません。** 表に max は無く、routing で決まったモデルへのリクエストは、子エージェントが effort の方針で max を指定された場合も含めて xhigh に下げて送ります。
 - **保存済みの effort は使いません。** ダッシュボードや `/switch effort` の値は、このプリセットの間は無視します。Ultra（Ultracode）が ON の間は、他のモデルと同じく root が xhigh で動きます。

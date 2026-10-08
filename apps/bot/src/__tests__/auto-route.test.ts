@@ -47,9 +47,9 @@ const scored = (score: number) => async () => ({
 const request: Message[] = [{ role: "user", content: "この関数のバグを直して", turnStart: true }];
 const never = new AbortController().signal;
 
-test("the routing table is the owner's seven levels and never uses max", () => {
+test("the routing table is the owner's six levels and never uses max", () => {
   expect(AUTO_ROUTE_LEVELS.map((l) => `${l.model}/${l.effort}`)).toEqual([
-    "claude-haiku-5-5/medium", "claude-haiku-5-5/high", "claude-haiku-5-5/xhigh",
+    "claude-haiku-5-5/medium", "claude-haiku-5-5/high",
     "claude-sonnet-5-5/medium", "claude-sonnet-5-5/high", "claude-sonnet-5-5/xhigh",
     "claude-opus-5-5/medium",
   ]);
@@ -67,8 +67,8 @@ test("Jev's difficulty score picks the nearest level", async () => {
   expect(input.state.latest_user_request).toBe("この関数のバグを直して");
   expect(JSON.stringify(input.questions)).not.toMatch(/haiku|sonnet|opus/i);
   for (const [score, model, effort] of [
-    [0, "claude-haiku-5-5", "medium"], [2.4, "claude-haiku-5-5", "xhigh"],
-    [2.6, "claude-sonnet-5-5", "medium"], [6, "claude-opus-5-5", "medium"],
+    [0, "claude-haiku-5-5", "medium"], [1.4, "claude-haiku-5-5", "high"],
+    [1.6, "claude-sonnet-5-5", "medium"], [5, "claude-opus-5-5", "medium"],
   ] as const)
     expect((await evaluateRoute(request, scored(score), never)).selection)
       .toEqual({ provider: "anthropic", model, effort, routed: true });
@@ -116,9 +116,9 @@ test("routing asks Jev once and reports nothing when Jev is unavailable", async 
   let calls = 0;
   const decide: ToolRegistry["jev"]["decide"] = async () => { calls++; return scored(4)(); };
   const routed = await routeWith({}, decide);
-  expect(routed.result?.selection).toEqual({ provider: "anthropic", model: "claude-sonnet-5-5", effort: "high", routed: true });
+  expect(routed.result?.selection).toEqual({ provider: "anthropic", model: "claude-sonnet-5-5", effort: "xhigh", routed: true });
   expect(routed.result?.usage).toEqual(usage);
-  expect(routed.log).toMatchObject({ verdict: "classified", level: 4, model: "claude-sonnet-5-5", effort: "high" });
+  expect(routed.log).toMatchObject({ verdict: "classified", level: 4, model: "claude-sonnet-5-5", effort: "xhigh" });
   expect(JSON.stringify(routed.log)).not.toContain("バグ");
   expect(calls).toBe(1);
 
@@ -222,7 +222,7 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
   bot.tools.tools = () => [];
   let now = Date.now();
   bot.routes = new RouteMemory(() => now);
-  let score: number | Error = 6, routings = 0;
+  let score: number | Error = 5, routings = 0;
   bot.tools.jev.decide = (async (input: { questions: Json }) => {
     // The completion check shares this client; only routing is under test.
     if (!input.questions.difficulty) throw new Error("not routing");
@@ -263,7 +263,7 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
     expect(routings).toBe(3);
     score = 4;
     await bot.respond("実装して", { ...ctx });
-    expect(used.at(-1)).toBe("claude-sonnet-5-5/high");
+    expect(used.at(-1)).toBe("claude-sonnet-5-5/xhigh");
     expect(routings).toBe(4);
     expect(new Set(used).has("auto/high")).toBe(false);
   } finally { await bot.close(); await rm(dir, { recursive: true, force: true }); }

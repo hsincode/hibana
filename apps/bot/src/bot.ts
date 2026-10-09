@@ -26,6 +26,7 @@ import { commands, handleCommand } from "./commands";
 import { imagePrompt, shouldRespond, splitMessage } from "./triggers";
 import { assemblePrompt } from "./harness";
 import { atomicJson, readJson, Serial } from "./io";
+import { UsageLedger } from "./usage-ledger";
 import {
   classifyFailure,
   httpStatusOf,
@@ -87,6 +88,7 @@ export class Hibana {
   readonly llm: LlmClient;
   readonly agent: Agent;
   readonly history: History;
+  readonly usage: UsageLedger;
   routes = new RouteMemory();
   private fallbackAnnounced = new Set<string>();
   readonly tools: ToolRegistry;
@@ -117,9 +119,17 @@ export class Hibana {
       partials: [Partials.Channel],
     });
     this.runtime = new Runtime(config);
+    this.usage = new UsageLedger(
+      join(config.dataDir, "anthropic_usage.json"),
+      undefined,
+      (e) => this.report(e),
+    );
     this.llm = new LlmClient(config, fetch, {
       onRetry: notice => this.log.warn(notice, "LLM reconnecting"),
-      onCompletion: record => this.log.info(record, "LLM request completed"),
+      onCompletion: record => {
+        this.log.info(record, "LLM request completed");
+        this.usage.record(record);
+      },
     });
     this.agent = new Agent(this.llm);
     this.history = new History(config);
@@ -157,6 +167,9 @@ export class Hibana {
     await this.tools.load();
     await this.sync.start();
     this.checkpoints = await readJson(this.checkpointPath, {});
+    // A damaged ledger must not keep the bot offline; it then stays in memory
+    // and the file is left untouched for inspection.
+    await this.usage.load().catch((e) => this.report(e));
     this.client.on(Events.Error, (e) => this.report(e));
     this.client.on(Events.GuildCreate, (guild) => this.track(this.runtime.initializeGuild(guild.id)));
     this.client.on(Events.MessageCreate, (m) => this.track(this.onMessage(m)));
@@ -188,6 +201,7 @@ export class Hibana {
             this.history,
             this.voice,
             (ctx) => this.retry(ctx),
+            this.usage,
           ),
         );
     });
@@ -815,6 +829,7 @@ export class Hibana {
     await this.tools.close();
     await Promise.allSettled([...this.tasks]);
     await this.runtime.persist();
+    await this.usage.flush();
     this.client.destroy();
   }
 }

@@ -26,6 +26,13 @@ export function retryDelay(value: string | null, attempt: number, now = Date.now
     : Math.min(20_000, 200 * 2 ** attempt) * (0.9 + 0.2 * random);
 }
 
+// Anthropic sends `request-id`, OpenAI-compatible APIs `x-request-id`. Only
+// an id-shaped value is kept, never an arbitrary header.
+function requestId(response: Response | undefined): string | undefined {
+  const id = response?.headers.get("request-id") ?? response?.headers.get("x-request-id");
+  return id && /^[A-Za-z0-9_.:-]{1,128}$/.test(id) ? id : undefined;
+}
+
 export async function requestCompletion<T>(options: {
   fetch: (signal: AbortSignal) => Promise<Response>;
   read: (response: Response, signal: AbortSignal, activity: () => void) => Promise<T>;
@@ -73,6 +80,8 @@ export async function requestCompletion<T>(options: {
           : response?.headers.get("content-type")?.includes("application/json") ? "application/json" : "missing_or_other",
         reason: controller.signal.aborted ? "idle_timeout" : error instanceof SyntaxError ? "invalid_json"
           : error instanceof ProviderError ? "provider_error" : "transport_error",
+        request_id: requestId(response),
+        retries: retries.request + retries.stream,
       };
       if (!failure.retryable) throw failure;
     } finally {

@@ -68,3 +68,24 @@ classification; this change adds evidence rather than changing retry policy.
 Tests cover SSE failures, HTTP fallback and malformed JSON retries, including
 checks that private upstream content is absent. Earlier failures cannot be
 reconstructed from these new fields.
+
+## 失敗の詳細の表示（#42）
+
+2026-10-09 から、どこで失敗したかを Discord と記録に出します。
+
+- Discord の再接続の表示と最終的な失敗の通知に、固定の語だけを付けます。
+  段階（`送信時` = 応答が始まる前、`受信中` = 応答の途中）と、原因（`HTTP 529` のような
+  ステータス、`overloaded_error` のようなプロバイダのエラーの種類、`無応答で打ち切り`・
+  `接続切断`・`不正な応答`・`応答が途中で終了`のどれか）です。最終的な通知には再試行の回数も
+  付けます。例: 「プロバイダとの通信を再試行しましたが、応答を完了できませんでした。
+  （受信中・overloaded_error・再試行 5 回）」。表示はサーバーのメンバー全員に見えます。
+- エラーの種類は `[a-z_]` だけの語に限り、プロバイダが返した本文は表示も記録もしません。
+- ダッシュボードの会話ログに `failure_stage`・`failure_reason`・`error_type`・`retries`・
+  `effort` を追加しました。API 側でも決まった語・範囲以外は空にします。既存の行は空のままです。
+- bot のログ（`provider_diagnostics`）には、問い合わせ用に Anthropic の `request-id`
+  （OpenAI 互換は `x-request-id`）と再試行の回数も残します。ID の形をした値だけを残し、
+  Discord には出しません。
+
+検証の範囲: 模擬の応答を使う自動テストで、受信中の `overloaded_error`、HTTP 529、無応答、
+接続失敗、途中で切れた応答のそれぞれの表示と、本文が表示に混ざらないことを確認しました。
+実際のプロバイダの障害での表示は未確認です。

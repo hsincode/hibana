@@ -52,6 +52,17 @@ export type LogEntry = {
   http_status: number | null;
   /** Whether a retry checkpoint existed when the failure was reported. */
   has_checkpoint: boolean | null;
+  /** Provider request stage that failed: `request` (before the response
+   *  started) or `stream` (#42). */
+  failure_stage: "request" | "stream" | null;
+  /** Why it failed: idle_timeout / transport_error / invalid_json / provider_error. */
+  failure_reason: string | null;
+  /** The provider's error type or code (e.g. overloaded_error), [a-z_] only. */
+  error_type: string | null;
+  /** Reconnects spent before the request gave up. */
+  retries: number | null;
+  /** Effort the turn ran at; with auto routing, the routed one. */
+  effort: string | null;
   latency_ms: number | null;
 };
 
@@ -100,6 +111,11 @@ export function parseLogEntry(raw: unknown): LogEntry | null {
   const status = Number(r.http_status);
   const hasCheckpoint =
     typeof r.has_checkpoint === "boolean" ? r.has_checkpoint : null;
+  // Fixed vocabulary only: the bot never sends provider text, and a
+  // malformed producer must not be able to store some here either.
+  const word = (v: unknown, pattern: RegExp) =>
+    typeof v === "string" && pattern.test(v) ? v : null;
+  const retries = Number(r.retries);
   const channel_id = str(r.channel_id);
   const user_id = str(r.user_id);
   if (!channel_id || !user_id) return null;
@@ -124,6 +140,11 @@ export function parseLogEntry(raw: unknown): LogEntry | null {
       ? status
       : null,
     has_checkpoint: hasCheckpoint,
+    failure_stage: r.failure_stage === "request" || r.failure_stage === "stream" ? r.failure_stage : null,
+    failure_reason: word(r.failure_reason, /^(idle_timeout|transport_error|invalid_json|provider_error)$/),
+    error_type: word(r.error_type, /^[a-z][a-z_]{0,63}$/),
+    retries: Number.isInteger(retries) && retries >= 0 && retries <= 100 ? retries : null,
+    effort: word(r.effort, /^[a-z]{1,16}$/),
     latency_ms: Number.isFinite(Number(r.latency_ms))
       ? Number(r.latency_ms)
       : null,

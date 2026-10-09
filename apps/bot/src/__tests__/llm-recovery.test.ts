@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { LlmClient, retryDelay, toResponses, toAnthropic } from "../llm";
 import { loadConfig } from "../config";
 import { Agent } from "../agent";
-import { ProviderError, providerFailureNotice } from "../llm-errors";
+import { ProviderError, failureDetail, providerFailureNotice } from "../llm-errors";
 import type { RetryNotice } from "../llm-request";
 import type { Json, Message } from "../types";
 
@@ -289,4 +289,53 @@ test("HTTP error envelopes expose safe actionable reasons without echoing provid
     }
     expect(requests).toBe(1);
   }
+});
+
+// #42: a failure tells where it happened in fixed words only, never provider text.
+describe("failure detail", () => {
+  const overloaded = () => sse(frame({ type: "error", error: { type: "overloaded_error", message: "secret" } }));
+  const failed = async (llm: LlmClient) => {
+    try { await llm.complete(selection, [], []); } catch (error) { return error as ProviderError; }
+    throw new Error("expected failure");
+  };
+
+  test("a stream that keeps failing names the phase, the error type and the reconnects", async () => {
+    const notices: RetryNotice[] = [];
+    const llm = new LlmClient(config(), async () => overloaded(), { sleep: noWait, onRetry: n => { notices.push(n); } });
+    const error = await failed(llm);
+    expect(failureDetail(notices.at(-1)!.diagnostics, notices.at(-1)!.status)).toBe("受信中・overloaded_error");
+    expect(error.diagnostics).toMatchObject({ phase: "stream", type: "overloaded_error", retries: 5 });
+    expect(providerFailureNotice(error)).toContain("（受信中・overloaded_error・再試行 5 回）");
+    expect(providerFailureNotice(error)).not.toContain("secret");
+  });
+
+  test("HTTP failures, idle timeouts, dropped connections and cut streams each get their own words", async () => {
+    const http = await failed(new LlmClient(config(), async () => new Response("", { status: 529 }), { sleep: noWait }));
+    expect(failureDetail(http.diagnostics, http.status)).toBe("送信時・HTTP 529");
+    const idle = await failed(new LlmClient(config({ LLM_STREAM_IDLE_TIMEOUT_MS: "5" }), async () =>
+      new Response(new ReadableStream(), { headers: { "content-type": "text/event-stream" } }), { sleep: noWait }));
+    expect(failureDetail(idle.diagnostics, idle.status)).toBe("受信中・無応答で打ち切り");
+    const socket = await failed(new LlmClient(config(), async () => { throw new TypeError("socket closed"); }, { sleep: noWait }));
+    expect(failureDetail(socket.diagnostics, socket.status)).toBe("送信時・接続切断");
+    const cut = await failed(new LlmClient(config(), async () => sse(chat({ content: "partial" })), { sleep: noWait }));
+    expect(failureDetail(cut.diagnostics, cut.status)).toBe("受信中・応答が途中で終了");
+  });
+
+  test("the provider's request id is kept for the server log only when it looks like an id", async () => {
+    const withId = (id: string) => async () => new Response("", { status: 400, headers: { "request-id": id } });
+    expect((await failed(new LlmClient(config(), withId("req_011CX9abc"), { sleep: noWait }))).diagnostics.request_id).toBe("req_011CX9abc");
+    expect((await failed(new LlmClient(config(), withId("secret token with spaces"), { sleep: noWait }))).diagnostics.request_id).toBeUndefined();
+  });
+
+  test("the reconnect progress shows the same words", async () => {
+    const progress: string[] = [];
+    let requests = 0;
+    const llm = new LlmClient(config(), async () => ++requests === 1 ? overloaded() : ok(), { sleep: noWait });
+    await new Agent(llm).run({
+      selection, messages: [{ role: "user", content: "hi" }], tools: [],
+      context: { channelId: "1", userId: "2", botId: "3", thread: false, depth: 0, delivered: false, progress: async (text: string) => { progress.push(text); } },
+      maxRounds: 2, temperature: 0.7, nativeSearch: false, execute: async () => "",
+    });
+    expect(progress).toContain("応答を再接続しています（1/5・受信中・overloaded_error）。進捗は保持しています。");
+  });
 });

@@ -1,7 +1,7 @@
 import type { ServiceTier } from "@hibana/shared/settings";
 import type { Config, Selection } from "./config";
 import { recommendedEffort } from "./config";
-import type { Json, Message, ToolCall, ToolDef, Usage } from "./types";
+import { addUsage, type Json, type Message, type ToolCall, type ToolDef, type Usage } from "./types";
 import { apiFailure, ProviderError } from "./llm-errors";
 import { concreteSelection, routedEffort } from "./auto-route";
 import { readCompletion } from "./llm-stream";
@@ -52,12 +52,28 @@ export function protocolFor(
     return "responses";
   return "chat";
 }
+// `auto` means "use the provider's own web search where it has one" (#46).
+// Claude Max stays on Exa: its gateway is not verified to pass server tools.
 export function nativeSearchFor(s: Selection, mode: string, enabled: boolean) {
   return (
     enabled &&
-    (mode === "off" || (mode === "auto" && s.provider === "deepseek"))
+    (mode === "off" || (mode === "auto" && ["deepseek", "anthropic"].includes(s.provider)))
   );
 }
+// Anthropic server tools: the `_20260209` variants (dynamic filtering) need
+// Opus/Sonnet 4.6+; other models get the basic variants. Each is capped at 10
+// uses per request (#46) because every search is billed.
+export function anthropicWebTools(model: string, taken: Set<string>): Json[] {
+  const dynamic = /claude-(opus|sonnet|fable|mythos)-(5|4-[6-9])/.test(model);
+  return [
+    { type: dynamic ? "web_search_20260209" : "web_search_20250305", name: "web_search", max_uses: 10 },
+    { type: dynamic ? "web_fetch_20260209" : "web_fetch_20250910", name: "web_fetch", max_uses: 10 },
+  ].filter(t => !taken.has(t.name)); // A same-named client tool would be a 400.
+}
+// The server-side tool loop stops after a fixed number of iterations with
+// `pause_turn`; resending the paused turn continues it. Bounded so a stuck
+// loop cannot keep spending.
+const MAX_PAUSE_RESUMES = 3;
 export function outputBudget(
   model: string,
   effort: string | undefined,
@@ -241,6 +257,8 @@ export type Completion = {
   message: Message;
   usage: Usage;
   incomplete: boolean;
+  /** Anthropic `pause_turn`: the server tool loop stopped and can be resumed. */
+  paused?: boolean;
 };
 export function normalizeUsage(raw: Json = {}): Usage {
   const cacheRead = Number(
@@ -340,6 +358,7 @@ export function parseCompletion(
       },
       usage: normalizeUsage(data.usage as Json),
       incomplete: data.stop_reason === "max_tokens",
+      paused: data.stop_reason === "pause_turn",
     };
   }
   const choice = (data.choices as Json[])?.[0];
@@ -400,6 +419,8 @@ export class LlmClient {
       temperature?: number;
       nativeSearch?: boolean;
       signal?: AbortSignal;
+      /** Internal: how many `pause_turn` resumes this call already made. */
+      resumes?: number;
       onRetry?: (notice: RetryNotice) => Promise<void> | void;
       trace?: RequestTrace;
     } = {},
@@ -491,6 +512,8 @@ export class LlmClient {
       // Anthropic's own API reads a Bearer token as OAuth; the gateway behind
       // Claude Max accepts either header.
       if (selection.provider === "anthropic") delete headers.Authorization;
+      if (options.nativeSearch && selection.provider === "anthropic")
+        (body.tools as Json[]).push(...anthropicWebTools(selection.model, new Set(tools.map(t => t.function.name))));
       // Claude Max serves only 4.7+ models, which reject `budget_tokens` and
       // sampling parameters; adaptive thinking plus effort is the only shape.
       if (effort === "none") body.thinking = { type: "disabled" };
@@ -543,8 +566,9 @@ export class LlmClient {
     const started = Date.now();
     const audit = this.hooks.onCompletion && options.trace ? this.audit.observe(options.trace, body) : undefined;
     let usageReported = false;
+    let completion: Completion;
     try {
-      const completion = await requestCompletion({
+      completion = await requestCompletion({
         fetch: async (signal) => {
           const requestHeaders = { ...headers };
           if (isChatgpt) {
@@ -598,7 +622,6 @@ export class LlmClient {
       } catch {
         // Measurement must never discard a completion the provider already billed.
       }
-      return completion;
     } catch (error) {
       if (error instanceof ProviderError) {
         error.diagnostics = { ...error.diagnostics, provider: selection.provider, model: selection.model };
@@ -606,5 +629,24 @@ export class LlmClient {
       }
       throw error;
     }
+    if (completion.paused && (options.resumes ?? 0) < MAX_PAUSE_RESUMES) {
+      // Resend with the paused assistant blocks last; the API sees the
+      // trailing server tool use and continues the same turn.
+      const next = await this.complete(selection, [...messages, completion.message], tools, {
+        ...options, resumes: (options.resumes ?? 0) + 1,
+      });
+      const usage = { ...completion.usage };
+      addUsage(usage, next.usage);
+      return {
+        ...next,
+        usage,
+        message: {
+          ...next.message,
+          content: [completion.message.content, next.message.content].filter(Boolean).join("\n"),
+          providerBlocks: [...(completion.message.providerBlocks ?? []), ...(next.message.providerBlocks ?? [])],
+        },
+      };
+    }
+    return completion;
   }
 }

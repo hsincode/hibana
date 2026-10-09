@@ -81,3 +81,11 @@ export function canViewAllGuilds(role: Role): boolean {
 export function canModerate(role: Role): boolean {
   return role === "administrator" || role === "moderator";
 }
+
+/**
+ * Actor may read the Anthropic cost report. Billing is the owner's alone
+ * (decision records #44 and #48), so moderators are left out on purpose.
+ */
+export function canViewAnalytics(role: Role): boolean {
+  return role === "administrator";
+}

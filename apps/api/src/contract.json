@@ -2,6 +2,7 @@
   "routes": [
     "DELETE /api/blocked/:id",
     "DELETE /api/chatgpt/accounts/:id",
+    "GET /api/analytics/cost",
     "GET /api/artifacts",
     "GET /api/blocked",
     "GET /api/catalog",

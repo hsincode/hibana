@@ -174,3 +174,30 @@ APIに届かない間、botは待ち時間を倍にしながら再試行しま�
 スキルのカタログと公開サイトの一覧は、APIが前回受け取った内容から変わったときだけ送ります。botを再起動すると、一度送り直します。
 
 検証は手元のテスト（`apps/bot/src/__tests__/sync.test.ts`）までです。本番でのVercelの使用量は、配信後にUsage画面で確かめる必要があります。
+
+## 利用料ページ（2026-10-09）
+
+Webの `/analytics` は、APIの `GET /api/analytics/cost` を通して Anthropic の Admin API の cost report（`GET /v1/organizations/cost_report`）を表示します（[#48](https://github.com/hsincode/hibana/issues/48)）。見られるのは administrator（`WEB_ADMIN_IDS`）だけです。
+
+APIのVercelプロジェクト（`hibana-api`）の環境変数に `ANTHROPIC_ADMIN_API_KEY` を設定します。botが使う `ANTHROPIC_API_KEY`（workspace のキー）とは別のもので、使えるのは次のどちらかです（[公式ドキュメント](https://platform.claude.com/docs/en/manage-claude/admin-api)）。
+
+- Admin API キー（`sk-ant-admin...`）。組織の admin ロールのメンバーだけが Claude Console で作成できます
+- workspace に紐づかない個人キー（`sk-ant-usr-...`）。権限はキーを発行したアカウントと同じです。アカウントに権限がないと、cost report は403（`permission_error`）を返し、ページにその旨が表示されます
+
+どちらも1つの workspace を超えて使えるキーなので、APIの環境変数以外には置きません。未設定の間、ページには「未設定」と表示されます。
+
+Admin API は個人アカウントでは使えません。Console の組織が Individual Org の間は、設定に Admin keys の項目が出ず、個人キーで cost report を呼んでも403になります。「組織」のページでチーム組織に変換すると、Admin keys でキーを作成できます（2026-10-09に、この手順で作成したキーで取得できました）。
+
+- 日付は UTC 区切りです（cost report が UTC の日単位でしか返さないため）。日本時間では 9:00 に切り替わります
+- 載るのは終わった日（UTC）までです。cost report は進行中の日の行を返さないため、当日ぶんは次の 9:00（日本時間）を過ぎてから表示されます。「今月の残り」も、前日までの確定分で計算した値です
+- 月の1日目（UTC）は、終わった日がないため Anthropic へ問い合わせず、空の月を表示します。範囲に終わった日がない問い合わせに、cost report は400を返すためです
+- 月の予算 $200 は `apps/api/src/analytics.ts` の `MONTHLY_BUDGET_USD` です。1日の目安はこれをその月の日数で割った額です
+- APIは同じ月の結果を、インスタンスごとに1分間メモリに保持します。Anthropic が継続的な取得を1分に1回までとしているためです
+- Priority Tier の費用は cost report に含まれません
+
+検証の範囲（2026-10-09）:
+
+- 手元のテスト（`apps/api/src/analytics.test.ts`、`apps/web/tests/analytics.spec.ts`）。上の2点（当日の行が返らない・1日目の400）は、実際の応答に合わせた代用の応答で再現しています
+- Admin API キーで実際の cost report を手元から呼び、応答の形（`data`・`has_more`・`next_page`、`amount` はセントの文字列、通貨は USD）が公式ドキュメントのとおりであること、APIのルートを通した結果を画面に描画できることを確かめました
+- Individual Org の個人キーでは403（`permission_error: Missing permissions`）でした（同じキーで `GET /v1/organizations/me` は200）
+- 未確認: Console の Cost の表示との照合、本番（Vercel）での動作、日付が変わってから前日の行が載るまでの時間

@@ -51,29 +51,29 @@ describe("summarize", () => {
     expect(days.slice(0, 3).map((d) => d.over)).toEqual([false, true, false]);
   });
 
-  test("a running month lists the days so far and what is left of the budget", () => {
+  test("a running month lists the days that have ended and what is left of the budget", () => {
     const now = at("2026-10-09T03:00:00Z");
     const costs = new Map([
       ["2026-10-01", 10],
       ["2026-10-02", 2.5],
-      ["2026-10-09", 1.25],
+      ["2026-10-08", 1.25],
     ]);
     const m = summarize("2026-10", costs, now, now);
     expect(m.current).toBe(true);
     expect(m.today).toBe("2026-10-09");
     expect(m.days.map((d) => d.date)).toEqual([
-      "2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05",
-      "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09",
+      "2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04",
+      "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08",
     ]);
     expect(m.spent_usd).toBeCloseTo(13.75, 10);
     expect(m.remaining_usd).toBeCloseTo(186.25, 10);
-    expect(m.pace_usd).toBeCloseTo((200 / 31) * 9, 10);
-    // 9th through 31st, today included.
+    expect(m.pace_usd).toBeCloseTo((200 / 31) * 8, 10);
+    // 9th through 31st: today is still ahead, since it has no figure yet.
     expect(m.days_left).toBe(23);
   });
 
   test("a day the report did not return is unknown, not zero", () => {
-    const now = at("2026-10-02T12:00:00Z");
+    const now = at("2026-10-03T12:00:00Z");
     const m = summarize("2026-10", new Map([["2026-10-01", 0]]), now, now);
     expect(m.days).toEqual([
       { date: "2026-10-01", cost_usd: 0, over: false },
@@ -147,15 +147,6 @@ describe("CostReport", () => {
     expect(m.days[2]).toEqual({ date: "2026-09-03", cost_usd: 0, over: false });
     expect(m.days[3].cost_usd).toBeNull();
     expect(m.spent_usd).toBeCloseTo(13.7395, 10);
-  });
-
-  test("a running month is asked for without an end", async () => {
-    const { calls, fetcher } = upstream([{ data: [bucket("2026-10-09", ["50"])], has_more: false, next_page: null }]);
-    const report = new CostReport(ADMIN_KEY, fetcher, () => at("2026-10-09T03:00:00Z"));
-    const m = await report.month("2026-10");
-    expect(calls[0].url.searchParams.has("ending_at")).toBe(false);
-    expect(calls[0].url.searchParams.get("starting_at")).toBe("2026-10-01T00:00:00Z");
-    expect(m.days.at(-1)).toEqual({ date: "2026-10-09", cost_usd: 0.5, over: false });
   });
 
   test("December ends at the next year's January", async () => {
@@ -257,6 +248,88 @@ describe("CostReport", () => {
   });
 });
 
+/**
+ * Answers like the real cost report did on 2026-10-09 (Admin API key, #48):
+ * only days that have ended in UTC come back, whatever `ending_at` says, and a
+ * range that holds no finished day is a 400.
+ */
+function realReport(now: number, cents: Record<string, string>) {
+  const DAY = 86_400_000;
+  const calls: URL[] = [];
+  const fetcher = (async (input: string | URL | Request) => {
+    const url = new URL(String(input));
+    calls.push(url);
+    const today = Math.floor(now / DAY) * DAY;
+    const start = Date.parse(url.searchParams.get("starting_at") ?? "");
+    const asked = url.searchParams.get("ending_at");
+    const end = Math.min(asked ? Date.parse(asked) : Infinity, today);
+    if (!(end > start)) {
+      return Response.json(
+        { type: "error", error: { type: "invalid_request_error", message: "Invalid date range: ending date must be after starting date" } },
+        { status: 400 },
+      );
+    }
+    const limit = Number(url.searchParams.get("limit") ?? 7);
+    const data = [];
+    for (let t = start; t < end && data.length < limit; t += DAY) {
+      const date = new Date(t).toISOString().slice(0, 10);
+      data.push(bucket(date, cents[date] ? [cents[date]] : []));
+    }
+    return Response.json({ data, has_more: false, next_page: null });
+  }) as typeof fetch;
+  return { calls, fetcher };
+}
+
+describe("the report as Anthropic answers it", () => {
+  test("the running day is not reported, so a running month stops at yesterday", async () => {
+    const now = at("2026-10-09T14:24:00Z");
+    const { calls, fetcher } = realReport(now, { "2026-10-08": "40.922816" });
+    const m = await new CostReport(ADMIN_KEY, fetcher, () => now).month("2026-10");
+    expect(m.today).toBe("2026-10-09");
+    expect(m.days.map((d) => d.date)).toEqual([
+      "2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04",
+      "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08",
+    ]);
+    // Every listed day has a figure; none is waiting on a day that is still running.
+    expect(m.days.every((d) => d.cost_usd !== null)).toBe(true);
+    expect(m.days.at(-1)?.cost_usd).toBeCloseTo(0.40922816, 10);
+    expect(m.spent_usd).toBeCloseTo(0.40922816, 10);
+    expect(m.pace_usd).toBeCloseTo((200 / 31) * 8, 10);
+    // The 9th is not counted yet, so it is still ahead: 9th to 31st.
+    expect(m.days_left).toBe(23);
+    // Only finished days are asked for.
+    expect(calls).toHaveLength(1);
+    expect(calls[0].searchParams.get("starting_at")).toBe("2026-10-01T00:00:00Z");
+    expect(calls[0].searchParams.get("ending_at")).toBe("2026-10-09T00:00:00Z");
+  });
+
+  test("on the first day of a month nothing has finished: an empty month and no request", async () => {
+    const now = at("2026-10-01T03:00:00Z");
+    const { calls, fetcher } = realReport(now, {});
+    const m = await new CostReport(ADMIN_KEY, fetcher, () => now).month("2026-10");
+    expect(calls).toHaveLength(0);
+    expect(m).toMatchObject({
+      current: true,
+      today: "2026-10-01",
+      days: [],
+      spent_usd: 0,
+      remaining_usd: 200,
+      pace_usd: 0,
+      days_left: 31,
+    });
+  });
+
+  test("a finished month is unchanged: every day of it", async () => {
+    const now = at("2026-10-09T14:24:00Z");
+    const { calls, fetcher } = realReport(now, { "2026-09-30": "700" });
+    const m = await new CostReport(ADMIN_KEY, fetcher, () => now).month("2026-09");
+    expect(m.days).toHaveLength(30);
+    expect(m.days.at(-1)).toEqual({ date: "2026-09-30", cost_usd: 7, over: true });
+    expect(m.days_left).toBe(0);
+    expect(calls[0].searchParams.get("ending_at")).toBe("2026-10-01T00:00:00Z");
+  });
+});
+
 describe("GET /api/analytics/cost", () => {
   async function setup(adminKey: string | null, pages: (object | Response)[] = []) {
     const env = loadTestEnv({ adminIds: ["admin-1"], anthropicAdminKey: adminKey });
@@ -327,11 +400,13 @@ describe("GET /api/analytics/cost", () => {
   });
 
   test("defaults to the current UTC month", async () => {
-    const { get, calls } = await setup(ADMIN_KEY, [{ data: [bucket("2026-10-09", ["50"])], has_more: false, next_page: null }]);
+    const { get, calls } = await setup(ADMIN_KEY, [{ data: [bucket("2026-10-08", ["50"])], has_more: false, next_page: null }]);
     const body = await (await get("/api/analytics/cost", "admin-1")).json();
     expect(body).toMatchObject({ month: "2026-10", current: true, today: "2026-10-09", days_left: 23 });
-    expect(body.days).toHaveLength(9);
+    expect(body.days).toHaveLength(8);
+    expect(body.days.at(-1)).toEqual({ date: "2026-10-08", cost_usd: 0.5, over: false });
     expect(calls[0].url.searchParams.get("starting_at")).toBe("2026-10-01T00:00:00Z");
+    expect(calls[0].url.searchParams.get("ending_at")).toBe("2026-10-09T00:00:00Z");
   });
 
   test("rejects a malformed or future month before calling Anthropic", async () => {

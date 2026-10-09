@@ -34,7 +34,6 @@ test("a top difficulty score reaches Opus, and nothing below the top level does"
   const top = AUTO_ROUTE_LEVELS.length - 1;
   const model = async (score: number) =>
     (await evaluateRoute(request, decide(score), new AbortController().signal)).selection.model;
-  // 4.84-5.0 is where the real Jev put the Opus cases on 2026-10-08.
-  for (const score of [top - 0.49, 4.84, top]) expect(await model(score)).toBe("claude-opus-5-5");
+  for (const score of [top - 0.49, top]) expect(await model(score)).toBe("claude-opus-5-5");
   for (const score of [0, 2, top - 0.51]) expect(await model(score)).not.toBe("claude-opus-5-5");
 });

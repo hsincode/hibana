@@ -66,7 +66,8 @@ export const ROUTE_CASES: RouteCase[] = [
   ...difficulty(["sonnet", "opus"],
     "分散トランザクションの整合性を保ちながら、モノリスを段階的にマイクロサービスへ分割する移行計画を設計して。障害時のロールバック手順も含めて",
     "このサービスの認証まわり全体のセキュリティレビューをして、攻撃経路を洗い出して",
-    // Expected Opus when first run as a held-out case; Jev scored it 4.03 (Sonnet xhigh).
+    // Expected Opus when first run as a held-out case; on the six-level scale of
+    // 2026-10-08 Jev scored it 4.03 (then Sonnet xhigh, a level since removed).
     "うちの決済基盤を、可用性99.999%と厳密な一貫性を両立させつつ3リージョンに分散させたい。CAP の制約の中でどこを妥協すべきか、根拠付きで設計判断して",
   ),
   ...difficulty(["opus"],

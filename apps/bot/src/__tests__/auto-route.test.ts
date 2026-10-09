@@ -51,10 +51,10 @@ const scored = (score: number, requested = "none") => async () => ({
 const request: Message[] = [{ role: "user", content: "この関数のバグを直して", turnStart: true }];
 const never = new AbortController().signal;
 
-test("the routing table is the owner's six levels and never uses max", () => {
+test("the routing table is the owner's five levels and never uses max", () => {
   expect(AUTO_ROUTE_LEVELS.map((l) => `${l.model}/${l.effort}`)).toEqual([
     "claude-haiku-5-5/medium", "claude-haiku-5-5/high",
-    "claude-sonnet-5-5/medium", "claude-sonnet-5-5/high", "claude-sonnet-5-5/xhigh",
+    "claude-sonnet-5-5/medium", "claude-sonnet-5-5/high",
     "claude-opus-5-5/medium",
   ]);
   for (const level of [...AUTO_ROUTE_LEVELS, AUTO_ROUTE_FALLBACK])
@@ -72,7 +72,8 @@ test("Jev's difficulty score picks the nearest level", async () => {
   expect(JSON.stringify(input.questions.difficulty)).not.toMatch(/haiku|sonnet|opus/i);
   for (const [score, model, effort] of [
     [0, "claude-haiku-5-5", "medium"], [1.4, "claude-haiku-5-5", "high"],
-    [1.6, "claude-sonnet-5-5", "medium"], [5, "claude-opus-5-5", "medium"],
+    [1.6, "claude-sonnet-5-5", "medium"], [3, "claude-sonnet-5-5", "high"],
+    [4, "claude-opus-5-5", "medium"], [5, "claude-opus-5-5", "medium"],
   ] as const)
     expect((await evaluateRoute(request, scored(score), never)).selection)
       .toEqual({ provider: "anthropic", model, effort, routed: true });
@@ -88,7 +89,7 @@ test("a model the user asks for wins, at its level nearest to the difficulty", a
   for (const [score, requested, model, effort] of [
     [0, "opus", "claude-opus-5-5", "medium"], [5, "haiku", "claude-haiku-5-5", "high"],
     [0, "sonnet", "claude-sonnet-5-5", "medium"], [3, "sonnet", "claude-sonnet-5-5", "high"],
-    [5, "sonnet", "claude-sonnet-5-5", "xhigh"], [0, "haiku", "claude-haiku-5-5", "medium"],
+    [5, "sonnet", "claude-sonnet-5-5", "high"], [0, "haiku", "claude-haiku-5-5", "medium"],
   ] as const) {
     const decided = await evaluateRoute(request, scored(score, requested), never);
     expect(decided.requested).toBe(requested);
@@ -137,11 +138,11 @@ async function routeWith(env: NodeJS.ProcessEnv, decide: ToolRegistry["jev"]["de
 
 test("routing asks Jev once and reports nothing when Jev is unavailable", async () => {
   let calls = 0;
-  const decide: ToolRegistry["jev"]["decide"] = async () => { calls++; return scored(4)(); };
+  const decide: ToolRegistry["jev"]["decide"] = async () => { calls++; return scored(3)(); };
   const routed = await routeWith({}, decide);
-  expect(routed.result?.selection).toEqual({ provider: "anthropic", model: "claude-sonnet-5-5", effort: "xhigh", routed: true });
+  expect(routed.result?.selection).toEqual({ provider: "anthropic", model: "claude-sonnet-5-5", effort: "high", routed: true });
   expect(routed.result?.usage).toEqual(usage);
-  expect(routed.log).toMatchObject({ verdict: "classified", level: 4, model: "claude-sonnet-5-5", effort: "xhigh" });
+  expect(routed.log).toMatchObject({ verdict: "classified", level: 3, model: "claude-sonnet-5-5", effort: "high" });
   expect(JSON.stringify(routed.log)).not.toContain("バグ");
   expect(calls).toBe(1);
 
@@ -223,7 +224,7 @@ test("a child asked for the auto preset keeps the parent's route or runs the fal
   runtime.snapshot.user_roles.owner = "premium";
   await runtime.patch("g1", { preset: "anthropic-auto", subagent_model: { mode: "fixed", preset: "anthropic-auto" } }, "owner");
   const ctx = context();
-  const parent = { provider: "anthropic", model: "claude-sonnet-5-5", effort: "xhigh", routed: true };
+  const parent = { provider: "anthropic", model: "claude-sonnet-5-5", effort: "high", routed: true };
   expect(selectChild(runtime, ctx, parent, {})).toMatchObject({ provider: "anthropic", model: "claude-sonnet-5-5", routed: true });
   expect(selectChild(runtime, ctx, { provider: "codex_plus", model: "gpt-6-luna", effort: "max" }, {}))
     .toMatchObject({ provider: "anthropic", model: "claude-haiku-5-5", routed: true });
@@ -325,11 +326,11 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
     expect(used.at(-1)).toBe("claude-haiku-5-5/high");
     expect(routings).toBe(4);
     expect(notices()).toHaveLength(5);
-    score = 4;
+    score = 3;
     await bot.respond("実装して", { ...ctx });
-    expect(used.at(-1)).toBe("claude-sonnet-5-5/xhigh");
+    expect(used.at(-1)).toBe("claude-sonnet-5-5/high");
     expect(routings).toBe(5);
-    expect(notice()).toBe("Auto Routing: **Sonnet 5.5 XHigh**");
+    expect(notice()).toBe("Auto Routing: **Sonnet 5.5 High**");
     expect(notices()).toHaveLength(6);
     expect(new Set(used).has("auto/high")).toBe(false);
   } finally { await bot.close(); await rm(dir, { recursive: true, force: true }); }

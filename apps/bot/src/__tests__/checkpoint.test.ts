@@ -6,7 +6,7 @@ import pino from "pino";
 import { checkpointSnapshot, checkpointInScope, resumeCheckpoint } from "../checkpoint";
 import { Hibana } from "../bot";
 import { loadConfig } from "../config";
-import { toChatMessages, toResponses } from "../llm";
+import { toAnthropic, toChatMessages, toResponses } from "../llm";
 import type { Context, Message, Json } from "../types";
 
 const ctx: Context = { channelId: "10000", userId: "20000", botId: "30000", thread: false, depth: 0, delivered: false };
@@ -123,6 +123,32 @@ test("/retry after an HTTP failure reuses completed tool results and clears the 
     await f.bot.retry(ctx);
     expect(f.sent.at(-1)).toBe("resumed");
     expect(executions).toBe(1);
+    expect(await Bun.file(join(f.dir, "retry_checkpoints.json")).json()).toEqual({});
+  } finally { await f.cleanup(); }
+});
+
+// Production 2026-10-09 (#50): a checkpoint whose last message was the drafted
+// answer went to Anthropic as-is, which rejects it as assistant prefill (HTTP 400).
+test("/retry of a checkpoint ending in an undelivered answer ends the request with a user turn", async () => {
+  const f = await fixture();
+  const channel = await f.bot.client.channels.fetch(ctx.channelId) as unknown as { send: (value: { content: string }) => Promise<unknown> };
+  const deliver = channel.send;
+  let sends = 0;
+  // Only the first delivery fails, so the failure notice still goes out.
+  channel.send = async value => { if (++sends === 1) throw new Error("Discord unavailable"); return deliver(value); };
+  f.bot.client.channels.fetch = (async () => channel) as never;
+  const last: string[] = [];
+  f.bot.llm.complete = async (_selection, messages) => {
+    last.push(toAnthropic(messages).messages.at(-1)!.role);
+    return { message: { role: "assistant", content: last.length === 1 ? "draft" : "resumed" }, usage, incomplete: false };
+  };
+  try {
+    expect(await f.bot.respond("do the task", ctx)).toBe("");
+    const cp = Object.values(await Bun.file(join(f.dir, "retry_checkpoints.json")).json())[0] as { messages: Message[] };
+    expect(cp.messages.at(-1)).toMatchObject({ role: "assistant", content: "draft" });
+    await f.bot.retry(ctx);
+    expect(last).toEqual(["user", "user"]);
+    expect(f.sent.at(-1)).toBe("resumed");
     expect(await Bun.file(join(f.dir, "retry_checkpoints.json")).json()).toEqual({});
   } finally { await f.cleanup(); }
 });

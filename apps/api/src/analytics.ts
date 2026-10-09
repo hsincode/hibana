@@ -4,7 +4,8 @@
 // The report is organization-wide and billing-based, so it also counts
 // requests the bot's own estimate (#44) cannot see. It is not in the official
 // SDKs, hence the plain HTTP call. Days are UTC: the report has no other
-// granularity or time zone.
+// granularity or time zone. It only covers days that have ended; the running
+// day is absent until UTC midnight (checked against the real API, #48).
 
 const ENDPOINT = "https://api.anthropic.com/v1/organizations/cost_report";
 
@@ -34,37 +35,37 @@ export type CostDay = {
 export type CostMonth = {
   configured: true;
   month: string;
-  /** The month contains `today`, so its last day is still accumulating. */
+  /** The month contains `today`, so it has days the report does not cover yet. */
   current: boolean;
   /** UTC date the summary was computed on. */
   today: string;
   monthly_budget_usd: number;
   days_in_month: number;
   daily_guideline_usd: number;
-  /** Days that have started, oldest first. Future days are left out. */
+  /** Days that have ended in UTC, oldest first. Today and later are left out. */
   days: CostDay[];
   spent_usd: number;
   /** Budget minus spend; negative once the budget is exceeded. */
   remaining_usd: number;
   /** The guideline summed over `days`: what spend would be exactly on the line. */
   pace_usd: number;
-  /** Days of the month not yet finished, today included. 0 for a past month. */
+  /** Days of the month not in `days` yet, today included. 0 for a past month. */
   days_left: number;
   fetched_at: number;
 };
 
 const utcDate = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+const utcTimestamp = (ms: number) => `${new Date(ms).toISOString().slice(0, 19)}Z`;
 
 const pad = (n: number, width: number) => String(n).padStart(width, "0");
 
-/** Start and end (exclusive) of a `YYYY-MM` month in UTC, and the month after it. */
+/** Start and end (exclusive) of a `YYYY-MM` month in UTC. */
 function bounds(month: string) {
   const [year, mon] = month.split("-").map(Number);
   const next = mon === 12 ? `${pad(year + 1, 4)}-01` : `${pad(year, 4)}-${pad(mon + 1, 2)}`;
   return {
     start: Date.parse(`${month}-01T00:00:00Z`),
     end: Date.parse(`${next}-01T00:00:00Z`),
-    next,
   };
 }
 
@@ -92,7 +93,8 @@ export function summarize(
   let spent = 0;
   for (let t = start; t < end; t += DAY_MS) {
     const date = utcDate(t);
-    if (date > today) break;
+    // Today has no figure until it ends, so listing it would only show a gap.
+    if (date >= today) break;
     const cost = costs.get(date) ?? null;
     if (cost !== null) spent += cost;
     days.push({ date, cost_usd: cost, over: cost !== null && cost > guideline });
@@ -109,7 +111,7 @@ export function summarize(
     spent_usd: spent,
     remaining_usd: MONTHLY_BUDGET_USD - spent,
     pace_usd: guideline * days.length,
-    days_left: current ? daysInMonth - days.length + 1 : 0,
+    days_left: current ? daysInMonth - days.length : 0,
     fetched_at: fetchedAt,
   };
 }
@@ -172,18 +174,21 @@ export class CostReport {
   }
 
   private async fetchMonth(month: string, now: number): Promise<Map<string, number>> {
-    const { end, next } = bounds(month);
+    const { start, end } = bounds(month);
     const costs = new Map<string, number>();
+    // The report stops at the last day that has ended, whatever `ending_at`
+    // says, and answers 400 when the range holds no such day. So ask only for
+    // finished days, and on the first day of a month do not ask at all.
+    const until = Math.min(end, Math.floor(now / DAY_MS) * DAY_MS);
+    if (until <= start) return costs;
     let page: string | null = null;
     for (let i = 0; i < MAX_PAGES; i++) {
       const params = new URLSearchParams({
-        starting_at: `${month}-01T00:00:00Z`,
+        starting_at: utcTimestamp(start),
+        ending_at: utcTimestamp(until),
         bucket_width: "1d",
         limit: "31",
       });
-      // A running month has no closed end yet: without `ending_at` the report
-      // runs up to now, and anything past the month is dropped in addPage.
-      if (end <= now) params.set("ending_at", `${next}-01T00:00:00Z`);
       if (page) params.set("page", page);
       const body = await this.request(params);
       addPage(costs, month, body);

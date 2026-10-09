@@ -11,6 +11,7 @@
 .month-nav { display: flex; align-items: center; gap: 4px; margin-right: auto; }
 .month-nav strong { min-width: 7.5em; text-align: center; font-size: 15px; font-weight: 650; }
 .analytics-fetched { font-size: 12px; color: var(--muted); }
+.analytics-note { padding: 20px 0; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.7; color: var(--muted); }
 
 .analytics-report { display: grid; gap: 32px; min-width: 0; transition: opacity 0.15s; }
 .analytics-report.is-stale { opacity: 0.5; }
@@ -32,7 +33,6 @@
 .key-within { background: var(--chart-bar); }
 .key-over { background: var(--danger); }
 .key-line { width: 18px; height: 0; border-radius: 0; border-top: 2px dashed var(--ink-2); }
-.key-today { width: 6px; height: 6px; margin: 0 3px; border-radius: 50%; background: var(--ink); }
 
 .chart { position: relative; width: 100%; border-radius: var(--radius-sm); touch-action: pan-y; }
 .chart svg { display: block; }
@@ -44,14 +44,12 @@
 /* 目安の線だけ点線にする。目盛りの線は実線で、閾値と見分けがつく。 */
 .chart-guide { stroke: var(--ink-2); stroke-width: 1.5; stroke-dasharray: 5 4; }
 .chart-active { fill: var(--surface-hover); }
-.chart-today { fill: var(--ink); }
 .chart-tip { position: absolute; z-index: 5; display: grid; gap: 2px; width: max-content; max-width: 168px; padding: 8px 12px; transform: translateX(-50%); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow); font-size: 12px; line-height: 1.5; color: var(--muted); pointer-events: none; }
 .chart-tip strong { font-size: 15px; font-weight: 650; color: var(--ink); }
 
 .cost-table th.num, .cost-table td.num { text-align: right; }
 .cost-table td { white-space: nowrap; }
 .cost-table td .badge { margin-right: 0; }
-.cost-table td:first-child .badge { margin-left: 8px; }
 @media (max-width: 760px) {
   .cost-table th, .cost-table td { padding-left: 10px; padding-right: 10px; }
 }

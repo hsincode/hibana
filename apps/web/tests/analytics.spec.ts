@@ -25,13 +25,16 @@ function monthFixture(month: string, daysInMonth: number, costs: (number | null)
     spent_usd: spent,
     remaining_usd: BUDGET - spent,
     pace_usd: guideline * days.length,
-    days_left: current ? daysInMonth - days.length + 1 : 0,
+    days_left: current ? daysInMonth - days.length : 0,
     fetched_at: Date.parse("2026-10-09T03:00:00Z"),
   };
 }
 
-// 9 October so far: three days above $6.45, six at or below it.
-const october = monthFixture("2026-10", 31, [4.2, 7.9, 6.1, 0, 12.34, 3.3, 6.45, 8, 2.1], true);
+// The cost report only has days that have ended, so on 9 October the month
+// runs to the 8th: three days above $6.45, five at or below it.
+const october = monthFixture("2026-10", 31, [4.2, 7.9, 6.1, 0, 12.34, 3.3, 6.45, 8], true);
+// The first day of a month: nothing has ended yet.
+const firstDay = monthFixture("2026-10", 31, [], true);
 // A finished month that ran over the budget: 30 days at $3–$11.
 const september = monthFixture("2026-09", 30, Array.from({ length: 30 }, (_, i) => 3 + ((i * 7) % 9)), false);
 
@@ -82,43 +85,47 @@ for (const width of [1440, 390]) {
     await expect(page.getByRole("group", { name: "表示する月" })).toContainText("2026年10月");
     await expect(page.getByRole("button", { name: "次の月" })).toBeDisabled();
 
-    // $200 − $50.39, and the guideline $200 ÷ 31.
-    // Matched on the tile's own label: "今日" also appears in another tile's note.
+    // $200 − $48.29, and the guideline $200 ÷ 31.
+    // Matched on the tile's own label: the words also appear in other tiles' notes.
     const stat = (label: string) =>
       page.locator(".stat").filter({ has: page.locator(".stat-label", { hasText: label }) });
-    await expect(stat("今月の残り")).toContainText("$149.61");
+    await expect(stat("今月の残り")).toContainText("$151.71");
+    await expect(stat("今月の残り")).toContainText("10/8 までの確定分");
     await expect(stat("今月の残り")).toContainText("残り 23 日");
-    await expect(stat("今月の累計")).toContainText("$50.39");
+    await expect(stat("今月の累計")).toContainText("$48.29");
     await expect(stat("今月の累計")).toContainText("目安以内");
-    await expect(stat("今日")).toContainText("$2.10");
+    // The newest figure is yesterday's: the running day is never in the report.
+    await expect(stat("直近の確定日")).toContainText("10/8");
+    await expect(stat("直近の確定日")).toContainText("$8.00");
+    await expect(stat("直近の確定日")).toContainText("目安超過");
     await expect(stat("1日の目安")).toContainText("$6.45");
     await expect(stat("1日の目安")).toContainText("超えた日は 3 日");
 
     // Every day is in the table with its verdict in words, newest first.
     const rows = page.locator(".cost-table tbody tr");
-    await expect(rows).toHaveCount(9);
+    await expect(rows).toHaveCount(8);
     await expect(rows.filter({ hasText: "目安超過" })).toHaveCount(3);
-    await expect(rows.filter({ hasText: "目安以内" })).toHaveCount(6);
-    await expect(rows.first()).toContainText("10/9");
-    await expect(rows.first()).toContainText("集計中");
+    await expect(rows.filter({ hasText: "目安以内" })).toHaveCount(5);
+    await expect(rows.first()).toContainText("10/8");
     // 5 October: $12.34 against $6.45.
-    await expect(rows.nth(4)).toContainText("$12.34");
-    await expect(rows.nth(4)).toContainText("+$5.89");
-    await expect(rows.nth(4)).toContainText("目安超過");
+    await expect(rows.nth(3)).toContainText("$12.34");
+    await expect(rows.nth(3)).toContainText("+$5.89");
+    await expect(rows.nth(3)).toContainText("目安超過");
     // $6.45 is below $6.4516…, so it is within the guideline.
-    await expect(rows.nth(2)).toContainText("±$0.00");
-    await expect(rows.nth(2)).toContainText("目安以内");
+    await expect(rows.nth(1)).toContainText("±$0.00");
+    await expect(rows.nth(1)).toContainText("目安以内");
 
-    await expect(page.locator(".chart-bar")).toHaveCount(8);
+    await expect(page.locator(".chart-bar")).toHaveCount(7);
     await expect(page.locator(".chart-bar.is-over")).toHaveCount(3);
 
     // The chart answers to the keyboard as well as the pointer.
     const chart = page.getByRole("group", { name: /日毎の利用料のグラフ/ });
     await chart.focus();
-    await expect(page.locator(".chart-tip")).toContainText("$2.10");
-    await page.keyboard.press("ArrowLeft");
     await expect(page.locator(".chart-tip")).toContainText("$8.00");
     await expect(page.locator(".chart-tip")).toContainText("目安超過");
+    await page.keyboard.press("ArrowLeft");
+    await expect(page.locator(".chart-tip")).toContainText("$6.45");
+    await expect(page.locator(".chart-tip")).toContainText("目安以内");
 
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     // A full-page capture of a scrolled page draws the fixed header mid-page.
@@ -132,7 +139,7 @@ for (const width of [1440, 390]) {
     // 30 days at $3–$11 come to $210: $10 over the budget.
     await expect(stat("予算の残り")).toContainText("−$10.00");
     await expect(stat("予算の残り")).toContainText("予算超過");
-    await expect(stat("今日")).toHaveCount(0);
+    await expect(stat("直近の確定日")).toHaveCount(0);
     // The dev server's StrictMode runs the first load twice, hence the set.
     expect([...new Set(months)]).toEqual([null, "2026-09"]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -150,6 +157,18 @@ test("analytics in the dark theme", async ({ page }) => {
   await page.locator(".chart").hover({ position: { x: 240, y: 100 } });
   await expect(page.locator(".chart-tip")).toBeVisible();
   await page.screenshot({ path: "test-results/analytics-dark.png", fullPage: true });
+});
+
+test("analytics on the first day of a month has the budget but no days yet", async ({ page }) => {
+  await mockApi(page, () => ({ json: firstDay }));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/analytics");
+  await expect(page.getByText("この月で終わった日はまだありません")).toBeVisible();
+  await expect(page.locator(".stat").filter({ hasText: "今月の残り" })).toContainText("$200.00");
+  await expect(page.locator(".stat").filter({ hasText: "今月の残り" })).toContainText("残り 31 日");
+  await expect(page.locator(".stat").filter({ hasText: "今月の累計" })).toContainText("確定した日がまだありません");
+  await expect(page.locator(".cost-table")).toHaveCount(0);
+  await expect(page.locator(".chart")).toHaveCount(0);
 });
 
 test("analytics is not offered to an account that may not view it", async ({ page }) => {
@@ -176,6 +195,6 @@ test("analytics explains a missing key and shows an upstream error", async ({ pa
   // The page recovers on the next reload without leaving it.
   reply = { json: october };
   await page.getByRole("button", { name: "再読み込み" }).click();
-  await expect(page.locator(".cost-table tbody tr")).toHaveCount(9);
+  await expect(page.locator(".cost-table tbody tr")).toHaveCount(8);
   await expect(page.getByRole("alert")).toHaveCount(0);
 });

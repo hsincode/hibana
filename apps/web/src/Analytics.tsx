@@ -110,7 +110,8 @@ export function AnalyticsPage() {
           <h1>利用料</h1>
           <p className="lead">
             Anthropic の cost report（請求ベース・組織全体）を表示します。日付は UTC
-            区切りで、日本時間の 9:00 に切り替わります。反映には数分かかります。
+            区切り（日本時間の 9:00 に切り替わり）で、載るのは終わった日までです。進行中の日のぶんは、次の
+            9:00 を過ぎてから表示されます。
           </p>
         </div>
       </div>
@@ -164,7 +165,10 @@ export function AnalyticsPage() {
 
 function Report({ m, stale }: { m: CostMonth; stale: boolean }) {
   const guideline = m.daily_guideline_usd;
-  const today = m.current ? m.days.at(-1) : undefined;
+  // cost report に載るのは終わった日までなので、進行中の月でも「今日」の行はない。
+  // 今月は、いちばん新しい確定日を取り上げる。
+  const latest = m.current ? m.days.at(-1) : undefined;
+  const until = m.days.at(-1);
   const overDays = m.days.filter((d) => d.over).length;
   const overBudget = m.remaining_usd < 0;
   const paceDiff = m.spent_usd - m.pace_usd;
@@ -199,6 +203,7 @@ function Report({ m, stale }: { m: CostMonth; stale: boolean }) {
           </div>
           <p className="stat-note">
             月の予算 {usd(m.monthly_budget_usd)} のうち {usd(m.spent_usd)} を使用
+            {m.current && until && `（${shortDay(until.date)} までの確定分）`}
             {m.current && `。残り ${m.days_left} 日（今日を含む）`}
           </p>
         </Stat>
@@ -206,26 +211,27 @@ function Report({ m, stale }: { m: CostMonth; stale: boolean }) {
         <Stat
           label={m.current ? "今月の累計" : "この月の合計"}
           value={usd(m.spent_usd)}
-          badge={<Verdict over={paceDiff > 0} />}
+          badge={m.days.length > 0 ? <Verdict over={paceDiff > 0} /> : undefined}
         >
           <p className="stat-note">
-            {m.days.length} 日ぶんの目安 {usd(m.pace_usd)} より {usd(Math.abs(paceDiff))}{" "}
-            {paceDiff > 0 ? "多い" : "少ない"}
+            {m.days.length > 0
+              ? `${m.days.length} 日ぶんの目安 ${usd(m.pace_usd)} より ${usd(Math.abs(paceDiff))} ${paceDiff > 0 ? "多い" : "少ない"}`
+              : "確定した日がまだありません"}
           </p>
         </Stat>
 
-        {today && (
+        {latest && (
           <Stat
-            label={`今日（UTC ${shortDay(today.date)}）`}
-            value={today.cost_usd === null ? "未集計" : usd(today.cost_usd)}
-            badge={today.cost_usd === null ? undefined : <Verdict over={today.over} />}
+            label={`直近の確定日（UTC ${shortDay(latest.date)}）`}
+            value={latest.cost_usd === null ? "未集計" : usd(latest.cost_usd)}
+            badge={latest.cost_usd === null ? undefined : <Verdict over={latest.over} />}
           >
             <p className="stat-note">
-              {today.cost_usd === null
-                ? "cost report にまだ今日の行がありません"
-                : today.over
-                  ? `目安より ${usd(today.cost_usd - guideline)} 多い`
-                  : `目安まであと ${usd(guideline - today.cost_usd)}`}
+              {latest.cost_usd === null
+                ? "cost report にまだこの日の行がありません"
+                : latest.over
+                  ? `目安より ${usd(latest.cost_usd - guideline)} 多い`
+                  : `目安より ${usd(guideline - latest.cost_usd)} 少ない`}
             </p>
           </Stat>
         )}
@@ -238,79 +244,79 @@ function Report({ m, stale }: { m: CostMonth; stale: boolean }) {
         </Stat>
       </div>
 
-      <section className="panel" aria-labelledby="cost-chart-h">
-        <div className="panel-head">
-          <h2 id="cost-chart-h">日毎の利用料</h2>
-          <p className="desc">
-            棒が点線（1日の目安 {usd(guideline)}）を超えた日が目安超過です。
-          </p>
-        </div>
-        <div className="panel-body">
-          <ul className="chart-legend">
-            <li>
-              <span className="key key-within" />
-              目安以内
-            </li>
-            <li>
-              <span className="key key-over" />
-              目安超過
-            </li>
-            <li>
-              <span className="key key-line" />
-              1日の目安
-            </li>
-            {m.current && (
-              <li>
-                <span className="key key-today" />
-                今日（集計中）
-              </li>
-            )}
-          </ul>
-          <CostChart m={m} />
-        </div>
-      </section>
+      {m.days.length === 0 ? (
+        <p className="analytics-note">
+          この月で終わった日はまだありません。1 日のぶんは、UTC の日付が変わったあと（日本時間の 9:00
+          以降）に表示されます。
+        </p>
+      ) : (
+        <>
+          <section className="panel" aria-labelledby="cost-chart-h">
+            <div className="panel-head">
+              <h2 id="cost-chart-h">日毎の利用料</h2>
+              <p className="desc">
+                棒が点線（1日の目安 {usd(guideline)}）を超えた日が目安超過です。
+              </p>
+            </div>
+            <div className="panel-body">
+              <ul className="chart-legend">
+                <li>
+                  <span className="key key-within" />
+                  目安以内
+                </li>
+                <li>
+                  <span className="key key-over" />
+                  目安超過
+                </li>
+                <li>
+                  <span className="key key-line" />
+                  1日の目安
+                </li>
+              </ul>
+              <CostChart m={m} />
+            </div>
+          </section>
 
-      <section className="panel" aria-labelledby="cost-table-h">
-        <div className="panel-head">
-          <h2 id="cost-table-h">日別の一覧</h2>
-        </div>
-        <div className="table-wrap">
-          <table className="cost-table">
-            <thead>
-              <tr>
-                {/* 狭い画面では横にスクロールする。日付・利用額・判定が先に見える順にしてある。 */}
-                <th>日付（UTC）</th>
-                <th className="num">利用額</th>
-                <th>判定</th>
-                <th className="num">目安との差</th>
-                <th className="num">累計</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((d) => (
-                <tr key={d.date}>
-                  <td>
-                    {day(d.date)}
-                    {d.date === today?.date && <Badge tone="muted">集計中</Badge>}
-                  </td>
-                  <td className="num">{d.cost_usd === null ? "—" : usd(d.cost_usd)}</td>
-                  <td>
-                    {d.cost_usd === null ? (
-                      <Badge tone="muted">未集計</Badge>
-                    ) : (
-                      <Verdict over={d.over} />
-                    )}
-                  </td>
-                  <td className="num">
-                    {d.cost_usd === null ? "—" : signedUsd(d.cost_usd - guideline)}
-                  </td>
-                  <td className="num">{usd(d.running)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+          <section className="panel" aria-labelledby="cost-table-h">
+            <div className="panel-head">
+              <h2 id="cost-table-h">日別の一覧</h2>
+            </div>
+            <div className="table-wrap">
+              <table className="cost-table">
+                <thead>
+                  <tr>
+                    {/* 狭い画面では横にスクロールする。日付・利用額・判定が先に見える順にしてある。 */}
+                    <th>日付（UTC）</th>
+                    <th className="num">利用額</th>
+                    <th>判定</th>
+                    <th className="num">目安との差</th>
+                    <th className="num">累計</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((d) => (
+                    <tr key={d.date}>
+                      <td>{day(d.date)}</td>
+                      <td className="num">{d.cost_usd === null ? "—" : usd(d.cost_usd)}</td>
+                      <td>
+                        {d.cost_usd === null ? (
+                          <Badge tone="muted">未集計</Badge>
+                        ) : (
+                          <Verdict over={d.over} />
+                        )}
+                      </td>
+                      <td className="num">
+                        {d.cost_usd === null ? "—" : signedUsd(d.cost_usd - guideline)}
+                      </td>
+                      <td className="num">{usd(d.running)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
+      )}
     </div>
   );
 }
@@ -381,7 +387,6 @@ function CostChart({ m }: { m: CostMonth }) {
   const base = PAD_TOP + PLOT_H;
   const y = (v: number) => base - (v / top) * PLOT_H;
   const center = (i: number) => LEFT + band * (i + 0.5);
-  const todayIndex = m.current ? m.days.length - 1 : -1;
 
   function pick(clientX: number) {
     const rect = wrap.current?.getBoundingClientRect();
@@ -467,7 +472,6 @@ function CostChart({ m }: { m: CostMonth }) {
                 {n}
               </text>
             ))}
-          {todayIndex >= 0 && <circle className="chart-today" cx={center(todayIndex)} cy={base + 5} r={2.5} />}
         </svg>
       )}
       {shownDay && active !== null && (
@@ -481,10 +485,7 @@ function CostChart({ m }: { m: CostMonth }) {
             bottom: AXIS_H + PLOT_H + 4,
           }}
         >
-          <span>
-            {day(shownDay.date)}
-            {active === todayIndex && "・集計中"}
-          </span>
+          <span>{day(shownDay.date)}</span>
           <strong>{shownDay.cost_usd === null ? "未集計" : usd(shownDay.cost_usd)}</strong>
           {shownDay.cost_usd !== null && (
             <span>

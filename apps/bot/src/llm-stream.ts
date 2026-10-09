@@ -107,6 +107,8 @@ export async function readCompletion(
         const index = Number(data.index), block = blocks.get(index), delta = data.delta as Json;
         if (!block || !delta) throw interrupted();
         if (delta.type === "input_json_delta") inputs.set(index, (inputs.get(index) ?? "") + String(delta.partial_json ?? ""));
+        // Web search answers cite sources; keep them so the replayed turn matches.
+        else if (delta.type === "citations_delta") block.citations = [...((block.citations as unknown[]) ?? []), delta.citation];
         else for (const key of ["text", "thinking", "signature"]) {
           if (typeof delta[key] === "string") block[key] = String(block[key] ?? "") + delta[key];
         }

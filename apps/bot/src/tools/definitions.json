@@ -1180,7 +1180,7 @@
     "type": "function",
     "function": {
       "name": "websearch",
-      "description": "Search the web via Exa (same as OpenCode websearch). Use for current events, facts beyond training cutoff, or research. Prefer this over guessing. Returns titles, URLs, and highlights. For domain/date/category filters use web_search_advanced_exa; to read a known URL deeply use web_fetch_exa (JS/PDF-friendly). Omitted when EXA is off / auto-native (`/exa`; provider-native web_search is used instead, e.g. DeepSeek). or when web search master is disabled.",
+      "description": "Search the web via Exa (same as OpenCode websearch). Use for current events, facts beyond training cutoff, or research. Prefer this over guessing. Returns titles, URLs, and highlights. For domain/date/category filters use web_search_advanced_exa; to read a known URL deeply use web_fetch_exa (JS/PDF-friendly). Omitted when `/exa off` (web search disabled), under `/exa auto` when the provider's own web search is used instead (DeepSeek, Anthropic API), or when web search master is disabled.",
       "parameters": {
         "type": "object",
         "properties": {

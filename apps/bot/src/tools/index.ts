@@ -312,7 +312,9 @@ export class ToolRegistry {
         !this.runtime.config.siteEnabled
       )
         return false;
-      if (/^web/.test(n) && (!this.runtime.config.webSearch || (native && !this.jevTaskMode(ctx))))
+      // exa off disables every web tool, Jev task mode included (#46).
+      if (/^web/.test(n) && (!this.runtime.config.webSearch || settings.exa_mode === "off" ||
+          (native && !this.jevTaskMode(ctx))))
         return false;
       if (/^mcp_/.test(n) && settings.mcp_enabled === false) return false;
       if (

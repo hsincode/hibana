@@ -9,6 +9,7 @@ import {
   wireEffort,
   outputBudget,
   protocolFor,
+  nativeSearchFor,
 } from "../llm";
 import { Agent } from "../agent";
 import { loadConfig } from "../config";
@@ -530,4 +531,83 @@ describe("prompt cache routing", () => {
     const custom = await sentBody({ provider: "custom", model: "test-model", effort: "none" }, { channel: "111", agent: "root", round: 0 });
     expect(custom.prompt_cache_key).toBeUndefined();
   });
+});
+
+describe("Anthropic server-side web tools (#46)", () => {
+  const cfg = () => loadConfig({ ANTHROPIC_API_KEY: "fixture", CLAUDE_MAX_API_KEY: "fixture" });
+  test("exa auto selects provider-native search for the Anthropic API but not Claude Max", () => {
+    expect(nativeSearchFor({ provider: "anthropic", model: "claude-sonnet-5-5" }, "auto", true)).toBe(true);
+    expect(nativeSearchFor({ provider: "deepseek", model: "deepseek-chat" }, "auto", true)).toBe(true);
+    expect(nativeSearchFor({ provider: "claude_max", model: "claude-opus-5-5" }, "auto", true)).toBe(false);
+    expect(nativeSearchFor({ provider: "anthropic", model: "claude-sonnet-5-5" }, "on", true)).toBe(false);
+    expect(nativeSearchFor({ provider: "anthropic", model: "claude-sonnet-5-5" }, "auto", false)).toBe(false);
+  });
+
+  test("native search adds capped web_search and web_fetch with the model's tool version", async () => {
+    let body: Json = {};
+    const client = new LlmClient(cfg(), async (_url, init) => {
+      body = JSON.parse(String(init?.body));
+      return Response.json({ content: [{ type: "text", text: "ok" }], stop_reason: "end_turn" });
+    });
+    const types = () => (body.tools as Json[]).map(t => [t.type, t.name, t.max_uses]);
+    await client.complete({ provider: "anthropic", model: "claude-sonnet-5-5" }, [{ role: "user", content: "Hi" }], [tool], { nativeSearch: true });
+    expect(types()).toEqual([
+      [undefined, "lookup", undefined],
+      ["web_search_20260209", "web_search", 10],
+      ["web_fetch_20260209", "web_fetch", 10],
+    ]);
+    await client.complete({ provider: "anthropic", model: "claude-haiku-5-5" }, [{ role: "user", content: "Hi" }], [], { nativeSearch: true });
+    expect(types()).toEqual([["web_search_20250305", "web_search", 10], ["web_fetch_20250910", "web_fetch", 10]]);
+    await client.complete({ provider: "anthropic", model: "claude-sonnet-5-5" }, [{ role: "user", content: "Hi" }], [tool]);
+    expect(types()).toEqual([[undefined, "lookup", undefined]]);
+    await client.complete({ provider: "claude_max", model: "claude-opus-5-5" }, [{ role: "user", content: "Hi" }], [tool], { nativeSearch: true });
+    expect(types()).toEqual([[undefined, "lookup", undefined]]);
+  });
+
+  test("pause_turn is resumed with the paused assistant content and merged into one completion", async () => {
+    const bodies: Json[] = [];
+    const paused = [
+      { type: "text", text: "Searching." },
+      { type: "server_tool_use", id: "srvtoolu_1", name: "web_search", input: { query: "hibana" } },
+      { type: "web_search_tool_result", tool_use_id: "srvtoolu_1", content: [] },
+    ];
+    const client = new LlmClient(cfg(), async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return Response.json(bodies.length === 1
+        ? { content: paused, stop_reason: "pause_turn", usage: { input_tokens: 10, output_tokens: 2 } }
+        : { content: [{ type: "text", text: "Found it." }], stop_reason: "end_turn", usage: { input_tokens: 20, output_tokens: 3 } });
+    });
+    const out = await client.complete(
+      { provider: "anthropic", model: "claude-sonnet-5-5" }, [{ role: "user", content: "Find hibana" }], [], { nativeSearch: true },
+    );
+    expect(bodies).toHaveLength(2);
+    expect((bodies[1].messages as Json[]).at(-1)).toEqual({ role: "assistant", content: paused });
+    expect(out.message.content).toBe("Searching.\nFound it.");
+    expect(out.message.tool_calls).toBeUndefined();
+    expect(out.message.providerBlocks).toEqual([...paused, { type: "text", text: "Found it." }]);
+    expect(out.usage.prompt_tokens).toBe(30);
+    expect(out.usage.completion_tokens).toBe(5);
+  });
+});
+
+test("Anthropic stream keeps server tool input and text citations", async () => {
+  const sse = [
+    ["message_start", { type: "message_start", message: { usage: { input_tokens: 5 } } }],
+    ["content_block_start", { type: "content_block_start", index: 0, content_block: { type: "server_tool_use", id: "srvtoolu_1", name: "web_search", input: {} } }],
+    ["content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: "{\"query\":\"hibana\"}" } }],
+    ["content_block_start", { type: "content_block_start", index: 1, content_block: { type: "text", text: "" } }],
+    ["content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "citations_delta", citation: { type: "web_search_result_location", url: "https://example.com" } } }],
+    ["content_block_delta", { type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "Cited." } }],
+    ["message_delta", { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 2 } }],
+    ["message_stop", { type: "message_stop" }],
+  ].map(([event, data]) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`).join("");
+  const client = new LlmClient(loadConfig({ ANTHROPIC_API_KEY: "fixture" }), async () =>
+    new Response(sse, { headers: { "content-type": "text/event-stream" } }));
+  const out = await client.complete({ provider: "anthropic", model: "claude-sonnet-5-5" }, [{ role: "user", content: "Hi" }], []);
+  expect(out.message.content).toBe("Cited.");
+  expect(out.message.tool_calls).toBeUndefined();
+  expect(out.message.providerBlocks).toEqual([
+    { type: "server_tool_use", id: "srvtoolu_1", name: "web_search", input: { query: "hibana" } },
+    { type: "text", text: "Cited.", citations: [{ type: "web_search_result_location", url: "https://example.com" }] },
+  ]);
 });

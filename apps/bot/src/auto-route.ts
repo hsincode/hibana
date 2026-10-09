@@ -26,8 +26,7 @@ const criteria = [
   "Greeting, small talk, or a one-line factual answer.",
   "A short explanation, translation, summary or rewrite of supplied text, or a simple lookup.",
   "Ordinary multi-step work: writing or changing code, research across several sources, or a structured document.",
-  "Demanding but familiar work that needs careful reasoning: debugging a failure that can be reproduced, weighing design trade-offs, or analysis with several constraints.",
-  "Large work that follows established practice: big changes across many files, long documents, or a broad investigation, where the difficulty is volume rather than insight.",
+  "Demanding but familiar work that needs careful reasoning or sustained effort: debugging a failure that can be reproduced, weighing design trade-offs, analysis with several constraints, or large work that follows established practice (big changes across many files, long documents, a broad investigation), where the difficulty is volume rather than insight.",
   "Work that needs deep or original reasoning, where one subtle mistake invalidates the result: proofs and formal arguments, root causes of rare concurrency or distributed-system failures, novel algorithms or protocols, security analysis of a design, or expert judgment under conflicting or ambiguous constraints.",
 ];
 if (criteria.length !== AUTO_ROUTE_LEVELS.length)

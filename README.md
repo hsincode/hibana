@@ -42,6 +42,7 @@ make sandbox-smoke      # Docker隔離・ファイル操作の確認
 - メンション、Hibana / ひばな / ヒバナ / 火花、旧トリガー、スレッド・フォーラム名で応答。
 - `/switch`、`/temperature`、`/exa`、`/verify`、`/fast`、`/clear`、`/context`、`/retry`。
 - `/usage`（owner のみ）: Anthropic API の推計利用額を、当日・当月・モデル別・直近7日で表示。応答の `usage` に `packages/shared` の単価表を掛けた推計で、請求額とは一致しない。日付は UTC。集計は `HIBANA_DATA_DIR/anthropic_usage.json` に約400日分を保存（#44）。
+- Web の `/analytics`（administrator のみ）: Anthropic の Admin API の cost report から、日毎の利用料を表示。1日の目安（月 $200 ÷ その月の日数）を超えた日と、予算の残りが分かる。請求ベースで組織全体が対象。API の環境変数 `ANTHROPIC_ADMIN_KEY`（Admin API キー）が必要で、未設定ならページにその旨を表示する。日付は UTC（#48）。
 - Chat Completions / Responses / Anthropic Messages。プロバイダーの認証情報を分離。
 - [Jev 判定と行動選択モード](docs/jev.md)。根拠照合・分類・終了時の完了チェックと、Jev がファイル操作・検索などの各行動を選ぶ実行モードを別々に ON / OFF。
 - Discord操作、ファイル編集・配信、Exa検索、外部MCP、スキルCRUD、静的サイト公開。

@@ -179,11 +179,16 @@ APIに届かない間、botは待ち時間を倍にしながら再試行しま�
 
 Webの `/analytics` は、APIの `GET /api/analytics/cost` を通して Anthropic の Admin API の cost report（`GET /v1/organizations/cost_report`）を表示します（[#48](https://github.com/hsincode/hibana/issues/48)）。見られるのは administrator（`WEB_ADMIN_IDS`）だけです。
 
-APIのVercelプロジェクト（`hibana-api`）の環境変数に `ANTHROPIC_ADMIN_KEY` を設定します。値は Claude Console で作成する Admin API キー（`sk-ant-admin01-...`）で、botが使う `ANTHROPIC_API_KEY` とは別のものです。Admin API キーは組織の管理操作もできるため、APIの環境変数以外には置きません。未設定の間、ページには「未設定」と表示されます。Admin API は個人アカウントでは使えません。
+APIのVercelプロジェクト（`hibana-api`）の環境変数に `ANTHROPIC_ADMIN_API_KEY` を設定します。botが使う `ANTHROPIC_API_KEY`（workspace のキー）とは別のもので、使えるのは次のどちらかです（[公式ドキュメント](https://platform.claude.com/docs/en/manage-claude/admin-api)）。
+
+- Admin API キー（`sk-ant-admin...`）。組織の admin ロールのメンバーだけが Claude Console で作成できます
+- workspace に紐づかない個人キー（`sk-ant-usr-...`）。権限はキーを発行したアカウントと同じです。アカウントに権限がないと、cost report は403（`permission_error`）を返し、ページにその旨が表示されます
+
+どちらも1つの workspace を超えて使えるキーなので、APIの環境変数以外には置きません。未設定の間、ページには「未設定」と表示されます。Admin API は個人アカウントでは使えません。
 
 - 日付は UTC 区切りです（cost report が UTC の日単位でしか返さないため）。日本時間では 9:00 に切り替わります
 - 月の予算 $200 は `apps/api/src/analytics.ts` の `MONTHLY_BUDGET_USD` です。1日の目安はこれをその月の日数で割った額です
 - APIは同じ月の結果を、インスタンスごとに1分間メモリに保持します。Anthropic が継続的な取得を1分に1回までとしているためです
 - Priority Tier の費用は cost report に含まれません
 
-検証は手元のテスト（`apps/api/src/analytics.test.ts`、`apps/web/tests/analytics.spec.ts`）までです。テストは公式ドキュメントの応答形式に合わせた代用の応答を使っていて、実際の Admin API キーでの取得と、Console の表示との照合は未実施です。
+検証は手元のテスト（`apps/api/src/analytics.test.ts`、`apps/web/tests/analytics.spec.ts`）までです。テストは公式ドキュメントの応答形式に合わせた代用の応答を使っています。2026-10-09に、workspace に紐づかない個人キーで実際の cost report を呼んだところ、403（`permission_error: Missing permissions`）が返りました（同じキーで `GET /v1/organizations/me` は200）。このため、実際の応答での取得と、Console の表示との照合はまだできていません。

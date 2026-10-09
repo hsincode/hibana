@@ -216,7 +216,7 @@ describe("CostReport", () => {
   });
 
   test("upstream errors become a 502 that never repeats the key or the upstream body", async () => {
-    for (const [status, text] of [[401, "Admin キー"], [403, "Admin キー"], [429, "リクエスト制限"], [500, "HTTP 500"]] as const) {
+    for (const [status, text] of [[401, "認証できません"], [403, "読む権限がありません"], [429, "リクエスト制限"], [500, "HTTP 500"]] as const) {
       const { fetcher } = upstream([
         Response.json({ error: { type: "authentication_error", message: `bad key ${ADMIN_KEY}` } }, { status }),
       ]);
@@ -348,7 +348,7 @@ describe("GET /api/analytics/cost", () => {
     const res = await get("/api/analytics/cost?month=2026-09", "admin-1");
     expect(res.status).toBe(502);
     const text = await res.text();
-    expect(text).toContain("Admin キー");
+    expect(text).toContain("HTTP 401");
     expect(text).not.toContain(ADMIN_KEY);
   });
 });

@@ -143,8 +143,9 @@ export class CostReport {
   private cache = new Map<string, { at: number; costs: Promise<Map<string, number>> }>();
 
   constructor(
-    // An Admin API key can manage the organization. It stays in this process:
-    // never returned to the dashboard, never logged, never put in an error.
+    // The key reaches the whole organization (an Admin API key can manage it).
+    // It stays in this process: never returned to the dashboard, never logged,
+    // never put in an error.
     private adminKey: string | null,
     private fetcher: typeof fetch = fetch,
     private now: () => number = Date.now,
@@ -208,10 +209,15 @@ export class CostReport {
     } catch {
       throw new CostReportError(502, "Anthropic の cost report に接続できませんでした");
     }
-    if (res.status === 401 || res.status === 403) {
+    // The two refusals call for different fixes: 401 is a wrong value, 403 is
+    // a valid key whose account may not read the report.
+    if (res.status === 401) {
+      throw new CostReportError(502, "Anthropic がキーを認証できませんでした（HTTP 401）。ANTHROPIC_ADMIN_API_KEY の値を確認してください");
+    }
+    if (res.status === 403) {
       throw new CostReportError(
         502,
-        `Anthropic が Admin キーを拒否しました（HTTP ${res.status}）。ANTHROPIC_ADMIN_KEY が Admin API キーか確認してください`,
+        "このキーには cost report を読む権限がありません（HTTP 403）。ANTHROPIC_ADMIN_API_KEY に Admin API キーを設定するか、キーを発行したアカウントの組織ロールを確認してください",
       );
     }
     if (res.status === 429) {

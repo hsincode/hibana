@@ -153,8 +153,8 @@ export function AnalyticsPage() {
       {!data && !err && <Skeleton height={320} />}
       {data && !data.configured && (
         <Empty
-          title="Admin API キーが未設定"
-          body="API サーバーの環境変数 ANTHROPIC_ADMIN_KEY に Anthropic の Admin API キーを設定すると、ここに日毎の利用料が表示されます。"
+          title="Admin API のキーが未設定"
+          body="API サーバーの環境変数 ANTHROPIC_ADMIN_API_KEY に、Anthropic の cost report を読めるキー（Admin API キーなど）を設定すると、ここに日毎の利用料が表示されます。"
         />
       )}
       {report && <Report m={report} stale={loading} />}

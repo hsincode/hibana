@@ -166,12 +166,12 @@ test("analytics explains a missing key and shows an upstream error", async ({ pa
   await mockApi(page, () => reply);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/analytics");
-  await expect(page.getByText("Admin API キーが未設定")).toBeVisible();
-  await expect(page.getByText("ANTHROPIC_ADMIN_KEY")).toBeVisible();
+  await expect(page.getByText("Admin API のキーが未設定")).toBeVisible();
+  await expect(page.getByText("ANTHROPIC_ADMIN_API_KEY")).toBeVisible();
 
-  reply = { status: 502, json: { error: "Anthropic が Admin キーを拒否しました（HTTP 401）。" } };
+  reply = { status: 502, json: { error: "このキーには cost report を読む権限がありません（HTTP 403）。" } };
   await page.getByRole("button", { name: "再読み込み" }).click();
-  await expect(page.getByRole("alert")).toContainText("Admin キーを拒否");
+  await expect(page.getByRole("alert")).toContainText("読む権限がありません");
 
   // The page recovers on the next reload without leaving it.
   reply = { json: october };

@@ -21,6 +21,7 @@ import {
   canModerate,
   canSelectPreset,
   canViewAllGuilds,
+  canViewAnalytics,
   parseRole,
   rank,
   ROLES,
@@ -68,6 +69,7 @@ import {
 } from "./store";
 import { guildId, guildSkills, skillAction, skillRow } from "./skills";
 import { ChatgptAccounts, ChatgptError } from "./chatgpt";
+import { CostReport, CostReportError, parseMonth } from "./analytics";
 
 async function loadSnapshot(
   store: Store,
@@ -131,6 +133,10 @@ const COOKIE = "hibana_session";
 
 export type AppHooks = {
   chatgptFetch?: typeof fetch;
+  /** Stands in for Anthropic's Admin API (the cost report) in tests. */
+  anthropicFetch?: typeof fetch;
+  /** Clock for the cost report: which UTC day is "today", and its cache age. */
+  now?: () => number;
   guildAccess?: (accessToken: string, guildId: string) => Promise<boolean>;
   listGuilds?: (
     accessToken: string,
@@ -143,6 +149,8 @@ export type AppHooks = {
 
 export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
   const chatgpt = new ChatgptAccounts(store, env.sessionSecret, hooks.chatgptFetch);
+  const now = hooks.now ?? Date.now;
+  const costReport = new CostReport(env.anthropicAdminKey, hooks.anthropicFetch, now);
   const cross = cookieCrossOrigin(env);
   const cookieOpts = {
     httpOnly: true,
@@ -203,7 +211,7 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
       }),
     )
     .onError(({ error, set }) => {
-      if (error instanceof ChatgptError) {
+      if (error instanceof ChatgptError || error instanceof CostReportError) {
         set.status = error.status;
         return { error: error.message };
       }
@@ -321,6 +329,7 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
         can_manage_users: canManageUsers(s.role),
         can_moderate: canModerate(s.role),
         can_view_all_guilds: canViewAllGuilds(s.role),
+        can_view_analytics: canViewAnalytics(s.role),
       };
     })
     .get("/api/me/settings", async ({ cookie, set }) => {
@@ -919,6 +928,31 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
         retention_days: Math.round(LOG_RETENTION_MS / 86_400_000),
         enabled: true,
       };
+    })
+    .get("/api/analytics/cost", async ({ cookie, set, query }) => {
+      // Billing figures: never held by a shared cache or the browser's.
+      set.headers["cache-control"] = "no-store";
+      const s = await requireSession(cookieSid(cookie as never));
+      if (!s) {
+        set.status = 401;
+        return { error: "unauthorized" };
+      }
+      if (!canViewAnalytics(s.role)) {
+        set.status = 403;
+        return { error: "forbidden" };
+      }
+      // Same shape as /api/logs when it is switched off: the page explains
+      // what to set instead of showing an error.
+      if (!costReport.configured) return { configured: false };
+      const month = parseMonth(
+        (query as Record<string, string | undefined>).month,
+        now(),
+      );
+      if (!month) {
+        set.status = 400;
+        return { error: "month must be YYYY-MM and not in the future" };
+      }
+      return costReport.month(month);
     })
     .post("/internal/logs", async ({ request, set, body }) => {
       if (!requireInternal(request.headers.get("authorization") ?? undefined)) {

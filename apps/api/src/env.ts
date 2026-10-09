@@ -21,6 +21,14 @@ export type WebEnv = {
    */
   logsEnabled: boolean;
   /**
+   * Anthropic Admin API key (`ANTHROPIC_ADMIN_KEY`) for the cost report behind
+   * `/api/analytics/cost`. null = the page reports that it is not set up.
+   * Not the key the bot sends messages with: a workspace key is rejected here,
+   * and this one can manage the organization, so it is only ever sent to
+   * Anthropic.
+   */
+  anthropicAdminKey: string | null;
+  /**
    * Commit this deployment was built from (`HIBANA_COMMIT`, set by the deploy
    * job). `/version` reports it so the job can tell this build from the one
    * that currently serves production.
@@ -69,6 +77,7 @@ export function loadEnv(): WebEnv {
     adminIds,
     botControlUrl: opt("BOT_CONTROL_URL", ""),
     logsEnabled: optBool("WEB_LOGS_ENABLED", false),
+    anthropicAdminKey: (process.env.ANTHROPIC_ADMIN_KEY ?? "").trim() || null,
     commit: (process.env.HIBANA_COMMIT ?? "").trim() || null,
   };
 }
@@ -87,6 +96,7 @@ export function loadTestEnv(overrides: Partial<WebEnv> = {}): WebEnv {
     adminIds: ["1"],
     botControlUrl: "",
     logsEnabled: false,
+    anthropicAdminKey: null,
     commit: null,
     ...overrides,
   };

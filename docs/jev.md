@@ -199,4 +199,4 @@ Anthropic の 4 つのプリセットは Premium / Moderator / Administrator だ
 
 削除のきっかけは本番の HTTP 400 です。完了チェックが 3 回続けて不足と判定して停止すると、末尾が assistant の回答案のチェックポイントが残ります。これを `/retry` で再開すると user メッセージが足されないまま送信され、Anthropic（`claude-sonnet-5-5`）が assistant prefill として拒否しました。
 
-削除で直ったのは「完了チェックの上限停止から 400 に至る経路」だけです。末尾が assistant のチェックポイントを `/retry` で再開すると 400 になること自体は直しておらず、最終回答の保存後に別の失敗が起きた場合の再現は確かめていません。
+400 そのものは、再開の側で直しています。`/retry` で復元した履歴の末尾が assistant なら、内部の user メッセージ（続行の指示）を足してから送信します（`resumeNote`、`apps/bot/src/checkpoint.ts`）。完了チェックが無くても、最終回答の保存後に Discord への送信が失敗すると同じ形のチェックポイントが残るためです。この経路を模擬の LLM と Discord で再現するテストがあり、修正前は末尾が assistant のリクエストになることを確かめています。実際の Anthropic API に送っての確認はしていません。

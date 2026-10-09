@@ -68,6 +68,17 @@ export function resumeCheckpoint(checkpoint: Checkpoint, prefix: Message[], sele
   return { messages: [...prefix, ...before, ...task], historyStart: prefix.length + before.length };
 }
 
+/** A checkpoint can end with a drafted answer: it is saved before delivery, so
+ *  a failed Discord send leaves it last. `/retry` adds no user text, and
+ *  Anthropic rejects a request ending in an assistant turn as prefill (HTTP
+ *  400 in production, #50). Tool calls never end a resumed history: each gets
+ *  a result, saved or marked unknown. */
+export function resumeNote(messages: readonly Message[]): Message | undefined {
+  if (messages.at(-1)?.role !== "assistant") return;
+  return { role: "user", internal: true,
+    content: "The previous attempt stopped after the answer above was drafted; it may not have reached the user. Continue the authorized task and reply with the complete, self-contained final answer. Do not repeat side effects that already succeeded." };
+}
+
 export function checkpointInScope(checkpoint: Checkpoint, ctx: Context): boolean {
   return checkpoint.ctx.channelId === ctx.channelId && checkpoint.ctx.userId === ctx.userId
     && checkpoint.ctx.guildId === ctx.guildId && checkpoint.ctx.thread === ctx.thread;

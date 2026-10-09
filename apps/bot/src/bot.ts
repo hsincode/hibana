@@ -14,7 +14,7 @@ import type { Config, Selection } from "./config";
 import { Runtime } from "./runtime";
 import { LlmClient, nativeSearchFor } from "./llm";
 import { providerFailureNotice, ProviderError } from "./llm-errors";
-import { checkpointSnapshot, checkpointInScope, resumeCheckpoint, type Checkpoint } from "./checkpoint";
+import { checkpointSnapshot, checkpointInScope, resumeCheckpoint, resumeNote, type Checkpoint } from "./checkpoint";
 import { Agent, type AgentOptions } from "./agent";
 import { MultiAgentSession } from "./multi-agent";
 import { History } from "./history";
@@ -620,6 +620,11 @@ export class Hibana {
         if (reminder) messages.push(reminder);
         const full = reminder?.content === systemReminder(ULTRACODE_ENTER_FULL);
         if (workflows && (ctx.workflowKeyword || full)) messages.push(...this.authoringReference(ctx, state, messages));
+      } else {
+        // /retry: nothing follows the saved history, so it must not end on
+        // the assistant's own draft.
+        const note = resumeNote(messages);
+        if (note) messages.push(note);
       }
       failurePhase = "checkpoint_save";
       await this.saveCheckpoint(ctx, messages, seed, key);

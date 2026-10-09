@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import pino from "pino";
-import { checkpointSnapshot, checkpointInScope, resumeCheckpoint } from "../checkpoint";
+import { checkpointSnapshot, checkpointInScope, resumeCheckpoint, resumeNote } from "../checkpoint";
 import { Hibana } from "../bot";
 import { loadConfig } from "../config";
 import { toAnthropic, toChatMessages, toResponses } from "../llm";
@@ -64,6 +64,12 @@ describe("checkpoint recovery", () => {
     expect(resumed.messages.some(m => m.content === "old policy" || m.content === "stale mode")).toBe(false);
     expect(resumed.messages.some(m => m.providerBlocks || m.reasoning_content)).toBe(false);
     expect(toResponses(resumed.messages).input).toContainEqual({ type: "function_call_output", call_id: "a", output: "already saved" });
+  });
+  test("only a history ending in an assistant turn gets a resume note", () => {
+    expect(resumeNote([{ role: "user", content: "task" }, { role: "assistant", content: "draft" }])).toMatchObject({ role: "user", internal: true });
+    expect(resumeNote([{ role: "user", content: "task" }])).toBeUndefined();
+    expect(resumeNote([{ role: "assistant", content: null, tool_calls: [call("a")] }, { role: "tool", tool_call_id: "a", content: "saved" }])).toBeUndefined();
+    expect(resumeNote([])).toBeUndefined();
   });
   test("retry cannot import another user, guild, channel, or DM checkpoint", () => {
     const cp = checkpointSnapshot(ctx, [], 0, JSON.stringify(selection));

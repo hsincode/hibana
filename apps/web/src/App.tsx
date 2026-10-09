@@ -33,6 +33,7 @@ import {
 } from "react-router-dom";
 import { SkillsPage } from "./Skills";
 import { ChatgptAccounts } from "./ChatgptAccounts";
+import { AnalyticsPage } from "./Analytics";
 import { Pencil, ChevronDown, Menu, X } from "lucide-react";
 import * as Dropdown from "@radix-ui/react-dropdown-menu";
 import {
@@ -117,6 +118,12 @@ export function App() {
                   path="/models"
                   element={
                     me.can_manage_users ? <ModelsPage /> : <Navigate to="/" />
+                  }
+                />
+                <Route
+                  path="/analytics"
+                  element={
+                    me.can_view_analytics ? <AnalyticsPage /> : <Navigate to="/" />
                   }
                 />
                 <Route path="*" element={<NotFound />} />
@@ -293,6 +300,15 @@ function Shell({
                 モデル
               </NavLink>
             </>
+          )}
+          {me.can_view_analytics && (
+            <NavLink
+              to="/analytics"
+              className={({ isActive }) => (isActive ? "active" : "")}
+            >
+              <Icon.gauge />
+              利用料
+            </NavLink>
           )}
         </nav>
 

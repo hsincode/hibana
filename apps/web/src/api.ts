@@ -60,6 +60,8 @@ export type Me = {
   avatar: string | null;
   role: string;
   can_manage_users: boolean;
+  /** 利用料ページを開けるか。旧 API は返さないので、無ければ出さない。 */
+  can_view_analytics?: boolean;
 };
 
 export type GuildSummary = {

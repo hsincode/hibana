@@ -1,0 +1,57 @@
+/* 利用料ページ。色は styles.css のトークンを使い、足すのは棒の中立色だけ。
+   目安以内の棒を地の色に近い灰にして、目安超過（--danger）だけが目に入るようにする。
+   どちらも地の色に対して 3:1 以上。 */
+:root { --chart-bar: #8a8a8a; }
+:root[data-theme="dark"] { --chart-bar: #6b6b6b; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) { --chart-bar: #6b6b6b; }
+}
+
+.analytics-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
+.month-nav { display: flex; align-items: center; gap: 4px; margin-right: auto; }
+.month-nav strong { min-width: 7.5em; text-align: center; font-size: 15px; font-weight: 650; }
+.analytics-fetched { font-size: 12px; color: var(--muted); }
+
+.analytics-report { display: grid; gap: 32px; min-width: 0; transition: opacity 0.15s; }
+.analytics-report.is-stale { opacity: 0.5; }
+
+.stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+.stat { display: grid; gap: 10px; align-content: start; min-width: 0; padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.stat-label { font-size: 12px; font-weight: 550; color: var(--muted); }
+.stat-value { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; }
+/* 大きな数字は等幅数字にしない（:root の tabular-nums だと桁の間が空いて見える）。 */
+.stat-value strong { font-size: 28px; font-weight: 650; line-height: 1.2; font-variant-numeric: normal; overflow-wrap: anywhere; }
+.stat-note { font-size: 12px; line-height: 1.7; color: var(--muted); }
+.meter { height: 6px; border-radius: 3px; background: var(--accent-soft); overflow: hidden; }
+.meter span { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+.meter.is-over span { background: var(--danger); }
+
+.chart-legend { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 0 0 16px; padding: 0; list-style: none; font-size: 12px; color: var(--ink-2); }
+.chart-legend li { display: inline-flex; align-items: center; gap: 8px; }
+.key { display: inline-block; width: 12px; height: 12px; border-radius: 2px; flex: none; }
+.key-within { background: var(--chart-bar); }
+.key-over { background: var(--danger); }
+.key-line { width: 18px; height: 0; border-radius: 0; border-top: 2px dashed var(--ink-2); }
+.key-today { width: 6px; height: 6px; margin: 0 3px; border-radius: 50%; background: var(--ink); }
+
+.chart { position: relative; width: 100%; border-radius: var(--radius-sm); touch-action: pan-y; }
+.chart svg { display: block; }
+.chart-grid { stroke: var(--line); stroke-width: 1; }
+.chart-tick, .chart-guide-label { font-size: 11px; fill: var(--muted); }
+.chart-guide-label { fill: var(--ink-2); font-weight: 600; }
+.chart-bar { fill: var(--chart-bar); }
+.chart-bar.is-over { fill: var(--danger); }
+/* 目安の線だけ点線にする。目盛りの線は実線で、閾値と見分けがつく。 */
+.chart-guide { stroke: var(--ink-2); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.chart-active { fill: var(--surface-hover); }
+.chart-today { fill: var(--ink); }
+.chart-tip { position: absolute; z-index: 5; display: grid; gap: 2px; width: max-content; max-width: 168px; padding: 8px 12px; transform: translateX(-50%); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow); font-size: 12px; line-height: 1.5; color: var(--muted); pointer-events: none; }
+.chart-tip strong { font-size: 15px; font-weight: 650; color: var(--ink); }
+
+.cost-table th.num, .cost-table td.num { text-align: right; }
+.cost-table td { white-space: nowrap; }
+.cost-table td .badge { margin-right: 0; }
+.cost-table td:first-child .badge { margin-left: 8px; }
+@media (max-width: 760px) {
+  .cost-table th, .cost-table td { padding-left: 10px; padding-right: 10px; }
+}

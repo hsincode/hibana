@@ -52,13 +52,11 @@ export function protocolFor(
     return "responses";
   return "chat";
 }
-// `auto` means "use the provider's own web search where it has one" (#46).
-// Claude Max stays on Exa: its gateway is not verified to pass server tools.
+// exa modes (#46): auto = the provider's own web search where it has one,
+// else Exa; on = Exa only; off = no web search at all. Claude Max stays on Exa
+// under auto: its gateway is not verified to pass server tools.
 export function nativeSearchFor(s: Selection, mode: string, enabled: boolean) {
-  return (
-    enabled &&
-    (mode === "off" || (mode === "auto" && ["deepseek", "anthropic"].includes(s.provider)))
-  );
+  return enabled && mode === "auto" && ["deepseek", "anthropic"].includes(s.provider);
 }
 // Anthropic server tools: the `_20260209` variants (dynamic filtering) need
 // Opus/Sonnet 4.6+; other models get the basic variants. Each is capped at 10

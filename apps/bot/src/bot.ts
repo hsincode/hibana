@@ -70,6 +70,17 @@ type FailureReport = {
   http_status: number | null;
   has_checkpoint: boolean;
 };
+/** The sanitized provider diagnostics the dashboard log keeps (#42): where
+ *  the request failed and how often it reconnected, never provider text. */
+function providerLogFields(error: unknown) {
+  const d = error instanceof ProviderError ? error.diagnostics : {};
+  return {
+    failure_stage: d.phase ?? null,
+    failure_reason: d.reason ?? null,
+    error_type: [d.type, d.code].find((v) => v && v !== "error") ?? null,
+    retries: d.retries ?? null,
+  };
+}
 export class Hibana {
   readonly client: Client;
   readonly runtime: Runtime;
@@ -732,6 +743,8 @@ export class Hibana {
                   failure_code: failureCode,
                   http_status: httpStatus,
                   has_checkpoint: checkpointPersisted,
+                  ...providerLogFields(error),
+                  effort: selection.effort ?? null,
                   latency_ms: Date.now() - started,
                 },
               ],

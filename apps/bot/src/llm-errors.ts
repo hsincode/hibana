@@ -5,6 +5,11 @@ export type ProviderDiagnostics = {
   event?: string; code?: string; type?: string; error_fingerprint?: string;
   reason?: string; phase?: string; elapsed_ms?: number; response_status?: number;
   content_type?: string; provider?: string; model?: string;
+  /** Reconnects spent before the request gave up (#42). */
+  retries?: number;
+  /** The provider's id for the request (Anthropic `request-id`), for a
+   *  support inquiry. Server log only: it is not shown in Discord. */
+  request_id?: string;
 };
 
 // Never retain upstream messages, bodies, URLs or arbitrary error properties.
@@ -72,8 +77,33 @@ function classifyApiFailure(raw: unknown): ProviderError {
   return new ProviderError(transient ? "transient" : "protocol", transient);
 }
 
+const phaseWords: Record<string, string> = { request: "送信時", stream: "受信中" };
+const reasonWords: Record<string, string> = {
+  idle_timeout: "無応答で打ち切り", transport_error: "接続切断", invalid_json: "不正な応答",
+  provider_error: "応答が途中で終了",
+};
+
+/** Where a provider request failed, in fixed words for Discord (#42), e.g.
+ *  "受信中・overloaded_error" or "送信時・HTTP 529". Built only from the
+ *  phase, an HTTP status and the code/type `errorDiagnostics` already
+ *  restricted to [a-z_], so no provider text can reach a channel. */
+export function failureDetail(diagnostics: ProviderDiagnostics | undefined, status?: number): string {
+  const d = diagnostics ?? {};
+  // `error` is the SSE event name, not a cause.
+  const type = [d.type, d.code].find((v) => v && v !== "error");
+  const cause = status ? `HTTP ${status}` : type ?? (d.reason ? reasonWords[d.reason] : undefined);
+  return [d.phase ? phaseWords[d.phase] : undefined, cause].filter(Boolean).join("・");
+}
+
 export function providerFailureNotice(error: unknown): string | undefined {
   if (!(error instanceof ProviderError)) return;
+  const detail = [failureDetail(error.diagnostics, error.status),
+    error.diagnostics.retries ? `再試行 ${error.diagnostics.retries} 回` : ""].filter(Boolean).join("・");
+  const notice = providerFailureText(error);
+  return detail ? `${notice}（${detail}）` : notice;
+}
+
+function providerFailureText(error: ProviderError): string {
   switch (error.kind) {
     case "authentication": return "プロバイダの認証・権限エラーです。APIキーと利用権限を確認してください。";
     case "not_found": return "プロバイダのモデルまたは接続先が見つかりません。選択モデルと接続先を確認してください。";

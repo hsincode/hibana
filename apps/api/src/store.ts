@@ -541,6 +541,11 @@ export class NeonStore implements Store {
         failure_code TEXT,
         http_status INTEGER,
         has_checkpoint BOOLEAN,
+        failure_stage TEXT,
+        failure_reason TEXT,
+        error_type TEXT,
+        retries INTEGER,
+        effort TEXT,
         latency_ms INTEGER
       )`;
       // Keep deployments that already have the logs table compatible with the
@@ -549,6 +554,12 @@ export class NeonStore implements Store {
       await this.sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS failure_code TEXT`;
       await this.sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS http_status INTEGER`;
       await this.sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS has_checkpoint BOOLEAN`;
+      // Provider failure detail (#42).
+      await this.sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS failure_stage TEXT`;
+      await this.sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS failure_reason TEXT`;
+      await this.sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS error_type TEXT`;
+      await this.sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS retries INTEGER`;
+      await this.sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS effort TEXT`;
       // The log page always sorts by recency and filters by guild/user, so both
       // indexes are on `id DESC` — a plain `at` index would still need the sort.
       await this.sql`CREATE INDEX IF NOT EXISTS logs_id_desc ON logs (id DESC)`;
@@ -833,12 +844,15 @@ export class NeonStore implements Store {
         INSERT INTO logs (
           at, guild_id, guild_name, channel_id, channel_name, user_id, username,
           trigger_reason, prompt, reply, provider, model, error,
-          failure_phase, failure_code, http_status, has_checkpoint, latency_ms
+          failure_phase, failure_code, http_status, has_checkpoint,
+          failure_stage, failure_reason, error_type, retries, effort, latency_ms
         ) VALUES (
           ${e.at}, ${e.guild_id}, ${e.guild_name}, ${e.channel_id}, ${e.channel_name},
           ${e.user_id}, ${e.username}, ${e.trigger}, ${e.prompt}, ${e.reply},
           ${e.provider}, ${e.model}, ${e.error}, ${e.failure_phase},
-          ${e.failure_code}, ${e.http_status}, ${e.has_checkpoint}, ${e.latency_ms}
+          ${e.failure_code}, ${e.http_status}, ${e.has_checkpoint},
+          ${e.failure_stage}, ${e.failure_reason}, ${e.error_type}, ${e.retries}, ${e.effort},
+          ${e.latency_ms}
         )
       `;
     }
@@ -855,7 +869,8 @@ export class NeonStore implements Store {
     const rows = (await this.sql`
       SELECT id, at, guild_id, guild_name, channel_id, channel_name, user_id,
              username, trigger_reason AS trigger, prompt, reply, provider, model,
-             error, failure_phase, failure_code, http_status, has_checkpoint, latency_ms
+             error, failure_phase, failure_code, http_status, has_checkpoint,
+             failure_stage, failure_reason, error_type, retries, effort, latency_ms
       FROM logs
       WHERE (${q.before}::bigint IS NULL OR id < ${q.before}::bigint)
         AND (${q.guild_id}::text IS NULL OR guild_id = ${q.guild_id}::text)

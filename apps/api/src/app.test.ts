@@ -1363,6 +1363,24 @@ describe("audit logs", () => {
     expect(rows[0]?.has_checkpoint).toBeNull();
   });
 
+  // #42: where a provider request failed, kept only as fixed vocabulary.
+  test("POST /internal/logs keeps the provider failure detail and drops anything else", async () => {
+    const { app, store } = await setup({ logsEnabled: true });
+    const post = (fields: Record<string, unknown>) => app.handle(
+      req("/internal/logs", {
+        method: "POST",
+        headers: { authorization: "Bearer test-internal" },
+        body: JSON.stringify({ entries: [{ ...entry, reply: null, ...fields }] }),
+      }),
+    );
+    await post({ failure_stage: "stream", failure_reason: "provider_error", error_type: "overloaded_error", retries: 5, effort: "medium" });
+    await post({ failure_stage: "upload", failure_reason: "Secret text", error_type: "Overloaded Error!", retries: -1, effort: "x".repeat(40) });
+    const query = { limit: 10, before: null, guild_id: null, user_id: null, scope: "all" as const, q: null };
+    const [bad, good] = await store.listLogs(query);
+    expect(good).toMatchObject({ failure_stage: "stream", failure_reason: "provider_error", error_type: "overloaded_error", retries: 5, effort: "medium" });
+    expect(bad).toMatchObject({ failure_stage: null, failure_reason: null, error_type: null, retries: null, effort: null });
+  });
+
   test("GET /api/logs is empty and flagged off by default", async () => {
     const { app } = await setup();
     const denied = await app.handle(req("/api/logs", { cookie: "sess-free" }));

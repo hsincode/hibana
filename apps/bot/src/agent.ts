@@ -1,6 +1,7 @@
 import { StopHookExhaustedError, type StopHook } from "./stop-hook";
 import type { ServiceTier } from "@hibana/shared/settings";
 import { LlmClient } from "./llm";
+import { failureDetail } from "./llm-errors";
 import type { Selection } from "./config";
 import { jevTaskModeIn, jevTaskModeMessage } from "./jev-task";
 import { Serial } from "./io";
@@ -91,9 +92,10 @@ export class Agent {
           nativeSearch: !taskMode && o.nativeSearch,
           signal: o.requestSignal?.() ?? o.context.signal,
           trace: { channel: o.context.channelId, agent: lineage, round, child: o.context.depth > 0 },
-          onRetry: async ({ attempt, maxRetries, status }) => {
+          onRetry: async ({ attempt, maxRetries, status, diagnostics }) => {
+            const detail = failureDetail(diagnostics, status);
             await o.context.progress?.(
-              `応答を再接続しています（${attempt}/${maxRetries}${status ? `・HTTP ${status}` : ""}）。進捗は保持しています。`,
+              `応答を再接続しています（${attempt}/${maxRetries}${detail ? `・${detail}` : ""}）。進捗は保持しています。`,
             ).catch(() => {});
           },
         });

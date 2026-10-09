@@ -6,6 +6,7 @@ import type { Runtime } from "./runtime";
 import type { ToolRegistry } from "./tools";
 import type { History } from "./history";
 import type { Voice } from "./voice";
+import type { UsageLedger } from "./usage-ledger";
 import type { Context, Json } from "./types";
 const string = (
   name: string,
@@ -37,6 +38,7 @@ export function commands(runtime: Runtime) {
     command("clear", "このチャンネルの会話履歴を消去"),
     command("context", "会話履歴とトークン使用量"),
     command("retry", "失敗した作業を再開"),
+    command("usage", "Anthropic API の推計利用額（owner のみ）"),
     command("switch", "このサーバーのモデルを切り替え", [
       { ...string("preset", "モデルのプリセット"), autocomplete: true },
       string("effort", "推論の深さ", [...REASONING_EFFORTS, "default"]),
@@ -135,6 +137,7 @@ export async function handleCommand(
   history: History,
   voice: Voice,
   retry: (ctx: Context) => Promise<void>,
+  usage: UsageLedger,
 ) {
   if (runtime.snapshot.blocked_users.includes(i.user.id)) {
     await i.reply({
@@ -171,6 +174,13 @@ export async function handleCommand(
         break;
       case "context":
         result = history.info(ctx.channelId);
+        break;
+      case "usage":
+        // Spend covers every server the bot is in, so only the owner
+        // (`WEB_ADMIN_IDS`, role administrator) may read it (#44).
+        if (runtime.role(i.user.id) !== "administrator")
+          throw new Error("このコマンドは owner のみ使用できます。");
+        result = usage.summary();
         break;
       case "clear":
         history.clear(ctx.channelId);

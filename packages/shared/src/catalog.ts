@@ -434,3 +434,47 @@ export function effectiveMinRole(
 ): string | null {
   return isPremium(id, overrides) ? "premium" : null;
 }
+
+/** USD per million tokens on Anthropic's own API (`provider: "anthropic"`).
+ *  Source: https://platform.claude.com/docs/en/about-claude/pricing, read
+ *  2026-10-09 (#44). Hibana only sets 1-hour cache breakpoints and sends no
+ *  server tools, so 5-minute writes and per-search fees are not priced. Update
+ *  this table by hand when Anthropic changes its prices. */
+export type AnthropicPrice = {
+  input: number;
+  cache_write_1h: number;
+  cache_read: number;
+  output: number;
+};
+export const ANTHROPIC_PRICES: Record<
+  string,
+  AnthropicPrice & { long?: { above: number } & AnthropicPrice }
+> = {
+  "claude-opus-5-5": { input: 4, cache_write_1h: 8, cache_read: 0.2, output: 20 },
+  "claude-sonnet-5-5": { input: 2, cache_write_1h: 4, cache_read: 0.1, output: 10 },
+  // Haiku 5.5 bills a whole request at the higher row once its prompt,
+  // cache reads and writes included, is over 100,000 tokens.
+  "claude-haiku-5-5": {
+    input: 0.1, cache_write_1h: 0.2, cache_read: 0.01, output: 0.5,
+    long: { above: 100_000, input: 0.5, cache_write_1h: 1, cache_read: 0.05, output: 2.5 },
+  },
+};
+
+/** Estimated USD for one Anthropic request, or `undefined` for a model the
+ *  table does not price. `prompt` counts uncached input plus cache reads and
+ *  writes, as the bot's normalized usage does. */
+export function anthropicCost(
+  model: string,
+  usage: { prompt: number; cache_read: number; cache_write: number; output: number },
+): number | undefined {
+  const row = ANTHROPIC_PRICES[model];
+  if (!row) return undefined;
+  const price = row.long && usage.prompt > row.long.above ? row.long : row;
+  const uncached = Math.max(0, usage.prompt - usage.cache_read - usage.cache_write);
+  return (
+    uncached * price.input +
+    usage.cache_write * price.cache_write_1h +
+    usage.cache_read * price.cache_read +
+    usage.output * price.output
+  ) / 1_000_000;
+}

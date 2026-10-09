@@ -1584,7 +1584,7 @@ function JevPanel({
           value={s.jev_enabled}
           onChange={(v) => onPatch({ jev_enabled: v })}
           onDefault={inherit ? () => onPatch({ jev_enabled: null }) : undefined}
-          hint={`根拠の照合・分類と、回答前の完了チェックに使います。本文や成果物が不足していれば作業を続けます。${multi ? "multi では依頼の開始時に分担も判定し、調査が必要なら調査役を先に起動します。" : ""}${inherit ? " デフォルトはサーバー設定です。" : ""}`}
+          hint={`根拠の照合・分類に使います。${multi ? "multi では依頼の開始時に分担も判定し、調査が必要なら調査役を先に起動します。" : ""}${inherit ? " デフォルトはサーバー設定です。" : ""}`}
         />
         <BooleanSetting
           label="Jev 行動選択モード"

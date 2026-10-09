@@ -1,9 +1,17 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { loadConfig } from "../config";
-import { isClosedControllerError } from "../io";
+import { isClosedControllerError, withAbort } from "../io";
 import { Runtime } from "../runtime";
 import { retryDelay, WebSync } from "../sync";
 import type { ToolRegistry } from "../tools";
+
+test("withAbort stops waiting on work that has not settled", async () => {
+  const abort = new AbortController(), pending = Promise.withResolvers<void>();
+  const waiting = withAbort(pending.promise, abort.signal);
+  abort.abort(new Error("cancelled"));
+  await expect(waiting).rejects.toThrow("cancelled");
+  pending.resolve();
+});
 
 describe("closed fetch-body errors", () => {
   test("matches Bun's webstreams adapter TypeError", () => {

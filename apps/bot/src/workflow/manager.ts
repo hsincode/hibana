@@ -315,8 +315,8 @@ export class WorkflowManager {
     if (!task) return { success: false, message: `No task found with ID: ${id}` };
     if (task.run.status !== "running") return { success: false, message: `Task ${id} is not running (status: ${task.run.status})` };
     task.run.stop(true);
-    // Worded like interrupt_agent's reason: Jev's Stop check once rejected an
-    // answer three times because a deliberate stop read as unfinished work.
+    // Worded like interrupt_agent's reason, so a deliberate stop does not
+    // read as unfinished work.
     return { success: true, message: `Successfully stopped task: ${task.id} (${task.run.meta.name}). Stopped on purpose by the main agent; the stopped work is not unfinished user work.`, task_id: task.id, run_id: task.run.id };
   }
 
@@ -379,7 +379,6 @@ export class WorkflowManager {
         tools: tools(context),
         getTools: tools,
         jevTaskMode: undefined,
-        stopHook: undefined,
         checkpoint: undefined,
         requestSignal: undefined,
         takeSteering: undefined,

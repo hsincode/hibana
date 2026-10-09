@@ -1,4 +1,3 @@
-import { StopHookExhaustedError } from "./stop-hook";
 import {
   Client,
   Events,
@@ -632,7 +631,6 @@ export class Hibana {
         tools: this.tools.tools(ctx),
         getTools: (c) => this.tools.tools(c),
         jevTaskMode: (c) => this.tools.jevTaskMode(c),
-        stopHook: input => this.tools.checkCompletion(input),
         context: ctx,
         maxRounds: this.config.maxRounds,
         serviceTier: settings.service_tier,
@@ -766,9 +764,7 @@ export class Hibana {
           );
         }
         state.accepting = false;
-        const reason = error instanceof StopHookExhaustedError
-          ? "Jev の完了チェックで不足が残ると判定されたため、完了扱いにせず停止しました。"
-          : providerFailureNotice(error) ?? "処理に失敗しました。";
+        const reason = providerFailureNotice(error) ?? "処理に失敗しました。";
         await send(reason + (
           checkpointPersisted
             ? " 進捗を保存しました。`/retry` または次のメッセージで再開できます。"

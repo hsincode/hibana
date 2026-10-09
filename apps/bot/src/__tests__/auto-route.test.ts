@@ -251,7 +251,7 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
   bot.routes = new RouteMemory(() => now);
   let score: number | Error = 5, routings = 0, requested = "none";
   bot.tools.jev.decide = (async (input: { questions: Json }) => {
-    // The completion check shares this client; only routing is under test.
+    // Other Jev decisions share this client; only routing is under test.
     if (!input.questions.difficulty) throw new Error("not routing");
     routings++;
     if (score instanceof Error) throw score;

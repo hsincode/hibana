@@ -618,9 +618,9 @@ export class MultiAgentSession {
         throw new Error("Cannot interrupt root or yourself");
       const previous_status = recipient.status;
       recipient.restart = false;
-      // The reason reaches the parent's mailbox and the Stop check's evidence.
-      // A bare "interrupted" read as unfinished work: in production Jev
-      // rejected an Ultra answer three times after root stopped idle workers.
+      // The reason reaches the parent's mailbox. A bare "interrupted" read as
+      // unfinished work: in production the since-removed Jev completion check
+      // (#50) rejected an Ultra answer three times after root stopped idle workers.
       recipient.controller.abort(new Error(
         `Stopped on purpose by ${caller.path}; this assignment is no longer needed and is not unfinished user work`,
       ));

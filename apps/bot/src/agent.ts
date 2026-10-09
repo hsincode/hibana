@@ -1,4 +1,3 @@
-import { StopHookExhaustedError, type StopHook } from "./stop-hook";
 import type { ServiceTier } from "@hibana/shared/settings";
 import { LlmClient } from "./llm";
 import { failureDetail } from "./llm-errors";
@@ -42,7 +41,6 @@ export type AgentOptions = {
   /** Runs at the stop boundary with the candidate answer; returned messages
    *  continue the loop (worker results, the Multi-Agent review gate). */
   beforeFinal?: (candidate?: string) => Promise<Message[]>;
-  stopHook?: StopHook;
   checkpoint?: (messages: Message[], usage: Usage) => Promise<void>;
   takeSteering?: () => Message[];
   requestSignal?: () => AbortSignal | undefined;
@@ -65,7 +63,6 @@ export class Agent {
     // changed. Re-sending it every turn would split each turn from the last.
     let lastTaskMode = jevTaskModeIn(messages);
     let nudges = 0;
-    let stopContinuations = 0;
     // The soft budget is refilled once, matching the original loop's completion guarantee.
     const hardLimit = o.context.team || o.context.depth === 0 ? 512 : o.maxRounds;
     for (let round = 0; round < hardLimit; round++) {
@@ -211,8 +208,8 @@ export class Agent {
       const text = msg.content?.trim() ?? "";
       if (o.shouldStop?.()) return { text, messages, usage, rounds: round + 1 };
       // Empty/truncated transport responses are not a candidate final answer.
-      // Semantic completion belongs to the optional Stop hook, not regexes
-      // over Japanese/English delivery claims or unconditional extra turns.
+      // Nothing judges semantic completion: no regexes over Japanese/English
+      // delivery claims, no unconditional extra turns (#50).
       if ((!text || completion.incomplete) && nudges++ < 3) {
         messages.push({ role: "user", internal: true,
           content: "Continue the authorized task. Produce a complete user-facing answer; ask a concrete question only if blocked." });
@@ -220,39 +217,6 @@ export class Agent {
       }
       if (!text) throw new Error("Provider returned no user-facing answer");
       await o.checkpoint?.(messages, usage);
-      if (o.stopHook && o.context.depth === 0) {
-        const signal = o.requestSignal?.() ?? o.context.signal;
-        let outcome;
-        try {
-          outcome = await o.stopHook({
-            messages, lastAssistantMessage: text, context: o.context,
-            stopHookActive: stopContinuations > 0, signal,
-            recordUsage: u => { addUsage(usage, u); o.recordUsage?.(u); },
-          });
-        } catch (error) {
-          const fresh = o.takeSteering?.() ?? [];
-          if (fresh.length && !o.context.signal?.aborted) {
-            messages.push(...fresh);
-            continue;
-          }
-          throw error;
-        }
-        // A user correction or worker report arriving during the check makes
-        // its decision stale. Process that input before applying any verdict.
-        const fresh = o.takeSteering?.() ?? [];
-        if (fresh.length) { messages.push(...fresh); continue; }
-        signal?.throwIfAborted();
-        if (outcome.decision === "block") {
-          // Codex Stop hooks resume via a user-role reason. Two continuations
-          // bound evaluator/model disagreements; keep the checkpoint instead
-          // of presenting a repeatedly rejected draft as completed work.
-          if (stopContinuations >= 2) throw new StopHookExhaustedError();
-          stopContinuations++;
-          messages.push({ role: "user", internal: true, content: outcome.reason });
-          await o.checkpoint?.(messages, usage);
-          continue;
-        }
-      }
       return { text, messages, usage, rounds: round + 1 };
     }
     throw new Error(

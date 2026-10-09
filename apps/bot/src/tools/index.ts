@@ -1,5 +1,3 @@
-import { evaluateCompletion, withAbort } from "../jev-stop";
-import type { StopHookInput, StopDecision } from "../stop-hook";
 import type { Logger } from "pino";
 import { MODEL_PRESETS } from "@hibana/shared/catalog";
 import { readFile, mkdir, writeFile, lstat } from "node:fs/promises";
@@ -38,7 +36,7 @@ import { Agent } from "../agent";
 import { nativeSearchFor } from "../llm";
 import { JevClient, JEV_NOTICE_HEADER, jevInputSchema } from "../jev";
 import { jevTaskSchema, jevTaskTool, jevRequiredActionTools, runJevTask } from "../jev-task";
-import { Semaphore } from "../io";
+import { Semaphore, withAbort } from "../io";
 import { triggerWords } from "../triggers";
 import type { Context, Json, Message, ToolDef, Usage } from "../types";
 import {
@@ -144,55 +142,7 @@ export class ToolRegistry {
     }, 3600000);
     this.maintenance.unref();
   }
-  async checkCompletion(input: StopHookInput): Promise<StopDecision> {
-    const ctx = input.context;
-    const enabled = () => ctx.depth === 0 && this.runtime.config.toolsEnabled &&
-      this.runtime.config.subagentEnabled && !!this.runtime.config.jevApiKey &&
-      this.runtime.resolve(ctx.guildId, ctx.userId).jev_enabled &&
-      !this.runtime.snapshot.blocked_users.includes(ctx.userId) &&
-      !this.runtime.guild(ctx.guildId).bot_disabled;
-    if (!enabled()) return { decision: "allow" };
-    // Optional evaluation must not hold a response for all HTTP retries or
-    // an occupied Jev slot. Timeout/error follows Codex's normal stop path.
-    const signal = AbortSignal.any([
-      ...(input.signal ? [input.signal] : []),
-      ...(ctx.signal ? [ctx.signal] : []),
-      AbortSignal.timeout(20000),
-    ]);
-    const started = performance.now();
-    const settings = this.runtime.resolve(ctx.guildId, ctx.userId);
-    const fields = { channel: ctx.channelId, message_id: ctx.messageId,
-      settings_version: this.runtime.snapshot.version, ultra_mode: settings.ultra_mode,
-      multi_agent: settings.multi_agent, jev_task_enabled: settings.jev_task_enabled,
-      stop_hook_active: input.stopHookActive };
-    let verdict = "unavailable";
-    try {
-      const result = await withAbort(this.subagents.run(async () => {
-        signal.throwIfAborted();
-        if (!enabled()) return undefined;
-        // Automatic completion checks stay silent and do not consume the
-        // visible invocation count used by explicit Jev tool calls.
-        return evaluateCompletion(input, this.jev.decide.bind(this.jev), signal);
-      }), signal);
-      if (!enabled() || !result) { verdict = "disabled"; return { decision: "allow" }; }
-      verdict = result.verdict;
-      return result.outcome;
-    } catch {
-      // User steering is cancellation, not evaluator failure. The agent loop
-      // consumes the new input and discards the candidate being checked.
-      if (input.signal?.aborted || ctx.signal?.aborted) {
-        verdict = "interrupted";
-        (input.signal?.aborted ? input.signal : ctx.signal)!.throwIfAborted();
-      }
-      await ctx.progress?.("Jev の完了チェックを利用できなかったため、通常の応答を返します。").catch(() => {});
-      return { decision: "allow" };
-    } finally {
-      // Never log request text, worker output, candidate answers or API bodies.
-      this.log?.info({ ...fields, verdict, elapsed_ms: Math.round(performance.now() - started) }, "Jev completion check finished");
-    }
-  }
-  /** Multi-Agent turn-start classification. Silent like the completion check:
-   *  no Discord notice or visible Jev count, and any failure means "no hint". */
+  /** Multi-Agent turn-start classification. Silent: no Discord notice or visible Jev count, and any failure means "no hint". */
   async triage(ctx: Context, messages: readonly Message[]): Promise<{ triage: Triage; usage: Usage } | undefined> {
     const enabled = () => {
       const settings = this.runtime.resolve(ctx.guildId, ctx.userId);

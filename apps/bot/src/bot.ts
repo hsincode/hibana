@@ -1,4 +1,3 @@
-import { StopHookExhaustedError } from "./stop-hook";
 import {
   Client,
   Events,
@@ -15,7 +14,7 @@ import type { Config, Selection } from "./config";
 import { Runtime } from "./runtime";
 import { LlmClient, nativeSearchFor } from "./llm";
 import { providerFailureNotice, ProviderError } from "./llm-errors";
-import { checkpointSnapshot, checkpointInScope, resumeCheckpoint, type Checkpoint } from "./checkpoint";
+import { checkpointSnapshot, checkpointInScope, resumeCheckpoint, resumeNote, type Checkpoint } from "./checkpoint";
 import { Agent, type AgentOptions } from "./agent";
 import { MultiAgentSession } from "./multi-agent";
 import { History } from "./history";
@@ -621,6 +620,11 @@ export class Hibana {
         if (reminder) messages.push(reminder);
         const full = reminder?.content === systemReminder(ULTRACODE_ENTER_FULL);
         if (workflows && (ctx.workflowKeyword || full)) messages.push(...this.authoringReference(ctx, state, messages));
+      } else {
+        // /retry: nothing follows the saved history, so it must not end on
+        // the assistant's own draft.
+        const note = resumeNote(messages);
+        if (note) messages.push(note);
       }
       failurePhase = "checkpoint_save";
       await this.saveCheckpoint(ctx, messages, seed, key);
@@ -632,7 +636,6 @@ export class Hibana {
         tools: this.tools.tools(ctx),
         getTools: (c) => this.tools.tools(c),
         jevTaskMode: (c) => this.tools.jevTaskMode(c),
-        stopHook: input => this.tools.checkCompletion(input),
         context: ctx,
         maxRounds: this.config.maxRounds,
         serviceTier: settings.service_tier,
@@ -766,9 +769,7 @@ export class Hibana {
           );
         }
         state.accepting = false;
-        const reason = error instanceof StopHookExhaustedError
-          ? "Jev の完了チェックで不足が残ると判定されたため、完了扱いにせず停止しました。"
-          : providerFailureNotice(error) ?? "処理に失敗しました。";
+        const reason = providerFailureNotice(error) ?? "処理に失敗しました。";
         await send(reason + (
           checkpointPersisted
             ? " 進捗を保存しました。`/retry` または次のメッセージで再開できます。"

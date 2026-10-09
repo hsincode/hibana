@@ -2,7 +2,7 @@ import type { JevClient } from "./jev";
 import type { Message, Usage } from "./types";
 
 // One batched Decisions call before the orchestrator's first model request.
-// Production Jev completion checks take ~0.5–0.8 s; the deadline bounds a
+// Production Jev decisions took ~0.5–0.8 s (2026-09-23); the deadline bounds a
 // busy shared Jev slot or a slow API so triage never stalls the turn.
 export const TRIAGE_TIMEOUT_MS = 5000;
 // Pre-starting an explorer costs a child run when the guess is wrong, but

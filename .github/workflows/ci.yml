@@ -19,7 +19,7 @@ jobs:
           bun-version: "1.4.0"
       - run: bun install --frozen-lockfile
       - run: make ci
-      - run: bunx playwright install --with-deps chromium
+      - run: bunx playwright install --with-deps --only-shell chromium
         working-directory: apps/web
       - run: bun run test:ui
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

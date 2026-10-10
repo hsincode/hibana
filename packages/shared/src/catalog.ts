@@ -260,13 +260,22 @@ export function canonicalModel(provider: string, model: string): string {
 export const AUTO_ROUTE_PROVIDER = "anthropic";
 export const AUTO_ROUTE_MODEL = "auto";
 
-/** Easiest to hardest, as the owner listed them (#35). `max` never appears. */
+/** Easiest to hardest (#35). `max` never appears. Since 2026-10-10 the
+ *  difficulty alone never picks Sonnet: the middle of the scale runs on Haiku
+ *  and the two top levels on Opus. */
 export const AUTO_ROUTE_LEVELS = [
   { model: "claude-haiku-5-5", effort: "medium" },
   { model: "claude-haiku-5-5", effort: "high" },
-  { model: "claude-sonnet-5-5", effort: "medium" },
-  { model: "claude-sonnet-5-5", effort: "high" },
+  { model: "claude-haiku-5-5", effort: "xhigh" },
   { model: "claude-opus-5-5", effort: "medium" },
+  { model: "claude-opus-5-5", effort: "high" },
+] as const;
+
+/** Reached only when the message asks for the model by name (#35). `level` is
+ *  the difficulty each one stands for when the nearest effort is picked. */
+export const AUTO_ROUTE_REQUEST_ONLY = [
+  { model: "claude-sonnet-5-5", effort: "medium", level: 2 },
+  { model: "claude-sonnet-5-5", effort: "high", level: 3 },
 ] as const;
 
 /** Used whenever Jev cannot classify the request. */

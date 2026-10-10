@@ -11,7 +11,9 @@ import type { Message } from "./types";
 type Tier = "haiku" | "sonnet" | "opus";
 export type RouteCase = {
   text: string;
-  /** Models the difficulty may route to; two entries mark a boundary case. */
+  /** Models the difficulty may route to; two entries mark a boundary case.
+   *  The difficulty never routes to Sonnet (#35, 2026-10-10): only a message
+   *  that asks for it does. */
   tiers: Tier[];
   /** Model the message asks for; absent when it asks for none. */
   requested?: Tier;
@@ -35,42 +37,40 @@ export const ROUTE_CASES: RouteCase[] = [
     "「了解しました」を丁寧な英語のメールの一文にして",
     "こんばんは〜", "今日は何曜日？", "「ありがとう」を韓国語で", "富士山の高さは？", "眠い",
     "この英文を和訳して: The meeting has been moved to Friday.", "りんごは英語で？", "OK、了解",
-  ),
-  ...difficulty(["haiku", "sonnet"],
     "Pythonでフィボナッチ数列を出力するスクリプトを書いて",
     "メールアドレスにマッチする正規表現を書いて",
     "git で直前のコミットを取り消す方法を教えて",
-  ),
-  ...difficulty(["sonnet"],
-    "このリポジトリにレート制限のミドルウェアを追加して、テストも書いて",
-    "添付の PR をレビューして、問題点を指摘して",
-    "ユーザー管理の REST API を設計して。エンドポイントとスキーマを一覧にして",
-    "この SQL が遅い原因を調べて、インデックスの案を出して",
+    // Routine multi-step work that stands on its own. Until 2026-10-10 these
+    // routed to Sonnet medium; the same level now runs on Haiku.
     "React でページネーション付きのテーブルコンポーネントを実装して",
     "Bun と Deno と Node.js の最新の違いを調べて比較表にまとめて",
     "この関数にユニットテストを追加して、境界値も網羅して",
     "この Express アプリを Docker で動かす Dockerfile と compose を書いて",
     "リモートワークの生産性について、2000字のブログ記事を書いて",
     "添付の CSV を集計して、月別の売上の傾向を分析して",
-    "本番でだけ起きるメモリリークの原因を、添付のヒーププロファイルとログから特定して修正案を出して",
-    "このクラスを責務ごとに分割するリファクタリングをして",
     "Discord bot にスラッシュコマンドを追加する方法を、コード付きで説明して",
-    "このエラーログを見て原因を調べて: TypeError: Cannot read properties of undefined (reading 'map') at UserList.tsx:42",
     "TypeScript でイベントエミッターを型安全に実装して",
     "来週の勉強会用に、Rust の所有権を説明するスライド構成を10枚分作って",
     "このシェルスクリプトを Python に書き換えて、エラー処理も足して",
-    "PostgreSQL と MySQL のどちらを選ぶべきか、うちの EC サイトの要件で比較して",
     "GitHub Actions でテストとデプロイを自動化するワークフローを書いて",
-    "この API のレスポンスが遅い。ログとコードを見てボトルネックを探して",
   ),
-  ...difficulty(["sonnet", "opus"],
-    "分散トランザクションの整合性を保ちながら、モノリスを段階的にマイクロサービスへ分割する移行計画を設計して。障害時のロールバック手順も含めて",
-    "このサービスの認証まわり全体のセキュリティレビューをして、攻撃経路を洗い出して",
-    // Expected Opus when first run as a held-out case; on the six-level scale of
-    // 2026-10-08 Jev scored it 4.03 (then Sonnet xhigh, a level since removed).
-    "うちの決済基盤を、可用性99.999%と厳密な一貫性を両立させつつ3リージョンに分散させたい。CAP の制約の中でどこを妥協すべきか、根拠付きで設計判断して",
+  ...difficulty(["haiku", "opus"],
+    "ユーザー管理の REST API を設計して。エンドポイントとスキーマを一覧にして",
+    "このエラーログを見て原因を調べて: TypeError: Cannot read properties of undefined (reading 'map') at UserList.tsx:42",
   ),
   ...difficulty(["opus"],
+    // Judgment about existing material or competing options: changing or
+    // reviewing existing code, finding a cause, choosing against requirements.
+    "このリポジトリにレート制限のミドルウェアを追加して、テストも書いて",
+    "添付の PR をレビューして、問題点を指摘して",
+    "この SQL が遅い原因を調べて、インデックスの案を出して",
+    "本番でだけ起きるメモリリークの原因を、添付のヒーププロファイルとログから特定して修正案を出して",
+    "このクラスを責務ごとに分割するリファクタリングをして",
+    "PostgreSQL と MySQL のどちらを選ぶべきか、うちの EC サイトの要件で比較して",
+    "この API のレスポンスが遅い。ログとコードを見てボトルネックを探して",
+    "分散トランザクションの整合性を保ちながら、モノリスを段階的にマイクロサービスへ分割する移行計画を設計して。障害時のロールバック手順も含めて",
+    "このサービスの認証まわり全体のセキュリティレビューをして、攻撃経路を洗い出して",
+    "うちの決済基盤を、可用性99.999%と厳密な一貫性を両立させつつ3リージョンに分散させたい。CAP の制約の中でどこを妥協すべきか、根拠付きで設計判断して",
     "この未解決予想に対する私の証明の誤りを見つけて、正しい証明を構成して",
     "自作の Raft 実装で、ネットワーク分断のあとにまれにコミット済みのログが失われる。添付のコードとログから根本原因を特定し、修正とその正しさの論証を書いて",
     "新しい鍵交換プロトコルを設計した。脅威モデルを定義して、安全性を厳密に論証するか、攻撃を構成して",
@@ -87,6 +87,25 @@ export const ROUTE_CASES: RouteCase[] = [
     "この定理の証明のステップ4が成り立たない気がする。反例を作るか、ギャップを埋める補題を証明して",
     "CRDT ベースの共同編集で、三者が同時に編集したときに収束しないケースがある。アルゴリズムの欠陥を特定して、収束性を証明できる修正を設計して",
     "この機械学習の論文の主定理の証明に誤りがあると思う。どこが間違っているか特定して、主張が救えるか検討して",
+  ),
+  // Held out on 2026-10-10: written before their first run and not used to
+  // word the criteria. They sit on both sides of the Haiku / Opus line.
+  ...difficulty(["haiku"],
+    "Next.js でお問い合わせフォームのページを作って。バリデーションも入れて",
+    "この JSON を CSV に変換する Node.js スクリプトを書いて",
+    "東京・大阪・福岡のコワーキングスペースの料金を調べて、表にまとめて",
+    "新入社員向けに、Git の基本操作の手順書を書いて",
+    "この議事録をもとに、参加者に送るフォローアップのメールを書いて",
+    "nginx でリバースプロキシを設定する conf を書いて。HTTPS と WebSocket も通して",
+    "3泊4日の京都旅行のプランを作って。移動手段と予算も入れて",
+  ),
+  ...difficulty(["opus"],
+    "このモジュールの設計をレビューして、依存関係の問題と直し方を提案して",
+    "CI がときどき落ちる。添付のログを見て、不安定なテストの原因を調べて",
+    "うちのチーム（5人、月間10万ユーザー）で、モノレポに移行すべきか判断して。根拠も",
+    "既存の認証を JWT からセッション方式に置き換えたい。影響範囲を洗い出して、移行手順を作って",
+    "この Terraform の構成を見て、コストとセキュリティの問題点を指摘して",
+    "先月から売上が落ちている。添付の3つのレポートを突き合わせて、考えられる原因を分析して",
   ),
   { text: "Opusで答えて。日本の首都は？", tiers: all, requested: "opus" },
   { text: "ここからはOpusに切り替えて", tiers: all, requested: "opus" },
@@ -121,10 +140,13 @@ export async function runRouteEval(cases: RouteCase[]): Promise<number> {
   // bot.ts appends this metadata to every Discord message.
   const meta = "\n\n[author: tester; user_id: 1; channel_id: 2; message_id: 3]";
   let passed = 0;
+  // A call that reports no cost leaves the total unknown, not smaller.
+  let cost: number | undefined = 0;
   for (const c of cases) {
     const messages: Message[] = [{ role: "user", content: c.text + meta, turnStart: true }];
     try {
       const raw = await jev.decide(routeInput(messages));
+      cost = cost === undefined || raw.cost === undefined ? undefined : cost + raw.cost;
       const decided = await evaluateRoute(messages, async () => raw, new AbortController().signal);
       const score = (raw.answers.difficulty as { score: number }).score;
       const tier = tierOf(decided.selection.model);
@@ -139,7 +161,7 @@ export async function runRouteEval(cases: RouteCase[]): Promise<number> {
       console.log(JSON.stringify({ pass: false, error: String(error), text: c.text.slice(0, 40) }));
     }
   }
-  console.log(`passed ${passed}/${cases.length}`);
+  console.log(`passed ${passed}/${cases.length}, cost ${cost === undefined ? "unknown" : `$${cost.toFixed(4)}`}`);
   return passed;
 }
 

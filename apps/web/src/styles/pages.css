@@ -88,6 +88,30 @@
 .chart-active { fill: color-mix(in oklch, var(--f1) 16%, transparent); }
 .cost-table td, .cost-table th { padding-top: 8px; padding-bottom: 8px; }
 
+/* ============ ユーザー: 利用停止 ============ */
+.block-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-3); padding-bottom: var(--sp-3); }
+.block-form .field { flex: 1 1 200px; }
+.block-form .field.is-id { flex: 0 1 240px; }
+
+/* ============ 会話ログ ============ */
+.log-table .prompt { max-width: 38ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.log-row { cursor: pointer; transition: background var(--dur-fast); }
+.log-row:hover, .log-row.is-open { background: var(--wash); }
+.log-row.is-open > td { border-bottom-color: transparent; }
+.log-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: transparent; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ink); white-space: nowrap; }
+.log-toggle .ic { color: var(--hot-ink); transition: transform var(--dur-fast); }
+.log-row.is-open .log-toggle .ic { transform: rotate(90deg); }
+.log-detail > td { padding: 0 0 var(--sp-4) 0; background: var(--wash); }
+.log-detail-in { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-4) var(--sp-5); padding: var(--sp-3) var(--sp-4) 0 22px; animation: fade-in 200ms linear backwards; }
+.log-detail-in h3 { margin-bottom: 4px; font-size: var(--fs-xs); font-weight: 500; color: var(--muted); }
+.log-detail-in h3.gap { margin-top: var(--sp-3); }
+/* 依頼と返信は、改行を保ったまま全文を出す */
+.log-detail-in p { color: var(--ink); font-size: var(--fs-sm); overflow-wrap: anywhere; white-space: pre-wrap; }
+.kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 12px; font-size: var(--fs-xs); }
+.kv dt { color: var(--muted); font-family: var(--font-mono); }
+.kv dd { font-family: var(--font-mono); color: var(--ink); overflow-wrap: anywhere; }
+.log-more { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--sp-3); padding-top: var(--sp-4); color: var(--muted); font-size: var(--fs-sm); }
+
 @media (max-width: 900px) {
   .stats, .stats.is-three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat:nth-child(odd) { padding-left: 0; border-left: 0; }
@@ -100,6 +124,13 @@
   }
   .chart-panel.frame::before { inset: -1px 0; }
   .guild-grid { gap: var(--sp-4); }
+  .block-form .field, .block-form .field.is-id { flex: 1 1 100%; }
+  .block-form .btn { flex: 1; }
+  .log-detail-in { grid-template-columns: minmax(0, 1fr); padding-left: 0; padding-right: 0; }
+  .stack tr.log-detail { display: block; padding: 0 0 var(--sp-3); }
+  .stack tr.log-row.is-open { border-bottom-color: transparent; }
+  .log-table .prompt { max-width: none; white-space: normal; overflow-wrap: anywhere; }
+  .log-toggle { min-height: 40px; }
   .month-meta { width: 100%; justify-content: space-between; }
   .chart-panel { padding-block: var(--sp-3); }
   .cost-table { min-width: 340px; }

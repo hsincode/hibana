@@ -54,6 +54,11 @@ export function clearApiCache(): void {
   inflight.clear();
 }
 
+/** 1 つのパスだけ読み直させる（サーバーを止めたあとの一覧など）。 */
+export function invalidateApi(path: string): void {
+  inflight.delete(path);
+}
+
 export type Me = {
   id: string;
   username: string;
@@ -62,6 +67,8 @@ export type Me = {
   can_manage_users: boolean;
   /** 利用料ページを開けるか。旧 API は返さないので、無ければ出さない。 */
   can_view_analytics?: boolean;
+  /** 会話ログを読み、サーバーの停止と利用停止を操作できるか（Administrator / Moderator）。無ければ出さない。 */
+  can_moderate?: boolean;
 };
 
 export type GuildSummary = {
@@ -69,6 +76,10 @@ export type GuildSummary = {
   name: string;
   icon: string | null;
   preset: string | null;
+  /** このサーバーで bot を止めているか。 */
+  bot_disabled?: boolean;
+  /** 自分が参加しているサーバーか。Administrator / Moderator には、参加していないサーバーも返る。 */
+  member?: boolean;
 };
 
 export type Artifact = {
@@ -111,6 +122,8 @@ export type Catalog = {
 };
 
 export type GuildSettings = Record<string, unknown> & {
+  /** このサーバーで bot を止めているか。変えられるのは Administrator / Moderator だけ（API が断る）。 */
+  bot_disabled?: boolean;
   mcp_enabled?: boolean | null;
   mcp_url?: string | null;
   selection?: {

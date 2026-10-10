@@ -60,7 +60,7 @@ export function Palette({
         group: "サーバー",
         icon: <Icon.server />,
         label: g.name,
-        where: g.id === currentId ? "今のサーバー" : `ID ${g.id}`,
+        where: `${g.id === currentId ? "今のサーバー" : `ID ${g.id}`}${g.bot_disabled ? " · 停止中" : ""}`,
         to: guildPath(g.id),
       });
     }
@@ -77,6 +77,8 @@ export function Palette({
     }
     if (me.can_view_analytics)
       items.push({ group: "ページ", icon: <Icon.gauge />, label: "利用料", where: "管理", to: "/analytics" });
+    if (me.can_moderate)
+      items.push({ group: "ページ", icon: <Icon.log />, label: "会話ログ", where: "管理", to: "/logs" });
     if (current) {
       for (const s of GUILD_SETTINGS) {
         const page = GUILD_PAGES.find((p) => p.path === s.page);

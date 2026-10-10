@@ -4,6 +4,7 @@ import { apiCached, type Catalog, type GuildSummary, type Preset } from "./api";
 import {
   Alert,
   Avatar,
+  Badge,
   Empty,
   Icon,
   ProviderTile,
@@ -119,6 +120,9 @@ export function GuildList() {
                       <span className="is-text">env 既定</span>
                     )}
                   </span>
+                  {g.bot_disabled && <Badge tone="danger">停止中</Badge>}
+                  {/* Administrator / Moderator には、参加していないサーバーも並ぶ。自分のサーバーと見分けられるようにする。 */}
+                  {g.member === false && <Badge>参加していない</Badge>}
                 </span>
               </span>
               <Icon.chevronRight />

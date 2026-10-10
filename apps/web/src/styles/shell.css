@@ -105,6 +105,7 @@
 @keyframes page-enter { from { opacity: 0; transform: translateY(10px); } }
 .page-head { display: flex; flex-direction: column; gap: var(--sp-2); }
 .page-head .lead { max-width: 68ch; color: var(--ink-2); }
+.page-head > .alert { margin-top: var(--sp-2); }
 .page-head-row { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--sp-4); }
 .head-search { width: min(300px, 100%); }
 /* 見出し: 墨の字の尾だけに箔の色が入る */
@@ -120,6 +121,12 @@
 .guild-heading .titles { min-width: 0; flex: 1; }
 .guild-heading h1 { overflow-wrap: anywhere; }
 .guild-heading .sub { color: var(--muted); font-size: var(--fs-sm); }
+.guild-status { display: flex; align-items: center; gap: 6px; flex: none; }
+/* サーバーで bot を止めているかどうか。停止中は、色だけでなく印の形（四角）でも分かるようにする */
+.status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--wash); font-size: var(--fs-xs); color: var(--ink-2); white-space: nowrap; }
+.status-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.status-pill.is-off { color: var(--danger); border-color: color-mix(in oklch, var(--danger) 55%, var(--line)); }
+.status-pill.is-off::before { background: var(--danger); border-radius: 0; box-shadow: 0 0 8px var(--danger); }
 .guild-tabs { display: none; }
 
 /* ============ コマンドパレット ============ */

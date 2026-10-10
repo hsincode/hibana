@@ -1,4 +1,6 @@
 import {
+  createContext,
+  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
@@ -18,6 +20,7 @@ import {
   api,
   apiCached,
   clearApiCache,
+  invalidateApi,
   type GuildSummary,
   type Me,
 } from "./api";
@@ -34,6 +37,12 @@ import { Avatar, Badge, GUILD_PAGE_ICON, Icon, cdnUrl } from "./ui";
    ============================================================ */
 
 const LAST_GUILD_KEY = "hibana-guild";
+
+/**
+ * サーバーの一覧を読み直す合図。サーバーを止めた・再開したあとに呼ぶと、
+ * サイドバーの切替とコマンドパレットの「停止中」が追いつく。
+ */
+export const ReloadGuildsContext = createContext<() => void>(() => {});
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 
 function readLastGuild(): string | null {
@@ -91,11 +100,16 @@ export function Shell({
   const main = useRef<HTMLElement>(null);
   const current = useCurrentGuild(guilds);
 
-  useEffect(() => {
+  const loadGuilds = useCallback(() => {
     apiCached<{ guilds: GuildSummary[] }>("/api/guilds")
       .then((r) => setGuilds(r.guilds))
       .catch(() => undefined);
   }, []);
+  useEffect(loadGuilds, [loadGuilds]);
+  const reloadGuilds = useCallback(() => {
+    invalidateApi("/api/guilds");
+    loadGuilds();
+  }, [loadGuilds]);
 
   /* ---------- 引き出し（狭い幅のナビ） ---------- */
   useEffect(() => {
@@ -312,13 +326,14 @@ export function Shell({
               {link("/me", <Icon.user />, "マイ設定")}
               {link("/artifacts", <Icon.box />, "すべての成果物")}
             </div>
-            {(me.can_manage_users || me.can_view_analytics) && (
+            {(me.can_manage_users || me.can_view_analytics || me.can_moderate) && (
               <>
                 <div className="nav-label">管理</div>
                 <div className="nav-group">
                   {me.can_manage_users && link("/users", <Icon.users />, "ユーザー")}
                   {me.can_manage_users && link("/models", <Icon.cpu />, "モデル")}
                   {me.can_view_analytics && link("/analytics", <Icon.gauge />, "利用料")}
+                  {me.can_moderate && link("/logs", <Icon.log />, "会話ログ")}
                 </div>
               </>
             )}
@@ -326,7 +341,9 @@ export function Shell({
         </aside>
 
         <main ref={main} id="main-content" className="main" tabIndex={-1}>
-          {children}
+          <ReloadGuildsContext.Provider value={reloadGuilds}>
+            {children}
+          </ReloadGuildsContext.Provider>
         </main>
       </div>
 
@@ -476,10 +493,15 @@ function GuildSwitcher({
               >
                 <Avatar small src={cdnUrl("icons", g.id, g.icon)} name={g.name} />
                 <span className="grow">{g.name}</span>
-                {g.id === currentId && (
+                {(g.bot_disabled || g.id === currentId) && (
                   <span className="end">
-                    <Icon.check size={14} />
-                    <span className="sr">今のサーバー</span>
+                    {g.bot_disabled && <Badge tone="danger">停止中</Badge>}
+                    {g.id === currentId && (
+                      <>
+                        <Icon.check size={14} />
+                        <span className="sr">今のサーバー</span>
+                      </>
+                    )}
                   </span>
                 )}
               </button>

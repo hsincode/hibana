@@ -615,6 +615,11 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
             error: parsed.error.issues.map((i) => i.message).join("; "),
           };
         }
+        const killSwitch = refuseKillSwitchPatch(s.role, parsed.data);
+        if (killSwitch) {
+          set.status = 403;
+          return { error: killSwitch };
+        }
         const gated = refuseRestrictedPatch(
           s.role,
           parsed.data,
@@ -1301,6 +1306,21 @@ async function loadUnpublished(store: Store): Promise<string[]> {
 
 async function loadPremium(store: Store): Promise<Record<string, boolean>> {
   return parsePremiumOverrides(await store.getMeta("preset_premium"));
+}
+
+/**
+ * Stopping or resuming the bot for a whole server is a moderation power
+ * (`canModerate`, decision record #64). Everyone else who can open the server
+ * may still change its other settings, so the refusal is keyed on the one
+ * field — and covers the whole request, so a mixed PATCH is never half-saved.
+ */
+function refuseKillSwitchPatch(
+  role: Role,
+  patch: { bot_disabled?: boolean },
+): string | null {
+  return patch.bot_disabled !== undefined && !canModerate(role)
+    ? "only a moderator or administrator can stop or resume the bot for a server"
+    : null;
 }
 
 /** Reject a PATCH that picks a Premium-floor preset without the plan. */

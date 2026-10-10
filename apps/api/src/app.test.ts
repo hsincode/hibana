@@ -766,6 +766,40 @@ describe("guild settings", () => {
     expect(g2.temperature).toEqual(0.7);
   });
 
+  test("only a moderator or administrator can stop or resume the bot for a server", async () => {
+    const { app, store } = await setup();
+    const patch = (cookie: string, body: Record<string, unknown>) =>
+      app.handle(req("/api/guilds/g1/settings", { method: "PATCH", cookie, body: JSON.stringify(body) }));
+
+    // A member who can open the server's settings cannot flip the kill switch (#64)…
+    const refused = await patch("sess-free", { bot_disabled: true });
+    expect(refused.status).toBe(403);
+    expect((await refused.json()).error).toMatch(/moderator/i);
+    expect((await store.getGuild("g1")).bot_disabled).toBe(false);
+    // …and the refusal covers the whole request: nothing next to it is saved.
+    const mixed = await patch("sess-free", { bot_disabled: true, thread_only: true });
+    expect(mixed.status).toBe(403);
+    expect((await store.getGuild("g1")).thread_only).toBe(false);
+    // Their other settings still save.
+    expect((await patch("sess-free", { thread_only: true })).status).toBe(200);
+    expect((await store.getGuild("g1")).thread_only).toBe(true);
+
+    for (const cookie of ["sess-mod", "sess-admin"]) {
+      const stopped = await patch(cookie, { bot_disabled: true });
+      expect(stopped.status).toBe(200);
+      expect((await stopped.json()).settings.bot_disabled).toBe(true);
+      // Once stopped, a member cannot resume it either.
+      expect((await patch("sess-free", { bot_disabled: false })).status).toBe(403);
+      expect((await store.getGuild("g1")).bot_disabled).toBe(true);
+      expect((await patch(cookie, { bot_disabled: false })).status).toBe(200);
+      expect((await store.getGuild("g1")).bot_disabled).toBe(false);
+    }
+    // The server list reports the state to everyone who can see the server.
+    await patch("sess-mod", { bot_disabled: true });
+    const listed = await (await app.handle(req("/api/guilds", { cookie: "sess-free" }))).json();
+    expect(listed.guilds).toEqual([expect.objectContaining({ id: "g1", bot_disabled: true, member: true })]);
+  });
+
   test("internal snapshot PUT leaves personal overrides alone", async () => {
     const { app, store } = await setup();
     await app.handle(

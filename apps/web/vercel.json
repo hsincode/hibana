@@ -5,8 +5,8 @@
       "destination": "/index.html"
     }
   ],
-  "installCommand": "npx --yes bun@1.4.2 install --frozen-lockfile --linker hoisted",
-  "buildCommand": "npx --yes bun@1.4.2 run build",
+  "installCommand": "npx --yes bun@1.4.3 install --frozen-lockfile --linker hoisted",
+  "buildCommand": "npx --yes bun@1.4.3 run build",
   "redirects": [
     {
       "source": "/:path*",

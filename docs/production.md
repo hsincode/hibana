@@ -92,7 +92,7 @@ CIが使うactionはcommit SHAで、Vercel CLIは `tools/vercel/bun.lock` で固
 
 モノレポのルートから実行します。プロジェクト設定のRoot Directoryを変更しないでください。`VERCEL_TOKEN` に失効した値がある場合は削除し、CLIのログイン情報を使用してください。
 
-Vercelの既定Bunはlockfile v2を読めなかったため、各 `vercel.json` でBun 1.4.2によるインストールを指定しています。共有パッケージはpostinstallでJavaScriptへビルドし、Vercel Functionsにも解決可能なexportsを使います。Vercelでは依存の配置をhoistedに固定しています。
+Vercelの既定Bunはlockfile v2を読めなかったため、各 `vercel.json` でBun 1.4.3によるインストールを指定しています。共有パッケージはpostinstallでJavaScriptへビルドし、Vercel Functionsにも解決可能なexportsを使います。Vercelでは依存の配置をhoistedに固定しています。
 
 VPSでは新コードを `/opt/hibana` に配置した後、`bun install --frozen-lockfile`、`systemctl restart hibana` を実行します。`journalctl -u hibana` の `Hibana ready`、`sandbox:true` と `systemctl show hibana -p NRestarts` を確認します。秘密情報やデータディレクトリはリポジトリから上書きしません。
 

@@ -31,7 +31,7 @@
   - Dependabot の PR を読んでマージする作業が増える。`tools/vercel/` と `.github/` だけの変更なので、マージしても API・Web・bot は配信されない。新しい CLI が使われるのは、その次の配信から
   - 配信の job に `bun install`（286 パッケージ）が加わる
   - アプリの依存（ルートの `bun.lock`）は Dependabot の対象にしていない。更新すると bot が再配信されるため、持ち主が時期を選んで手で行う
-  - `Dockerfile` のベースイメージ（`oven/bun:1.4.0`）と、Vercel 側の `installCommand`（`npx --yes bun@1.4.2`）は、タグと版の指定のまま
+  - `Dockerfile` のベースイメージ（`oven/bun:1.4.3`）と、Vercel 側の `installCommand`（`npx --yes bun@1.4.3`）は、タグと版の指定のまま
   - Dependabot は SHA とコメントの両方を更新する（#16・#17 で確かめた）
 - セキュリティ・障害時の挙動:
   - action の作者がタグを付け替えても、実行する commit は変わらない

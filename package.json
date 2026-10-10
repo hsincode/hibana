@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "packageManager": "bun@1.4.0",
+  "packageManager": "bun@1.4.3",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -12,7 +12,7 @@
     "dev:bot": "bun run --cwd apps/bot dev",
     "dev:api": "bun run --cwd apps/api dev",
     "dev:web": "bun run --cwd apps/web dev",
-    "typecheck": "bun run --filter \"*\" typecheck && tsc -p scripts/tsconfig.json",
+    "typecheck": "bun check .",
     "test": "bun test apps/bot/src apps/api/src apps/relay/src packages/shared/src ./scripts",
     "test:ui": "bun run --cwd apps/web test:ui",
     "build": "bun run --filter \"*\" build",

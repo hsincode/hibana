@@ -41,6 +41,7 @@ make sandbox-smoke      # Docker隔離・ファイル操作の確認
 
 - メンション、Hibana / ひばな / ヒバナ / 火花、旧トリガー、スレッド・フォーラム名で応答。
 - `/switch`、`/temperature`、`/exa`、`/verify`、`/fast`、`/clear`、`/context`、`/retry`。
+- 会話履歴と Auto Routing の経路は `HIBANA_DATA_DIR/conversations.db`（SQLite）に保存し、bot の再起動（デプロイ）をまたいで続ける。`/clear`・モデルの変更・guild の設定変更で消える（#59、[ADR-0008](docs/adr/0008-keep-conversations-across-restarts.md)）。
 - `/usage`（owner のみ）: Anthropic API の推計利用額を、当日・当月・モデル別・直近7日で表示。応答の `usage` に `packages/shared` の単価表を掛けた推計で、請求額とは一致しない。日付は UTC。集計は `HIBANA_DATA_DIR/anthropic_usage.json` に約400日分を保存（#44）。
 - Web の `/analytics`（administrator のみ）: Anthropic の Admin API の cost report から、日毎の利用料を表示。1日の目安（月 $200 ÷ その月の日数）を超えた日と、予算の残りが分かる。請求ベースで組織全体が対象。API の環境変数 `ANTHROPIC_ADMIN_API_KEY`（Admin API キーなど、cost report を読めるキー）が必要で、未設定ならページにその旨を表示する。日付は UTC（#48）。
 - Chat Completions / Responses / Anthropic Messages。プロバイダーの認証情報を分離。

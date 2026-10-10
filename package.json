@@ -13,7 +13,7 @@
     "dev:api": "bun run --cwd apps/api dev",
     "dev:web": "bun run --cwd apps/web dev",
     "typecheck": "bun check .",
-    "test": "bun test apps/bot/src apps/api/src apps/relay/src packages/shared/src ./scripts",
+    "test": "bun test --parallel apps/bot/src apps/api/src apps/relay/src packages/shared/src ./scripts",
     "test:ui": "bun run --cwd apps/web test:ui",
     "build": "bun run --filter \"*\" build",
     "ci": "bun run typecheck && bun run test && bun run build",

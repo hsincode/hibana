@@ -117,7 +117,10 @@ export async function readCompletion(
         usage = { ...usage, ...(data.usage as Json) };
       } else if (type === "message_stop") {
         if (!started || !finish) throw interrupted();
-        for (const [index, input] of inputs) blocks.get(index)!.input = JSON.parse(input);
+        // A call without arguments streams one empty partial_json (#42); its
+        // block keeps the `{}` it started with. An input cut off mid-JSON
+        // still fails to parse here and the request is retried.
+        for (const [index, input] of inputs) if (input) blocks.get(index)!.input = JSON.parse(input);
         return { content: [...blocks.entries()].sort(([a], [b]) => a - b).map(([, block]) => block), usage, stop_reason: finish };
       }
     } else {

@@ -1,0 +1,111 @@
+/* ページごとの面: サーバー一覧・モデル管理・利用料。 */
+
+/* ============ サーバー一覧 ============ */
+.guild-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 272px), 1fr)); gap: var(--sp-5); padding: 6px; }
+.guild-card {
+  display: flex; align-items: center; gap: var(--sp-3); min-width: 0; padding: var(--sp-4);
+  border-radius: calc(var(--r-md) + 2px); color: var(--ink); text-decoration: none;
+  transition: background var(--dur-fast), border-color var(--dur-fast), box-shadow var(--dur-fast);
+}
+/* 触れたカードは、線が箔の縁に替わる */
+.guild-card:hover { border-color: transparent; box-shadow: var(--glow-sel), var(--card-shadow); }
+.guild-card:hover::before, .guild-card:focus-visible::before { opacity: 1; }
+.guild-card .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.guild-card .name { font-weight: 600; font-size: var(--fs-lg); line-height: 1.35; overflow-wrap: anywhere; }
+.guild-card .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.guild-card .model { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ink-2); overflow-wrap: anywhere; }
+.guild-card .model .is-text { font-family: var(--font-ui); font-weight: 500; }
+.guild-card .model .mono-tile { width: 22px; height: 22px; }
+.guild-card > .ic { color: var(--muted); transition: color var(--dur-fast); }
+.guild-card:hover > .ic { color: var(--hot-ink); }
+
+/* ============ モデル管理: ChatGPT のマスターアカウント ============ */
+.account-list {
+  display: flex; flex-direction: column; padding: 0 20px;
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--card-shadow);
+}
+.account-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2) var(--sp-3); padding: var(--sp-3) 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.account-list > li:last-child { border-bottom: 0; }
+.auth-box { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; padding: var(--sp-3) var(--sp-4); border: 1px dashed color-mix(in oklch, var(--f1) 55%, var(--line-strong)); border-radius: var(--r-md); background: var(--wash); }
+.auth-box .code-big { font-family: var(--font-mono); font-size: var(--fs-xl); letter-spacing: 0.06em; }
+
+/* ============ 利用料 ============ */
+.month-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+.month-nav { display: inline-flex; align-items: center; gap: 4px; }
+.month-nav strong { min-width: 9ch; text-align: center; font-size: var(--fs-lg); font-weight: 600; }
+.month-meta { display: inline-flex; align-items: center; gap: var(--sp-3); color: var(--muted); font-size: var(--fs-xs); }
+.analytics-report { display: flex; flex-direction: column; gap: var(--sp-6); transition: opacity var(--dur-fast); }
+/* 読み込み中は前の月の表示を薄くして残す（枠が跳ねない） */
+.analytics-report.is-stale { opacity: 0.55; }
+.stats {
+  position: relative; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 0 20px;
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--card-shadow);
+}
+.stats.is-three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.stat { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: var(--sp-4) var(--sp-4) var(--sp-4) 0; }
+.stat + .stat { padding-left: var(--sp-4); border-left: 1px solid var(--line); }
+.stat-label { color: var(--muted); font-size: var(--fs-xs); }
+.stat-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
+.stat-value { font-family: var(--font-mono); font-size: var(--fs-2xl); font-weight: 400; line-height: 1.2; letter-spacing: -0.03em; color: var(--ink); }
+.stat-value.is-neg { color: var(--danger); }
+.stat-note { color: var(--ink-2); font-size: var(--fs-xs); line-height: 1.65; }
+/* メーター: 溝の全長に箔の帯があり、使った分だけ見える（使うほど暖かい色に届く） */
+.meter { position: relative; height: 12px; margin: 2px 0 4px; container-type: inline-size; }
+.meter::before { content: ""; position: absolute; left: 0; right: 0; top: 4px; height: 4px; border-radius: 4px; background: var(--well); box-shadow: inset 0 0 0 1px var(--line); }
+.meter-fill { position: absolute; left: 0; top: 4px; height: 4px; max-width: 100%; border-radius: 4px; background: var(--foil) 0 0 / 100cqw 100% no-repeat; box-shadow: var(--glow-line); transform-origin: 0 50%; animation: meter-grow 600ms var(--ease-out) backwards; }
+.meter.is-over .meter-fill { background: var(--danger); box-shadow: none; }
+.meter i { position: absolute; top: 1px; width: 1px; height: 10px; background: var(--line-strong); opacity: 0.7; }
+@keyframes meter-grow { from { transform: scaleX(0); } }
+.chart-panel { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); }
+.chart-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px var(--sp-4); }
+.chart-head p { color: var(--ink-2); font-size: var(--fs-sm); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px var(--sp-4); color: var(--ink-2); font-size: var(--fs-xs); }
+.legend li { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+.legend .k-in { background: linear-gradient(0deg, var(--f1), var(--f2) 55%, var(--f3)); }
+/* 超過は色だけでなく斜線でも示す */
+.legend .k-over { background: repeating-linear-gradient(45deg, var(--danger) 0 3px, var(--danger-deep) 3px 5px); }
+.legend .k-guide { height: 0; width: 16px; border-top: 1px dashed var(--ink); border-radius: 0; }
+/* 読み取り欄: 選んだ日の値はグラフの外に出し、棒や凡例に重ねない */
+.chart-readout { position: relative; height: 40px; }
+.chart-tip {
+  position: absolute; top: 0; display: inline-flex; align-items: baseline; gap: 10px; padding: 6px 10px; white-space: nowrap; transform: translateX(-50%);
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--raised); box-shadow: var(--card-shadow); font-size: var(--fs-xs); color: var(--ink-2);
+}
+.chart-tip strong { font-family: var(--font-mono); font-size: var(--fs-md); font-weight: 400; color: var(--ink); }
+.chart-tip .is-over { color: var(--danger); }
+.chart-hint { position: absolute; top: 10px; left: 0; color: var(--muted); font-size: var(--fs-xs); }
+.chart { position: relative; border-radius: var(--r-sm); }
+.chart svg { display: block; overflow: visible; }
+.chart-grid { stroke: var(--line); stroke-width: 1; shape-rendering: crispEdges; }
+.chart-tick { font-family: var(--font-mono); font-size: 11px; fill: var(--muted); }
+/* 棒: 軸の高さに対して箔の色を掛けるので、高い日ほど暖かい色になる */
+.chart-bar { fill: var(--f2); filter: var(--bar-shadow); transform-box: fill-box; transform-origin: 50% 100%; animation: bar-grow 520ms var(--ease-out) backwards; animation-delay: calc(var(--i, 0) * 14ms); }
+.chart-bar.is-over { fill: var(--danger); stroke: var(--danger); stroke-width: 1; filter: none; }
+@keyframes bar-grow { from { transform: scaleY(0); } }
+.chart-guide { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 3 4; opacity: 0.85; shape-rendering: crispEdges; }
+.chart-guide-label { font-family: var(--font-mono); font-size: 11px; fill: var(--ink-2); }
+.chart-active { fill: color-mix(in oklch, var(--f1) 16%, transparent); }
+.cost-table td, .cost-table th { padding-top: 8px; padding-bottom: 8px; }
+
+@media (max-width: 900px) {
+  .stats, .stats.is-three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat:nth-child(odd) { padding-left: 0; border-left: 0; }
+  .stat:nth-child(n + 3) { border-top: 1px solid var(--line); }
+}
+@media (max-width: 760px) {
+  .stats, .stats.is-three, .account-list, .chart-panel {
+    max-width: none; margin-inline: calc(var(--pad) * -1); padding-inline: var(--pad);
+    border-left: 0; border-right: 0; border-radius: 0;
+  }
+  .chart-panel.frame::before { inset: -1px 0; }
+  .guild-grid { gap: var(--sp-4); }
+  .month-meta { width: 100%; justify-content: space-between; }
+  .chart-panel { padding-block: var(--sp-3); }
+  .cost-table { min-width: 340px; }
+}
+@media (max-width: 420px) {
+  .stats, .stats.is-three { grid-template-columns: minmax(0, 1fr); }
+  .stat, .stat + .stat { padding-left: 0; border-left: 0; }
+  .stat + .stat { border-top: 1px solid var(--line); }
+}

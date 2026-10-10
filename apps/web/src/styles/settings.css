@@ -1,0 +1,271 @@
+/* 設定の面: 節・設定行・「実際の動作」・モデル・サブエージェント・トリガー・スキル。 */
+
+/* ============ 節と設定行 ============ */
+/* 節への直リンク（#mcp など）で、見出しが上部バーの下に隠れないようにする */
+.sec { position: relative; display: flex; flex-direction: column; scroll-margin-top: calc(var(--topbar-h) + var(--sp-4)); }
+.sec-head { display: flex; flex-direction: column; gap: 2px; padding-bottom: var(--sp-3); }
+.sec-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sec-desc { max-width: 68ch; color: var(--ink-2); font-size: var(--fs-sm); }
+.sec > .toolbar { padding-bottom: var(--sp-3); }
+.sec > .alert { margin-bottom: var(--sp-3); }
+.sec > .muted { padding: var(--sp-3) 0; }
+.sec-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-3); padding-top: var(--sp-3); color: var(--muted); font-size: var(--fs-sm); }
+/* 設定行のまとまりは 1 枚の面で包む。左に名前と説明、右に部品、右端に保存の印 */
+.rows {
+  position: relative; display: flex; flex-direction: column; padding: 0 20px;
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--card-shadow);
+}
+.row {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 360px) 20px; gap: var(--sp-2) var(--sp-5);
+  align-items: start; padding: var(--sp-4) 0; border-top: 1px solid var(--line);
+}
+.rows > :first-child { border-top: 0; }
+.row.is-block { grid-template-columns: minmax(0, 1fr) 20px; }
+.row.is-block .row-label { grid-column: 1 / -1; }
+.row.is-block .row-control { grid-column: 1; }
+.row-label { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.row-name { font-size: var(--fs-md); font-weight: 500; color: var(--ink); line-height: 1.5; }
+.row-name.mono { font-size: var(--fs-sm); font-weight: 400; }
+.row-name-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.row-hint { max-width: 60ch; color: var(--muted); font-size: var(--fs-sm); line-height: 1.6; }
+.row-control { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.row-mark { display: grid; place-items: center; flex: none; width: 20px; height: 34px; color: var(--muted); }
+.row-mark .m { display: grid; place-items: center; animation: fade-in var(--dur-fast) linear backwards; }
+.row-mark .m.is-saving { width: 7px; height: 7px; border: 1px solid var(--hot-ink); border-radius: 50%; }
+.row-mark .m.is-saved { color: var(--ok); filter: drop-shadow(0 0 5px color-mix(in oklch, var(--ok) 70%, transparent)); }
+.row-mark .m.is-failed { color: var(--danger); }
+/* コマンドパレットから設定項目へ飛んだときの目印 */
+.row.is-target { background: color-mix(in oklch, var(--f2) 9%, transparent); box-shadow: 0 0 0 8px color-mix(in oklch, var(--f2) 9%, transparent); border-radius: 4px; }
+/* マイ設定で、サーバー設定を上書きしている項目 */
+.tag-over { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--ink); font-weight: 500; white-space: nowrap; }
+.tag-over::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--foil); box-shadow: 0 0 8px -1px var(--f2); }
+
+/* 値を変えた部品: 縁を箔の光が 1 周する（輪 = ::after、にじみ = ::before）。失敗は赤が逆に回る */
+.trace { position: relative; display: block; isolation: isolate; border-radius: var(--r-sm); --trace-r: calc(var(--r-sm) + 3px); }
+.trace.is-inline { display: inline-block; max-width: 100%; }
+.trace::after, .trace.is-traced::before {
+  content: ""; position: absolute; pointer-events: none; opacity: 0;
+  background: conic-gradient(from var(--a), transparent 0 56%, var(--f1) 68%, var(--f2) 82%, var(--f3) 93%, var(--f4) 100%);
+}
+.trace::after {
+  inset: -3px; padding: 2px; border-radius: var(--trace-r);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+}
+.trace.is-traced::before { inset: -5px; z-index: -1; border-radius: calc(var(--trace-r) + 2px); filter: blur(9px); }
+.trace.is-traced::after { animation: trace 840ms cubic-bezier(0.35, 0.1, 0.25, 1) 1; }
+.trace.is-traced::before { animation: trace-glow 840ms cubic-bezier(0.35, 0.1, 0.25, 1) 1; }
+.trace.is-traced.is-failed::before, .trace.is-traced.is-failed::after {
+  background: conic-gradient(from calc(360deg - var(--a)), var(--danger) 0, color-mix(in oklch, var(--danger) 40%, transparent) 14%, transparent 30% 100%);
+}
+@keyframes trace { 0% { --a: 0deg; opacity: 1; } 78% { opacity: 1; } 100% { --a: 360deg; opacity: 0; } }
+@keyframes trace-glow { 0% { --a: 0deg; opacity: 0.75; } 78% { opacity: 0.75; } 100% { --a: 360deg; opacity: 0; } }
+/* 横並びの小さな部品（ON / OFF など）では、光が部品の縁を回るよう、trace を部品の幅に合わせる */
+@media (min-width: 761px) {
+  .row-control > .trace.is-inline { align-self: flex-start; }
+}
+/* 角の大きい部品（モデルのカード）では、光の輪も同じ丸みにする */
+[data-row$="-preset"] .trace { --trace-r: calc(var(--r-md) + 3px); }
+
+/* いまは使われない設定: 部品は操作できるまま、斜線の地と理由を添える */
+.row.is-unused .trace .seg { background: var(--line-strong); }
+.row.is-unused .trace .seg button:not([aria-pressed="true"]),
+.row.is-unused .trace .select-trigger, .row.is-unused .trace .input {
+  background: repeating-linear-gradient(135deg, transparent 0 6px, var(--hatch) 6px 7px), var(--field);
+}
+.row.is-unused .trace .mode:not([aria-checked="true"]) { background: repeating-linear-gradient(135deg, transparent 0 6px, var(--hatch) 6px 7px); }
+.row-unused { display: flex; align-items: flex-start; gap: 6px; color: var(--ink-2); font-size: var(--fs-xs); line-height: 1.6; }
+.row-unused .ic { margin-top: 4px; color: var(--muted); }
+.row-unused strong { font-weight: 600; color: var(--ink); margin-right: 4px; }
+
+/* ============ 実際の動作: 上縁に箔の線が入った読み取り板 ============ */
+.effective {
+  position: relative; display: flex; flex-direction: column; gap: var(--sp-2); padding: 16px 20px 0;
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--card-shadow);
+}
+.effective::before {
+  content: ""; position: absolute; left: 14px; right: 14px; top: -1px; height: 2px; border-radius: 2px;
+  background: var(--foil); box-shadow: var(--glow-line-soft);
+}
+.effective-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.effective-head h2 { font-size: var(--fs-md); }
+.effective-head p { color: var(--muted); font-size: var(--fs-xs); }
+.eff-list { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border-top: 1px solid var(--line); margin-bottom: -1px; }
+.eff-list.is-three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.eff-item { min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: var(--sp-3) var(--sp-3) var(--sp-3) 0; border-bottom: 1px solid var(--line); }
+.eff-item + .eff-item { padding-left: var(--sp-3); border-left: 1px solid var(--line); }
+.eff-item dt { font-size: var(--fs-xs); color: var(--muted); }
+.eff-value { font-family: var(--font-mono); font-size: var(--fs-md); color: var(--ink); overflow-wrap: anywhere; line-height: 1.5; }
+/* 日本語の値は等幅にしない */
+.eff-value.is-text, .model-id.is-text { font-family: var(--font-ui); font-weight: 500; }
+.eff-note { font-size: var(--fs-xs); color: var(--muted); line-height: 1.55; }
+/* 保存した値と違う値で動いている項目 */
+.eff-item.is-unused .eff-value { text-decoration: underline dotted var(--muted); text-underline-offset: 4px; }
+.eff-item.is-warn .eff-value, .eff-item.is-warn .eff-note { color: var(--warn); }
+
+/* ============ モデル ============ */
+/* モデルのカード: 面の中の沈んだ井戸 */
+.model-card { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); background: var(--well); box-shadow: none; }
+.model-meta { flex: 1; min-width: 0; }
+.model-id { font-family: var(--font-mono); font-size: var(--fs-lg); line-height: 1.4; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.model-sub { color: var(--muted); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.model-actions { display: flex; flex-wrap: wrap; gap: 8px; flex: none; }
+.fixed-btn { justify-content: space-between; width: 100%; min-width: 0; font-weight: 400; }
+.fixed-btn > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* モデルを選ぶダイアログ */
+.picker-tools { display: flex; flex-direction: column; gap: var(--sp-3); }
+.chips-filter { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip-f { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--wash); color: var(--ink-2); font-size: var(--fs-xs); white-space: nowrap; }
+.chip-f:hover { color: var(--ink); border-color: color-mix(in oklch, var(--f1) 60%, var(--line-strong)); }
+.chip-f[aria-pressed="true"] { position: relative; border-color: transparent; background: var(--sel-fill); color: var(--ink); font-weight: 600; }
+.chip-f .mono { font-size: 11px; opacity: 0.75; }
+.picker-list { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.picker-row {
+  display: grid; grid-template-columns: 28px minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) 112px; align-items: center; gap: var(--sp-3);
+  width: 100%; min-height: 48px; padding: 6px 8px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--ink); text-align: left; font-size: var(--fs-sm);
+}
+.picker-row:hover:not(:disabled) { background: var(--wash); }
+.picker-row[aria-pressed="true"] { background: linear-gradient(var(--f3), var(--f2) 50%, var(--f1)) 0 50% / 2px 64% no-repeat, var(--sel-wash); }
+.picker-row[aria-pressed="true"] .p-model { font-weight: 600; }
+.picker-row:disabled { color: var(--muted); }
+.picker-row .p-model { font-family: var(--font-mono); overflow-wrap: anywhere; }
+.picker-row .p-model.is-text { font-family: var(--font-ui); }
+.picker-row .p-prov, .picker-row .p-id { color: var(--muted); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.picker-row .p-id { font-family: var(--font-mono); }
+.picker-row .p-tags { display: flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+.picker-row .p-tags .ic { color: var(--hot-ink); }
+
+/* ============ サブエージェント ============ */
+.modes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-2); padding: 2px; }
+.modes.has-default { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.mode {
+  position: relative; display: flex; flex-direction: column; gap: 6px; min-height: 132px; padding: 12px 12px 14px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-md); background: transparent; color: var(--ink-2); text-align: left;
+  transition: border-color var(--dur-fast), background var(--dur-fast), color var(--dur-fast);
+}
+.mode:hover { border-color: color-mix(in oklch, var(--f1) 60%, var(--line-strong)); background: var(--wash); color: var(--ink); }
+.mode-name { display: flex; align-items: center; justify-content: space-between; font-family: var(--font-mono); font-size: var(--fs-md); color: var(--ink); }
+.mode-name.is-text { font-family: var(--font-ui); font-weight: 500; }
+.mode-name::after { content: ""; width: 8px; height: 8px; border: 1px solid var(--line-strong); border-radius: 50%; }
+.mode-body { font-size: var(--fs-xs); line-height: 1.6; }
+/* 選んだモード: 箔の縁と、藤色の薄い色づけ。切り替えたときは、縁と色づけが短く現れるだけにする
+   （まとまり全体を光が回る動きは、本人の指摘「派手すぎる」で外した） */
+.mode[aria-checked="true"] { border-color: transparent; background: color-mix(in oklch, var(--f2) 9%, transparent); color: var(--ink); }
+.mode[aria-checked="true"] .mode-name::after { border-color: transparent; background: var(--f2); }
+[data-row$="-mode"] .trace::after, [data-row$="-mode"] .trace.is-traced::before { content: none; }
+[data-row$="-mode"] .trace.is-traced .mode[aria-checked="true"] { animation: mode-tint 360ms var(--ease-out) 1; }
+[data-row$="-mode"] .trace.is-traced .mode[aria-checked="true"]::before { animation: mode-ring 360ms var(--ease-out) 1; }
+@keyframes mode-tint { from { background-color: transparent; } }
+@keyframes mode-ring { from { opacity: 0; } }
+/* 保存に失敗して元に戻ったとき: 戻った先のカードの縁が短く赤くなる */
+[data-row$="-mode"] .trace.is-traced.is-failed .mode[aria-checked="true"] { animation: mode-fail 700ms linear 1; }
+@keyframes mode-fail { from { box-shadow: 0 0 0 2px var(--danger); } to { box-shadow: 0 0 0 2px transparent; } }
+.subhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding-top: var(--sp-5); padding-bottom: var(--sp-2); }
+.subhead p { color: var(--muted); font-size: var(--fs-xs); }
+.subhead .row-mark { height: 20px; margin-left: auto; align-self: center; }
+.note.pad { padding-top: var(--sp-3); }
+.field { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.field > label, .field > .field-name { font-size: var(--fs-sm); font-weight: 500; color: var(--ink); }
+.field-hint { color: var(--muted); font-size: var(--fs-xs); line-height: 1.6; }
+.form-grid { display: flex; flex-direction: column; gap: var(--sp-4); }
+
+/* 役割の表とトリガーは、trace そのものを面にする（縁の光は面の外周を回る） */
+[data-row$="-roles"] > .trace, [data-row="g-triggers"] > .trace {
+  --trace-r: calc(var(--r-md) + 3px);
+  padding: 2px 18px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--card-shadow);
+}
+[data-row$="-roles"] > .trace.is-traced::before, [data-row="g-triggers"] > .trace.is-traced::before { content: none; }
+.trace > .table-wrap { margin: 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
+.roles td { vertical-align: top; }
+.roles .role-name { font-weight: 600; color: var(--ink); letter-spacing: -0.01em; }
+.roles .role-body { color: var(--muted); font-size: var(--fs-xs); max-width: 30ch; }
+.roles td.full { min-width: 170px; }
+.roles .stack-fields { display: flex; flex-direction: column; gap: 6px; min-width: 150px; }
+.roles .eff { display: flex; flex-direction: column; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ink); line-height: 1.7; white-space: nowrap; }
+
+/* ============ トリガー ============ */
+[data-row="g-triggers"] > .trace { padding: 0 20px; }
+.trig-group { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) 0; border-top: 1px solid var(--line); }
+.trig-group:first-child { border-top: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 2px; min-height: 34px; padding: 0 2px 0 13px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--field); font-size: var(--fs-sm); }
+.chip.is-off { border-style: dashed; }
+.chip.is-off .chip-text { color: var(--muted); text-decoration: line-through; }
+.chip-text { padding-right: 4px; overflow-wrap: anywhere; }
+.chip .icon-btn { width: 30px; height: 30px; border-radius: 50%; }
+.chip-input { width: 14ch; min-height: 28px; padding: 2px 6px 2px 10px; margin: 0 2px 0 -6px; border: 1px solid var(--focus); border-radius: 999px; background: var(--field); font-size: var(--fs-sm); }
+/* 入っているスイッチは藤色の 1 色。位置（つまみが右）でも分かる */
+.switch { position: relative; flex: none; width: 34px; height: 30px; padding: 0; border: 0; background: transparent; }
+.switch::before { content: ""; position: absolute; left: 4px; right: 4px; top: 50%; height: 14px; margin-top: -7px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--field); }
+.switch::after { content: ""; position: absolute; left: 7px; top: 50%; width: 8px; height: 8px; margin-top: -4px; border-radius: 50%; background: var(--muted); transition: transform var(--dur-fast), background var(--dur-fast); }
+.switch[aria-checked="true"]::before { border-color: transparent; background: var(--f2) border-box; }
+.switch[aria-checked="true"]::after { transform: translateX(11px); background: var(--on-accent); }
+.trig-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; padding-top: var(--sp-3); }
+.trig-form .input { flex: 1 1 200px; width: auto; }
+
+/* ============ スキル ============ */
+.skill-list {
+  display: flex; flex-direction: column; padding: 0 20px;
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--card-shadow);
+}
+.skill { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px var(--sp-4); align-items: center; padding: var(--sp-3) 0; border-bottom: 1px solid var(--line); }
+.skill-list > li:last-child { border-bottom: 0; }
+.skill-main { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.skill-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.skill-name { padding: 0; border: 0; background: transparent; font-family: var(--font-mono); font-size: var(--fs-md); color: var(--ink); text-decoration: underline; text-decoration-color: color-mix(in oklch, var(--f2) 55%, var(--line-strong)); text-underline-offset: 4px; overflow-wrap: anywhere; text-align: left; }
+.skill-name:hover { color: var(--hot-ink); text-decoration-color: currentColor; }
+.skill-desc { color: var(--ink-2); font-size: var(--fs-sm); max-width: 70ch; overflow-wrap: anywhere; }
+.skill-actions { display: flex; align-items: center; gap: 6px; }
+.skill-actions .seg button { min-height: 30px; min-width: 0; padding: 0 10px; font-size: var(--fs-xs); }
+.code { margin: 0; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--well); font-family: var(--font-mono); font-size: var(--fs-sm); line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow-y: auto; }
+.files { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.files li { display: flex; justify-content: space-between; gap: var(--sp-3); padding: 6px 0; border-bottom: 1px solid var(--line); font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ink-2); overflow-wrap: anywhere; }
+
+/* ============ 狭い幅 ============ */
+@media (max-width: 1100px) {
+  .eff-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .eff-item:nth-child(4) { padding-left: 0; border-left: 0; }
+  .modes.has-default { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .modes, .modes.has-default { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .rows, .effective, .skill-list, [data-row$="-roles"] > .trace, [data-row="g-triggers"] > .trace {
+    max-width: none; margin-inline: calc(var(--pad) * -1); padding-inline: var(--pad);
+    border-left: 0; border-right: 0; border-radius: 0;
+  }
+  .main .trace > .table-wrap { margin: 0; padding: 0; }
+  .effective::before { left: 0; right: 0; border-radius: 0; }
+  /* 端まで広げた面では、縁の光も画面の内側に収める（横スクロールを作らない） */
+  [data-row$="-roles"] > .trace::after, [data-row="g-triggers"] > .trace::after { inset: -3px 0; border-radius: 0; }
+  .row { grid-template-columns: minmax(0, 1fr) 20px; gap: var(--sp-2) var(--sp-2); }
+  .row-label, .row.is-block .row-label { grid-column: 1; }
+  .row-mark { grid-column: 2; grid-row: 1; height: 22px; }
+  .row-control, .row.is-block .row-control { grid-column: 1 / -1; }
+  .trace.is-inline { display: block; }
+  .eff-list, .eff-list.is-three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .eff-item:nth-child(4) { padding-left: var(--sp-3); border-left: 1px solid var(--line); }
+  .eff-item:nth-child(odd) { padding-left: 0; border-left: 0; }
+  .eff-item:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .model-card { flex-wrap: wrap; }
+  .model-actions { width: 100%; }
+  .model-actions .btn { flex: 1; }
+  .mode { min-height: 0; }
+  .picker-row { grid-template-columns: 28px minmax(0, 1fr) minmax(64px, auto); row-gap: 0; }
+  .picker-row .p-prov { grid-column: 2; grid-row: 2; }
+  .picker-row .p-id { display: none; }
+  .picker-row .p-tags { grid-column: 3; grid-row: 1 / span 2; }
+  .roles .stack-fields { min-width: 0; }
+  .roles .role-body { max-width: none; }
+  .roles .eff { white-space: normal; }
+  .chip { min-height: 42px; }
+  .chip .icon-btn { width: 40px; height: 40px; }
+  .switch { width: 40px; height: 40px; }
+  .switch::before { left: 7px; right: 7px; }
+  .switch::after { left: 10px; }
+  .skill { grid-template-columns: minmax(0, 1fr); }
+  .skill-name { display: inline-flex; align-items: center; min-height: 40px; }
+  .skill-actions .seg button { min-height: 40px; }
+}

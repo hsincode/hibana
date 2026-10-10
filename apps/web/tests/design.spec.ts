@@ -1,6 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { emptyGuild } from "@hibana/shared/settings";
+import { AUTO_ROUTE_FALLBACK } from "@hibana/shared/catalog";
+import { GUILD_PAGES, GUILD_SETTINGS, guildPath } from "../src/nav";
 
 const guilds = [
   { id: "100", name: "Design workspace", icon: null, preset: "DeepSeek V4" },
@@ -187,7 +189,11 @@ test("personal defaults follow the server until a control is changed", async ({ 
   await page.goto("/me");
   const mode = page.getByRole("radiogroup", { name: "サブエージェント", exact: true });
   await expect(mode.getByRole("radio", { name: /^デフォルト/ })).toHaveAttribute("aria-checked", "true");
-  await expect(page.getByRole("button", { name: "デフォルト", exact: true }).first()).toHaveAttribute("aria-pressed", "true");
+  // The model follows the server: the card says so, and the picker has デフォルト chosen.
+  await expect(page.locator('[data-row="me-preset"] .model-card')).toContainText("デフォルト");
+  await page.getByRole("button", { name: "モデルを変更" }).click();
+  await expect(page.getByRole("dialog", { name: "モデルを選ぶ" }).getByRole("button", { name: /^デフォルト/ })).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Escape");
   await expect(page.getByRole("group", { name: "Jev 判定" }).getByRole("button", { name: "デフォルト", exact: true })).toHaveAttribute("aria-pressed", "true");
   await mode.getByRole("radio", { name: /^multi/ }).click();
   await expect.poll(() => writes.some((w) => w.body.multi_agent === true && w.body.subagent_enabled === true)).toBe(true);
@@ -211,7 +217,9 @@ test("MCP endpoint and enable setting save on desktop and mobile", async ({
   const writes = await mockApi(page);
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
+    // The link from the one-page layout still works: it lands on the page that now holds MCP.
     await page.goto("/g/100#mcp");
+    await expect(page).toHaveURL(/\/g\/100\/tools#mcp$/);
     await page.reload();
     await expect(page.getByRole("link", { name: "速度 / 検証" })).toHaveCount(0);
     await expect(page.locator("#runtime")).toHaveCount(0);
@@ -413,9 +421,12 @@ test("capture review gallery", async ({ page }) => {
   }
   const routes = [
     ["servers", "/", "サーバー一覧"],
-    ["guild-settings", "/g/100", "サーバー設定"],
+    ["guild-agent", "/g/100", "サーバー設定: エージェント"],
+    ["guild-tools", "/g/100/tools", "サーバー設定: ツールと挙動"],
+    ["guild-context", "/g/100/context", "サーバー設定: コンテキスト"],
+    ["guild-artifacts", "/g/100/artifacts", "サーバー設定: 成果物"],
     ["personal-settings", "/me", "マイ設定"],
-    ["skills", "/skills", "スキル一覧"],
+    ["skills", "/g/100/skills", "サーバー設定: スキル"],
     ["artifacts", "/artifacts", "成果物一覧"],
     ["models", "/models", "モデル管理"],
     ["users", "/users", "ユーザー管理"],
@@ -437,10 +448,10 @@ test("capture review gallery", async ({ page }) => {
       for (const [name, path, title] of routes) {
         await page.goto(path);
         await expect(
-          page.locator(name === "not-found" ? ".empty strong" : "h1"),
+          page.locator("h1"),
         ).toBeVisible();
         await expect(page.locator(".skeleton")).toHaveCount(0);
-        if (path === "/skills")
+        if (path === "/g/100/skills")
           await expect(
             page.getByRole("button", { name: "code-review", exact: true }),
           ).toBeVisible();
@@ -492,9 +503,17 @@ test("capture review gallery", async ({ page }) => {
     ).toBeVisible();
     await capture("select", "設定ドロップダウン", false);
     await page.getByRole("option", { name: "high", exact: true }).click();
-    await expect(page.locator(".toast")).toBeVisible();
-    await capture("toast", "保存通知", false);
-    await page.goto("/skills");
+    await expect(page.locator(".topbar").getByRole("status")).toContainText("保存済み");
+    await capture("saved", "保存の表示", false);
+    await page.getByRole("button", { name: "検索・移動（コマンドパレット）" }).click();
+    await expect(page.getByRole("dialog", { name: "コマンドパレット" })).toBeVisible();
+    await capture("palette", "コマンドパレット", false);
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "モデルを変更" }).click();
+    await expect(page.getByRole("dialog", { name: "モデルを選ぶ" })).toBeVisible();
+    await capture("model-picker", "モデルを選ぶダイアログ", false);
+    await page.keyboard.press("Escape");
+    await page.goto("/g/100/skills");
     await page.getByRole("button", { name: "作成", exact: true }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
     await capture("create-skill", "スキル作成ダイアログ", false);
@@ -673,3 +692,431 @@ for (const [url, path, width] of [["/g/100", "/api/guilds/100/settings", 1440], 
     await expect(page.getByRole("button", { name: /^検証の固定モデル:/ })).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   });
+
+/* ============================================================
+   Layout introduced with the redesign (#61): five pages per server,
+   the command palette, the server switcher and how a save is shown.
+   ============================================================ */
+
+test("server settings are split into five pages, reachable from the sidebar and the tab strip", async ({ page }) => {
+  await mockApi(page);
+  let settingsReads = 0;
+  page.on("request", (request) => {
+    if (request.method() === "GET" && new URL(request.url()).pathname === "/api/guilds/100/settings") settingsReads += 1;
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/g/100");
+  const nav = page.getByRole("navigation", { name: "メイン", exact: true });
+  const tabs = page.getByRole("navigation", { name: "サーバーのページ" });
+  // One heading that only that page has.
+  const headings: Record<string, string> = {
+    "": "/switch モデル", tools: "MCP", context: "サーバーコンテキスト", skills: "スキル", artifacts: "成果物",
+  };
+  await expect(page.getByRole("heading", { name: "/switch モデル", level: 2 })).toBeVisible();
+  const readsAfterLoad = settingsReads;
+  await expect(tabs).toBeHidden();
+  for (const p of GUILD_PAGES) {
+    const link = nav.getByRole("link", { name: p.label, exact: true });
+    await link.click();
+    await expect(page).toHaveURL(new RegExp(`${guildPath("100", p.path)}$`));
+    await expect(link).toHaveAttribute("aria-current", "page");
+    await expect(nav.locator('[aria-current="page"]')).toHaveCount(1);
+    await expect(page.getByRole("heading", { name: "Design workspace", level: 1 })).toBeVisible();
+    await expect(page.getByRole("heading", { name: headings[p.path]!, level: 2, exact: true })).toBeVisible();
+    await expect(page).toHaveTitle(`Design workspace · ${p.label} · Hibana`);
+  }
+  // The pages share one copy of the settings: moving between them does not load it again.
+  expect(settingsReads).toBe(readsAfterLoad);
+
+  // Narrow screens: the sidebar is a drawer, so the same five pages are a tab strip.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(nav).toBeHidden();
+  await expect(tabs.getByRole("link")).toHaveText(GUILD_PAGES.map((p) => p.label));
+  await tabs.getByRole("link", { name: "ツールと挙動" }).click();
+  await expect(page).toHaveURL(/\/g\/100\/tools$/);
+  await expect(tabs.getByRole("link", { name: "ツールと挙動" })).toHaveAttribute("aria-current", "page");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+// The first of the five pages is covered with the other routes in "responsive pages";
+// the four new ones get their own test so that one stays within its time on CI (#56).
+test("the pages split off from server settings fit every width", async ({ page }) => {
+  await mockApi(page);
+  for (const width of [1440, 768, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const p of GUILD_PAGES.filter((p) => p.path !== "")) {
+      await page.goto(guildPath("100", p.path));
+      await expect(page.getByRole("heading", { name: "Design workspace", level: 1 })).toBeVisible();
+      await expect(page.locator(".skeleton")).toHaveCount(0);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+        `${p.label} at ${width}px`,
+      ).toBe(true);
+    }
+  }
+});
+
+test("links from the one-page layout and the old skills page lead to where the content now lives", async ({ page }) => {
+  await mockApi(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  for (const [from, to, section] of [
+    ["/g/100#mcp", "/g/100/tools#mcp", "mcp"],
+    ["/g/100#triggers", "/g/100/tools#triggers", "triggers"],
+    ["/g/100#context", "/g/100/context#context", "context"],
+    ["/g/100#artifacts", "/g/100/artifacts#artifacts", "artifacts"],
+    // Sections that stayed on the first page keep their anchors.
+    ["/g/100#jev", "/g/100#jev", "jev"],
+  ] as const) {
+    await page.goto(from);
+    await expect(page).toHaveURL(new RegExp(`${to}$`));
+    await expect(page.locator(`#${section}`)).toBeInViewport();
+  }
+  // /skills used to ask for a server; it now opens the server last looked at.
+  await page.goto("/g/200");
+  await expect(page.getByRole("heading", { name: "開発コミュニティ", level: 1 })).toBeVisible();
+  await page.goto("/skills");
+  await expect(page).toHaveURL(/\/g\/200\/skills$/);
+  await expect(page.getByRole("button", { name: "importable-skill", exact: true })).toBeVisible();
+  await page.goto("/g/100/unknown");
+  await expect(page.getByRole("heading", { name: "ページが見つからない" })).toBeVisible();
+});
+
+test("command palette reaches servers, pages and every listed setting from the keyboard", async ({ page }) => {
+  test.setTimeout(60_000);
+  await mockApi(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/g/100");
+  await expect(page.getByRole("heading", { name: "/switch モデル", level: 2 })).toBeVisible();
+  const opener = page.getByRole("button", { name: "検索・移動（コマンドパレット）" });
+  const palette = page.getByRole("dialog", { name: "コマンドパレット" });
+  const input = palette.getByRole("combobox");
+
+  await page.keyboard.press("Control+k");
+  await expect(input).toBeFocused();
+  // A setting: lands on its page with the row marked and its control focused.
+  await input.fill("exa");
+  await expect(palette.getByRole("option")).toHaveCount(1);
+  await page.keyboard.press("Enter");
+  await expect(palette).toBeHidden();
+  await expect(page).toHaveURL(/\/g\/100\/tools$/);
+  await expect(page.locator('[data-row="g-exa"]')).toHaveClass(/is-target/);
+  await expect(page.getByRole("combobox", { name: "exa", exact: true })).toBeFocused();
+
+  // The arrow keys move through the candidates and wrap at the ends.
+  await opener.click();
+  const options = palette.getByRole("option");
+  await input.fill("サーバー");
+  await expect(options.first()).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("ArrowDown");
+  await expect(options.nth(1)).toHaveAttribute("aria-selected", "true");
+  await expect(palette.locator('[aria-selected="true"]')).toHaveCount(1);
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("ArrowUp");
+  await expect(options.last()).toHaveAttribute("aria-selected", "true");
+  // A server.
+  await input.fill("開発");
+  await expect(options).toHaveCount(1);
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/g\/200$/);
+  await expect(page.getByRole("heading", { name: "開発コミュニティ", level: 1 })).toBeVisible();
+  await expect(page.locator("#main-content")).toBeFocused();
+
+  // Pages the account may not open are not offered (this account cannot see 利用料).
+  await page.keyboard.press("Control+k");
+  await input.fill("ユーザー");
+  await expect(palette.getByRole("option", { name: /^ユーザー/ })).toHaveCount(1);
+  await input.fill("利用料");
+  await expect(palette.getByRole("option")).toHaveCount(0);
+  await expect(palette.getByText("一致するものがありません。")).toBeVisible();
+  // Escape closes it and hands focus back to where it was; so does the shortcut.
+  await page.keyboard.press("Escape");
+  await expect(palette).toBeHidden();
+  await expect(page.locator("#main-content")).toBeFocused();
+  await opener.click();
+  await page.keyboard.press("Control+k");
+  await expect(palette).toBeHidden();
+  await expect(opener).toBeFocused();
+
+  // Every setting the palette lists exists on the page it points to.
+  await page.goto("/g/100");
+  for (const setting of GUILD_SETTINGS) {
+    await page.keyboard.press("Control+k");
+    await input.fill(setting.label);
+    await palette.getByRole("option").filter({ hasText: "›" }).filter({ hasText: setting.label }).first().click();
+    await expect(page).toHaveURL(new RegExp(`${guildPath("100", setting.page)}$`));
+    await expect(page.locator(`[data-row="${setting.row}"]`), setting.label).toBeVisible();
+  }
+});
+
+test("the server switcher filters by name or ID and keeps the kind of page", async ({ page }) => {
+  await mockApi(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/g/100/tools");
+  const switcher = page.getByRole("button", { name: /^サーバーを切り替える/ });
+  await expect(switcher).toContainText("Design workspace");
+  await switcher.click();
+  const search = page.getByRole("combobox", { name: "サーバーを探す" });
+  await expect(search).toBeFocused();
+  await expect(page.getByRole("option")).toHaveCount(3);
+  await search.fill("200");
+  await expect(page.getByRole("option")).toHaveCount(1);
+  await expect(page.getByRole("option", { name: "開発コミュニティ" })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/g\/200\/tools$/);
+  await expect(page.getByRole("heading", { name: "開発コミュニティ", level: 1 })).toBeVisible();
+  await expect(switcher).toContainText("開発コミュニティ");
+  await expect(switcher).toBeFocused();
+  // Escape and a click elsewhere close it without moving.
+  await switcher.click();
+  await page.keyboard.press("Escape");
+  await expect(search).toBeHidden();
+  await expect(switcher).toBeFocused();
+  await switcher.click();
+  await page.getByRole("heading", { name: "MCP", level: 2 }).click();
+  await expect(search).toBeHidden();
+  await expect(page).toHaveURL(/\/g\/200\/tools$/);
+
+  // In the drawer, Escape closes the switcher first and the drawer second.
+  await page.setViewportSize({ width: 390, height: 844 });
+  const toggle = page.getByRole("button", { name: "ナビゲーションを開く" });
+  await toggle.click();
+  await expect(switcher).toBeFocused();
+  await switcher.click();
+  await page.keyboard.press("Escape");
+  await expect(search).toBeHidden();
+  await expect(page.getByRole("navigation", { name: "メイン", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("navigation", { name: "メイン", exact: true })).toBeHidden();
+  await expect(toggle).toBeFocused();
+});
+
+test("a save shows on the row and in the top bar, and a failed save rolls the control back", async ({ page }) => {
+  const writes = await mockApi(page, true);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/g/100");
+  const status = page.locator(".topbar").getByRole("status");
+  const effort = page.getByRole("combobox", { name: "effort", exact: true });
+  const mark = page.locator('[data-row="g-effort"] .row-mark');
+  const strip = page.getByRole("region", { name: "実際の動作" });
+  await expect(status).toHaveText("変更は自動保存されます");
+  await expect(mark).toBeEmpty();
+
+  await effort.click();
+  await page.getByRole("option", { name: "high", exact: true }).click();
+  await expect(status).toContainText("保存済み");
+  // Only an upper bound is promised: nothing tells the dashboard when the bot picked it up.
+  await expect(status).toContainText("bot への反映は最大 30 秒");
+  await expect(mark).toHaveText("保存済み");
+  await expect(strip).toContainText("high");
+  // Success is not a toast any more.
+  await expect(page.locator(".toast")).toHaveCount(0);
+
+  // Leaving a field without changing it writes nothing.
+  await page.getByRole("navigation", { name: "メイン", exact: true }).getByRole("link", { name: "ツールと挙動" }).click();
+  const before = writes.length;
+  await page.getByRole("textbox", { name: "MCP サーバー URL" }).focus();
+  await page.keyboard.press("Tab");
+  await page.getByRole("spinbutton", { name: "temperature" }).focus();
+  await page.keyboard.press("Tab");
+  await page.locator("#mcp").getByRole("button", { name: "OFF", exact: true }).click();
+  await expect.poll(() => writes.slice(before).some((w) => w.body.mcp_enabled === false)).toBe(true);
+  expect(writes.slice(before).some((w) => "mcp_url" in w.body || "temperature" in w.body)).toBe(false);
+
+  // The API refuses the next change.
+  await page.route("**/api/guilds/100/settings", (route) =>
+    route.request().method() === "PATCH"
+      ? route.fulfill({ status: 500, json: { error: "書き込めませんでした" } })
+      : route.fallback());
+  const exa = page.getByRole("combobox", { name: "exa", exact: true });
+  await expect(exa).toHaveText("auto");
+  await exa.click();
+  await page.getByRole("option", { name: "off", exact: true }).click();
+  await expect(status).toHaveText("保存に失敗");
+  await expect(exa).toHaveText("auto");
+  await expect(page.locator('[data-row="g-exa"] .row-mark')).toHaveText("保存に失敗");
+  await expect(page.locator(".toast.is-danger")).toContainText("書き込めませんでした");
+});
+
+test("a slow save for one server never lands on another server's page", async ({ page }) => {
+  await mockApi(page, true);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/api/guilds/100/settings", async (route) => {
+    if (route.request().method() === "PATCH") await held;
+    await route.fallback();
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/g/100");
+  const status = page.locator(".topbar").getByRole("status");
+  const effort = page.getByRole("combobox", { name: "effort", exact: true });
+  await effort.click();
+  await page.getByRole("option", { name: "low", exact: true }).click();
+  await expect(status).toHaveText("保存中…");
+
+  // Move to another server while the first one's save is still on its way.
+  await page.getByRole("button", { name: /^サーバーを切り替える/ }).click();
+  await page.getByRole("option", { name: "開発コミュニティ" }).click();
+  await expect(page.getByRole("heading", { name: "開発コミュニティ", level: 1 })).toBeVisible();
+  await expect(effort).toHaveText("max");
+  await expect(status).toHaveText("変更は自動保存されます");
+
+  const answered = page.waitForResponse((response) =>
+    response.request().method() === "PATCH" && response.url().endsWith("/api/guilds/100/settings"));
+  release();
+  await answered;
+  // Give the late answer every chance to be drawn before looking.
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+  await expect(effort).toHaveText("max");
+  await expect(status).toHaveText("変更は自動保存されます");
+});
+
+test("実際の動作 shows what a combination of settings does, not just what was saved", async ({ page }) => {
+  await mockApi(page);
+  let custom: Record<string, unknown> = {};
+  await page.route("**/api/guilds/100/settings", (route) =>
+    route.fulfill({ json: { settings: { ...emptyGuild(), ...custom } } }));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const strip = page.getByRole("region", { name: "実際の動作" });
+  const item = (label: string) =>
+    strip.locator(".eff-item").filter({ has: page.locator("dt", { hasText: new RegExp(`^${label}$`) }) });
+  const unused = (row: string) => page.locator(`[data-row="${row}"]`).getByText("いまは使われません。");
+
+  // Nothing interacts: the saved values are the ones in use.
+  await page.goto("/g/100");
+  await expect(item("モデル")).toContainText("gpt-6-luna");
+  await expect(item("effort")).toHaveText(/^effort\s*max$/);
+  await expect(item("サブエージェント")).toContainText("on");
+  await expect(page.getByText("いまは使われません。")).toHaveCount(0);
+
+  // Anthropic / Auto: Jev decides the model and effort, and subagents are off whatever was saved.
+  custom = { selection: { provider: "anthropic", model: "auto", effort: "high" }, effort: "high", ultra_mode: true, multi_agent: true };
+  await page.reload();
+  await expect(item("モデル")).toContainText("Jev が会話ごとに選ぶ");
+  await expect(item("effort")).toContainText("Jev が決める");
+  await expect(item("effort")).toContainText("保存値 high は使われません。");
+  await expect(item("サブエージェント")).toContainText("off");
+  await expect(item("サブエージェント")).toContainText("保存値 multi");
+  await expect(unused("g-effort")).toBeVisible();
+  await expect(unused("g-mode")).toBeVisible();
+  // The controls stay usable: the saved value applies again under another provider.
+  await expect(page.getByRole("combobox", { name: "effort", exact: true })).toBeEnabled();
+
+  // …and with Jev 判定 off, Auto falls back to one fixed model.
+  custom = { ...custom, jev_enabled: false };
+  await page.reload();
+  await expect(item("モデル")).toContainText(AUTO_ROUTE_FALLBACK.model);
+  await expect(item("effort")).toContainText(AUTO_ROUTE_FALLBACK.effort);
+  await expect(page.locator('[data-row="g-jev"]')).toContainText(`毎回 ${AUTO_ROUTE_FALLBACK.model} / ${AUTO_ROUTE_FALLBACK.effort} で応答します。`);
+
+  // Ultra runs at xhigh and keeps the saved effort for later.
+  custom = { effort: "low", selection: { provider: "deepseek", model: "DeepSeek V4", effort: "low" }, ultra_mode: true };
+  await page.reload();
+  await expect(item("effort")).toContainText("xhigh");
+  await expect(item("effort")).toContainText("保存値 low は ultra を外すと使われます。");
+  await expect(unused("g-effort")).toBeVisible();
+
+  // Multi does not run the Jev task loop even when it is saved as ON.
+  custom = { ultra_mode: true, multi_agent: true, jev_task_enabled: true };
+  await page.reload();
+  await expect(item("Jev 行動選択")).toContainText("使わない");
+  await expect(unused("g-jev-task")).toBeVisible();
+  await expect(unused("g-effort")).toHaveCount(0);
+});
+
+test("overlays stay inside narrow screens", async ({ page }) => {
+  await mockApi(page);
+  // scrollWidth only sees the document; fixed overlays have to be measured themselves.
+  const fits = async (selector: string) => {
+    const box = await page.locator(selector).boundingBox();
+    const width = page.viewportSize()!.width;
+    expect(box, selector).not.toBeNull();
+    expect(box!.x, selector).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width, selector).toBeLessThanOrEqual(width);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), selector).toBe(true);
+  };
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto("/g/100");
+    await expect(page.getByRole("heading", { name: "/switch モデル", level: 2 })).toBeVisible();
+    await page.getByRole("button", { name: "検索・移動（コマンドパレット）" }).click();
+    await fits(".palette");
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "モデルを変更" }).click();
+    await fits(".modal");
+    await page.keyboard.press("Escape");
+    await page.getByRole("combobox", { name: "effort", exact: true }).click();
+    await fits(".select-menu");
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "アカウントメニュー" }).click();
+    await fits(".pop");
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "ナビゲーションを開く" }).click();
+    await fits(".side");
+    await page.getByRole("button", { name: /^サーバーを切り替える/ }).click();
+    await fits(".switcher .pop");
+  }
+});
+
+test("long names and URLs wrap or scroll inside their own frame", async ({ page }) => {
+  await mockApi(page);
+  const word = `VeryLongNameWithoutAnySpacesAtAll_${"0123456789_abcdefghijklmnopqrstuvwxyz_".repeat(3)}`;
+  await page.route("**/api/guilds", (route) => route.fulfill({ json: { guilds: [
+    { id: "100", name: `とても長い名前のサーバー${word}`, icon: null, preset: `model-${word}` },
+  ] } }));
+  await page.route("**/api/artifacts", (route) => route.fulfill({ json: { sites: [{
+    token: "long", guild_id: "100", channel_id: "100",
+    url: `https://example.com/published/${"very-long-path-segment/".repeat(8)}index.html`,
+    source_path: `${"dir/".repeat(20)}report.html`,
+    created_at_unix: 1788652800, updated_at_unix: null, expires_at_unix: 1791244800,
+    retention: "month", bytes: 1024, file_count: 1, permanent: false, pending: "unpermanent",
+  }] } }));
+  await page.route("**/api/users", (route) => route.fulfill({ json: {
+    users: [{ discord_id: "123456789012345678901234567890", username: `member-${word}`, role: "user" }],
+    assignable: ["user", "premium"],
+  } }));
+  // 768px is the widest layout where tables are still tables: a column pushed past the
+  // frame has to scroll inside it, including its screen-reader-only header text.
+  for (const width of [1440, 768, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const path of ["/", "/g/100", "/artifacts", "/users"]) {
+      await page.goto(path);
+      await expect(page.locator("h1")).toBeVisible();
+      await expect(page.locator(".skeleton")).toHaveCount(0);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth - innerWidth),
+        `${path} at ${width}px`,
+      ).toBeLessThanOrEqual(0);
+    }
+  }
+});
+
+test("motion plays once, and not at all when the OS asks for less", async ({ page }) => {
+  await mockApi(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/g/100");
+  const block = page.getByRole("region", { name: "実際の動作" });
+  await expect(block).toBeVisible();
+  const seconds = () => block.evaluate((el) => parseFloat(getComputedStyle(el).animationDuration));
+  expect(await seconds()).toBeCloseTo(0.38);
+  // Nothing on a loaded page keeps moving by itself.
+  const looping = await page.evaluate(() =>
+    [...document.querySelectorAll("*")].flatMap((el) =>
+      [null, "::before", "::after"].filter((pseudo) => getComputedStyle(el, pseudo).animationIterationCount === "infinite")).length);
+  expect(looping).toBe(0);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  expect(await seconds()).toBeLessThan(0.001);
+});
+
+test("the two typefaces are served by the app itself", async ({ page, baseURL }) => {
+  const hosts = new Set<string>();
+  page.on("request", (request) => hosts.add(new URL(request.url()).host));
+  await mockApi(page);
+  await page.goto("/g/100");
+  await expect(page.getByRole("heading", { name: "/switch モデル", level: 2 })).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
+  const loaded = await page.evaluate(() =>
+    [...document.fonts].filter((face) => face.status === "loaded").map((face) => face.family.replace(/"/g, "")));
+  expect(loaded).toEqual(expect.arrayContaining(["Outfit", "Red Hat Mono"]));
+  // No font host, no CDN: every request went to the dashboard's own origin.
+  expect([...hosts]).toEqual([new URL(baseURL!).host]);
+});

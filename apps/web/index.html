@@ -16,8 +16,9 @@
     <meta name="robots" content="index,follow" />
 
     <meta name="color-scheme" content="dark light" />
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0a0a0a" />
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+    <!-- ブラウザの枠の色。src/styles/tokens.css の --bg（ダーク / ライト）を sRGB に直した値 -->
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0c0f15" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f4f4fa" />
     <script>
       try { document.documentElement.dataset.theme = localStorage.getItem("hibana-theme") || "system"; } catch {}
     </script>

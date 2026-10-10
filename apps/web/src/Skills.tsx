@@ -1,17 +1,8 @@
 import { Select } from "./controls";
 import { useCallback, useEffect, useState } from "react";
-import {
-  Download,
-  Plus,
-  Copy,
-  Trash2,
-  RefreshCw,
-  BookOpen,
-} from "lucide-react";
 import { zipSync } from "fflate";
 import { api, type GuildSummary } from "./api";
-import { Alert, Loading, Modal } from "./ui";
-import "./skills.css";
+import { Alert, Badge, Icon, Loading, Modal, Seg } from "./ui";
 
 type Skill = {
   guild_id: string;
@@ -46,45 +37,8 @@ function download(skill: Skill) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function SkillsPage() {
-  const [guilds, setGuilds] = useState<GuildSummary[]>([]);
-  const [guild, setGuild] = useState("");
-  const [error, setError] = useState("");
-  useEffect(() => {
-    api<{ guilds: GuildSummary[] }>("/api/guilds")
-      .then((r) => {
-        setGuilds(r.guilds);
-        setGuild(r.guilds[0]?.id ?? "");
-      })
-      .catch((e) => setError(String(e)));
-  }, []);
-  return (
-    <div className="skills-page">
-      <h1>スキル</h1>
-      {error && <Alert>{error}</Alert>}
-      <label className="skill-field">
-        サーバー
-        <Select
-          aria-label="サーバー"
-          value={guild}
-          onValueChange={(e) => setGuild(e)}
-        >
-          <option value="" disabled>
-            サーバーを選択
-          </option>
-          {guilds.map((g) => (
-            <option key={g.id} value={g.id}>
-              {g.name}
-            </option>
-          ))}
-        </Select>
-      </label>
-      {guild && <SkillManager key={guild} guildId={guild} guilds={guilds} />}
-    </div>
-  );
-}
-
-function SkillManager({
+/** サーバー設定の「スキル」ページの中身。どのサーバーかは URL（サイドバーの切替）で決まる。 */
+export function SkillManager({
   guildId,
   guilds,
 }: {
@@ -157,9 +111,10 @@ function SkillManager({
   }
   const pending = data?.commands.filter((c) => c.result === null) ?? [];
   return (
-    <section className="skill-manager">
-      <div className="skill-toolbar">
+    <>
+      <div className="toolbar">
         <button
+          type="button"
           className="btn btn-primary"
           onClick={() => {
             setName("");
@@ -168,25 +123,26 @@ function SkillManager({
             setModal("create");
           }}
         >
-          <Plus size={16} />
+          <Icon.plus size={14} />
           作成
         </button>
-        <button className="btn" onClick={() => setModal("import")}>
-          <Copy size={16} />
+        <button type="button" className="btn" onClick={() => setModal("import")}>
           インポート
         </button>
+        <span className="grow" />
         <button
-          className="btn icon-button"
+          type="button"
+          className="icon-btn bordered"
           aria-label="更新"
           title="更新"
           onClick={() => void load()}
         >
-          <RefreshCw size={16} />
+          <Icon.refresh />
         </button>
       </div>
       {error && <Alert>{error}</Alert>}
       {pending.map((c) => (
-        <p className="skill-pending" role="status" key={c.id}>
+        <p className="pending" role="status" key={c.id}>
           {c.args.name}: 反映待ち
         </p>
       ))}
@@ -201,63 +157,68 @@ function SkillManager({
       {!data ? (
         <Loading />
       ) : !data.skills.length ? (
-        <p>スキルはありません。</p>
+        <p className="muted">スキルはありません。</p>
       ) : (
-        <div className="skill-list">
+        <ul className="skill-list">
           {data.skills.map((s) => {
             const locked = busy || pending.some((c) => c.args.name === s.name);
             return (
-              <article key={s.name} className="skill-row">
-                <div className="skill-info">
-                  <button className="skill-name" onClick={() => setPreview(s)}>
-                    <BookOpen size={16} />
-                    {s.name}
-                  </button>
-                  <span className="skill-source">
-                    {s.builtin ? "内蔵" : "カスタム"}
-                  </span>
-                  <p>{s.description}</p>
+              <li key={s.name} className="skill">
+                <div className="skill-main">
+                  <div className="skill-top">
+                    <button type="button" className="skill-name" onClick={() => setPreview(s)}>
+                      {s.name}
+                    </button>
+                    <Badge>{s.builtin ? "内蔵" : "カスタム"}</Badge>
+                  </div>
+                  <p className="skill-desc">{s.description}</p>
                 </div>
                 <div className="skill-actions">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={s.enabled}
-                      disabled={locked}
-                      onChange={(e) =>
-                        void act({
-                          action: "enabled",
-                          name: s.name,
-                          enabled: e.target.checked,
-                        })
-                      }
-                    />
-                    {s.enabled ? "有効" : "無効"}
-                  </label>
+                  <Seg
+                    label={`${s.name} の有効・無効`}
+                    value={s.enabled ? "on" : "off"}
+                    disabled={locked}
+                    options={[
+                      { value: "on", label: "有効" },
+                      { value: "off", label: "無効" },
+                    ]}
+                    onChange={(next) =>
+                      void act({
+                        action: "enabled",
+                        name: s.name,
+                        enabled: next === "on",
+                      })
+                    }
+                  />
                   <button
-                    className="btn icon-button"
+                    type="button"
+                    className="icon-btn"
                     title="ダウンロード"
                     aria-label={`${s.name} をダウンロード`}
                     onClick={() => download(s)}
                   >
-                    <Download size={16} />
+                    <Icon.download />
                   </button>
-                  {!s.builtin && (
+                  {s.builtin ? (
+                    // 内蔵スキルは削除できない。列をそろえるための空き。
+                    <span className="icon-btn" aria-hidden="true" />
+                  ) : (
                     <button
-                      className="btn icon-button"
+                      type="button"
+                      className="icon-btn"
                       title="削除"
                       aria-label={`${s.name} を削除`}
                       disabled={locked}
                       onClick={() => setDeleting(s)}
                     >
-                      <Trash2 size={16} />
+                      <Icon.trash />
                     </button>
                   )}
                 </div>
-              </article>
+              </li>
             );
           })}
-        </div>
+        </ul>
       )}
       <Modal
         open={modal !== null}
@@ -266,7 +227,7 @@ function SkillManager({
       >
         {error && <Alert>{error}</Alert>}
         <form
-          className="skill-form"
+          className="form-grid"
           onSubmit={(e) => {
             e.preventDefault();
             void act(
@@ -282,9 +243,10 @@ function SkillManager({
         >
           {modal === "create" ? (
             <>
-              <label>
-                名前
+              <label className="field">
+                <span className="field-name">名前</span>
                 <input
+                  className="input mono"
                   required
                   minLength={2}
                   maxLength={64}
@@ -292,10 +254,12 @@ function SkillManager({
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                 />
+                <span className="field-hint">英小文字・数字・ハイフン。2〜64 文字。</span>
               </label>
-              <label>
-                説明
+              <label className="field">
+                <span className="field-name">説明</span>
                 <textarea
+                  className="textarea sm"
                   required
                   maxLength={2000}
                   rows={3}
@@ -303,9 +267,10 @@ function SkillManager({
                   onChange={(e) => setDescription(e.target.value)}
                 />
               </label>
-              <label>
-                本文
+              <label className="field">
+                <span className="field-name">本文</span>
                 <textarea
+                  className="textarea mono"
                   required
                   maxLength={80000}
                   rows={12}
@@ -316,8 +281,8 @@ function SkillManager({
             </>
           ) : (
             <>
-              <label>
-                コピー元サーバー
+              <label className="field">
+                <span className="field-name">コピー元サーバー</span>
                 <Select
                   aria-label="コピー元サーバー"
                   required
@@ -334,8 +299,8 @@ function SkillManager({
                     ))}
                 </Select>
               </label>
-              <label>
-                スキル
+              <label className="field">
+                <span className="field-name">スキル</span>
                 <Select
                   aria-label="スキル"
                   required
@@ -358,28 +323,32 @@ function SkillManager({
                 </Select>
               </label>
               {source && !sourceLoading && !sourceSkills.length && (
-                <p>コピーできるスキルはありません。</p>
+                <p className="muted">コピーできるスキルはありません。</p>
               )}
             </>
           )}
-          <button
-            className="btn btn-primary"
-            type="submit"
-            disabled={busy || (modal === "import" && !sourceName)}
-          >
-            {busy ? "送信中" : modal === "create" ? "作成" : "コピー"}
-          </button>
+          <div className="modal-foot">
+            <button
+              className="btn btn-primary"
+              type="submit"
+              disabled={busy || (modal === "import" && !sourceName)}
+            >
+              {busy ? "送信中" : modal === "create" ? "作成" : "コピー"}
+            </button>
+          </div>
         </form>
       </Modal>
       <Modal
         open={deleting !== null}
         onClose={() => !busy && setDeleting(null)}
         title="スキルを削除"
+        size="narrow"
       >
         <p>{deleting?.name} と補助ファイルを削除します。</p>
         {error && <Alert>{error}</Alert>}
-        <div className="modal-actions">
+        <div className="modal-foot">
           <button
+            type="button"
             className="btn"
             disabled={busy}
             onClick={() => setDeleting(null)}
@@ -387,13 +356,14 @@ function SkillManager({
             キャンセル
           </button>
           <button
+            type="button"
             className="btn btn-danger"
             disabled={busy}
             onClick={() =>
               deleting && void act({ action: "delete", name: deleting.name })
             }
           >
-            <Trash2 size={16} />
+            <Icon.trash size={14} />
             削除
           </button>
         </div>
@@ -402,28 +372,31 @@ function SkillManager({
         open={preview !== null}
         onClose={() => setPreview(null)}
         title={preview?.name ?? "スキル"}
+        size="wide"
       >
         {preview && (
           <>
-            <pre className="skill-preview">
+            <pre className="code">
               {new TextDecoder().decode(
                 Uint8Array.from(atob(preview.files["SKILL.md"] ?? ""), (c) =>
                   c.charCodeAt(0),
                 ),
               )}
             </pre>
-            <ul>
+            <ul className="files">
               {Object.keys(preview.files).map((p) => (
                 <li key={p}>{p}</li>
               ))}
             </ul>
-            <button className="btn" onClick={() => download(preview)}>
-              <Download size={16} />
-              ダウンロード
-            </button>
+            <div className="modal-foot">
+              <button type="button" className="btn" onClick={() => download(preview)}>
+                <Icon.download size={14} />
+                ダウンロード
+              </button>
+            </div>
           </>
         )}
       </Modal>
-    </section>
+    </>
   );
 }

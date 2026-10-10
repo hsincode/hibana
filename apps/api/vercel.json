@@ -1,6 +1,6 @@
 {
   "bunVersion": "1.x",
-  "installCommand": "npx --yes bun@1.4.2 install --frozen-lockfile --linker hoisted",
+  "installCommand": "npx --yes bun@1.4.3 install --frozen-lockfile --linker hoisted",
   "redirects": [
     {
       "source": "/:path*",

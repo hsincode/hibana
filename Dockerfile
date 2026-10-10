@@ -1,4 +1,4 @@
-FROM oven/bun:1.4.0 AS dependencies
+FROM oven/bun:1.4.3 AS dependencies
 WORKDIR /app
 COPY package.json bun.lock ./
 COPY packages/shared/package.json packages/shared/package.json
@@ -14,7 +14,7 @@ COPY packages packages
 COPY apps apps
 RUN bun run --cwd apps/bot build
 
-FROM oven/bun:1.4.0
+FROM oven/bun:1.4.3
 RUN apt-get update && apt-get install -y --no-install-recommends docker.io ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=dependencies /app/node_modules ./node_modules

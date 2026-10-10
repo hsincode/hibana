@@ -636,3 +636,25 @@ test("Anthropic stream accepts a tool call without arguments", async () => {
   expect(out.message.providerBlocks).toEqual([{ type: "tool_use", id: "toolu_1", name: "lookup", input: {} }]);
   expect(requests).toBe(1);
 });
+
+test("Anthropic stream still rejects a tool input that ends mid-JSON", async () => {
+  const sse = [
+    ["message_start", { type: "message_start", message: { usage: { input_tokens: 5 } } }],
+    ["content_block_start", { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_1", name: "lookup", input: {} } }],
+    ["content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: "" } }],
+    ["content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: "{\"key\":" } }],
+    ["content_block_stop", { type: "content_block_stop", index: 0 }],
+    ["message_delta", { type: "message_delta", delta: { stop_reason: "max_tokens" }, usage: { output_tokens: 2 } }],
+    ["message_stop", { type: "message_stop" }],
+  ].map(([event, data]) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`).join("");
+  let requests = 0;
+  const client = new LlmClient(loadConfig({ ANTHROPIC_API_KEY: "fixture" }), async () => {
+    requests++;
+    return new Response(sse, { headers: { "content-type": "text/event-stream" } });
+  }, { sleep: async () => {} });
+  const failure = await client.complete({ provider: "anthropic", model: "claude-sonnet-5-5" }, [{ role: "user", content: "Hi" }], [tool])
+    .catch((error) => error);
+  expect(failure.diagnostics).toMatchObject({ phase: "stream", reason: "invalid_json", retries: 5 });
+  // The initial request and five reconnects; a half-received call never runs.
+  expect(requests).toBe(6);
+});

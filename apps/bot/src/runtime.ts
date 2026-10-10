@@ -63,11 +63,16 @@ export class Runtime {
   constructor(readonly config: Config) {}
   async load() {
     if (this.config.statePath) {
-      this.replace(await readJson(this.config.statePath, this.snapshot));
+      // Restoring is not a change: stored conversations were written under
+      // these settings, and reporting every guild here would clear them all
+      // on each start (#59).
+      this.replace(await readJson(this.config.statePath, this.snapshot), false);
       await this.persist();
     }
   }
-  replace(raw: Partial<Snapshot>) {
+  /** `notify: false` adopts a snapshot as the baseline that later ones are
+   *  compared with, without reporting its guilds as changed. */
+  replace(raw: Partial<Snapshot>, notify = true) {
     const previous = this.snapshot;
     const defaults = normalizeGuild(raw.defaults, this.defaultSettings());
     this.snapshot = {
@@ -92,7 +97,8 @@ export class Runtime {
     ])) {
       const a = previous.guilds[id],
         b = this.snapshot.guilds[id];
-      if (JSON.stringify([a?.selection, a?.effort, a?.ultra_mode, a?.multi_agent]) !==
+      if (notify &&
+          JSON.stringify([a?.selection, a?.effort, a?.ultra_mode, a?.multi_agent]) !==
           JSON.stringify([b?.selection, b?.effort, b?.ultra_mode, b?.multi_agent]))
         this.onChange?.(id);
     }

@@ -187,6 +187,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
       env.RUNTIME_STATE_PATH === ""
         ? ""
         : resolve(env.RUNTIME_STATE_PATH || `${dataDir}/runtime_state.json`),
+    // Conversation history and auto routes, kept across restarts (#59). An
+    // empty value keeps them in process memory only.
+    conversationDbPath:
+      env.CONVERSATION_DB_PATH === ""
+        ? ""
+        : resolve(env.CONVERSATION_DB_PATH || `${dataDir}/conversations.db`),
     promptFile: resolve(env.PROMPT_FILE || "prompt.md"),
     personaFile: resolve(env.PERSONA_FILE || "persona.md"),
     toolsEnabled: flag(env, "TOOLS_ENABLED", true),

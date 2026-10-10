@@ -18,6 +18,7 @@ import { checkpointSnapshot, checkpointInScope, resumeCheckpoint, resumeNote, ty
 import { Agent, type AgentOptions } from "./agent";
 import { MultiAgentSession } from "./multi-agent";
 import { History } from "./history";
+import { ConversationStore } from "./conversation-store";
 import { ToolRegistry } from "./tools";
 import { WebSync } from "./sync";
 import { Voice } from "./voice";
@@ -87,8 +88,10 @@ export class Hibana {
   readonly llm: LlmClient;
   readonly agent: Agent;
   readonly history: History;
+  /** History and auto routes on disk, so a restart keeps them (#59). */
+  readonly conversations: ConversationStore;
   readonly usage: UsageLedger;
-  routes = new RouteMemory();
+  routes: RouteMemory;
   private fallbackAnnounced = new Set<string>();
   readonly tools: ToolRegistry;
   readonly sync: WebSync;
@@ -131,7 +134,11 @@ export class Hibana {
       },
     });
     this.agent = new Agent(this.llm);
-    this.history = new History(config);
+    // Opened in start(): until then, and if the file cannot be opened, both
+    // stay in process memory.
+    this.conversations = new ConversationStore(config.conversationDbPath, (e) => this.report(e));
+    this.history = new History(config, this.conversations);
+    this.routes = new RouteMemory(Date.now, this.conversations);
     this.tools = new ToolRegistry(this.runtime, this.client, this.agent, this.log);
     this.sync = new WebSync(this.runtime, this.tools, (e) => this.report(e));
     this.voice = new Voice(
@@ -162,6 +169,11 @@ export class Hibana {
     if (!this.config.token) throw new Error("DISCORD_TOKEN is required");
     if (!this.config.endpoints[this.config.selection.provider]?.apiKey)
       throw new Error(`API key missing for ${this.config.selection.provider}`);
+    this.conversations.open();
+    if (this.conversations.opened) {
+      this.routes.prune();
+      this.log.info(this.conversations.stats() ?? {}, "Conversation store opened");
+    }
     await this.runtime.load();
     await this.tools.load();
     await this.sync.start();
@@ -831,6 +843,7 @@ export class Hibana {
     await Promise.allSettled([...this.tasks]);
     await this.runtime.persist();
     await this.usage.flush();
+    this.conversations.close();
     this.client.destroy();
   }
 }

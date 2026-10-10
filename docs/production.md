@@ -9,6 +9,7 @@
 | bot | 既存VPSの `/opt/hibana`、`hibana.service` |
 | bot設定 | `/etc/hibana/bot.env` |
 | botデータ | `/var/lib/hibana` |
+| botの会話履歴・Auto Routing の経路 | `/var/lib/hibana/conversations.db`（SQLite。[ADR-0008](adr/0008-keep-conversations-across-restarts.md)） |
 | 退避データ | `/var/backups/hibana-migration`、旧 `/opt/deepseeker`・`/var/lib/deepseeker` |
 
 `api.bot.hsincode.com` はCloudflare Universal SSL（`*.hsincode.com`）の対象外です。CloudflareではCNAME `api.bot` → `d9916215ed191ef6.vercel-dns-017.com` をDNS only（グレー雲）に設定し、Vercelの証明書で配信します。
@@ -201,3 +202,16 @@ Admin API は個人アカウントでは使えません。Console の組織が I
 - Admin API キーで実際の cost report を手元から呼び、応答の形（`data`・`has_more`・`next_page`、`amount` はセントの文字列、通貨は USD）が公式ドキュメントのとおりであること、APIのルートを通した結果を画面に描画できることを確かめました
 - Individual Org の個人キーでは403（`permission_error: Missing permissions`）でした（同じキーで `GET /v1/organizations/me` は200）
 - 未確認: Console の Cost の表示との照合、本番（Vercel）での動作、日付が変わってから前日の行が載るまでの時間
+
+## 会話履歴と Auto Routing の経路の保存（2026-10-10）
+
+bot は、会話履歴と Auto Routing の経路を `/var/lib/hibana/conversations.db`（SQLite）に保存します（[#59](https://github.com/hsincode/hibana/issues/59)、[ADR-0008](adr/0008-keep-conversations-across-restarts.md)）。デプロイなどで bot が再起動しても、会話は続きから始まり、Auto Routing のチャンネルは同じモデルと effort を使います。以前はどちらもプロセスのメモリにしかなく、再起動のたびに消えていました。
+
+- 起動すると、ログに `Conversation store opened` と、保存済みのチャンネル数・ターン数・経路数が出ます。この行が無く `Hibana operation failed` が出ている場合は、ファイルを開けておらず、メモリだけで動いています（会話は再起動で消えます）
+- 保存した会話が消えるのは、`/clear`、チャンネルやスレッドの削除、モデルの変更、guild の設定変更、スレッドの期限切れです。通常のチャンネルに期限はありません
+- 会話の本文（ツールの結果を含む）がこのファイルに残ります。モードは 0600 です。バックアップは取っていません
+- すべて消すには、bot を止めて `conversations.db`・`conversations.db-wal`・`conversations.db-shm` を削除します。保存をやめるには、`/etc/hibana/bot.env` に `CONVERSATION_DB_PATH=`（空）を書いて再起動します
+- 中身は `sqlite3 /var/lib/hibana/conversations.db` で見られます（表は `history_channels`・`history_turns`・`routes`）
+- bot を前の版に切り戻している間、前の版はこのファイルを使いません。その間の会話は保存されず、新しい版に戻ると、切り戻す前の履歴の続きになります
+
+検証は手元のテスト（`apps/bot/src/__tests__/conversation-store.test.ts`、`sync.test.ts`）までです。本番での動作、実際の会話でのファイルの大きさ、キャッシュのヒット率の変化は、配信後に確かめる必要があります。

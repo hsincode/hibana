@@ -59,7 +59,9 @@ export class WebSync {
       if (r.status === 304) return;
       if (!r.ok) throw new Error(`Settings snapshot HTTP ${r.status}`);
       const snapshot = (await r.json()) as Snapshot;
-      this.runtime.replace(snapshot);
+      // The first snapshot this bot ever holds (none was restored from disk)
+      // has nothing to differ from, so it is the baseline, not a change.
+      this.runtime.replace(snapshot, this.runtime.snapshot.version !== undefined);
       this.etag = r.headers.get("etag") ?? undefined;
       await this.runtime.persist();
       for (const command of snapshot.artifact_commands ?? []) {

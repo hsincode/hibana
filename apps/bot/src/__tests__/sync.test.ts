@@ -37,6 +37,7 @@ function settingsApi() {
     down: false,
     version: 1,
     blocked: [] as string[],
+    guilds: {} as Record<string, unknown>,
     /** Paths that answer 500 once. */
     failOnce: new Set<string>(),
     count: (method: string, path: string, status?: number) =>
@@ -56,7 +57,7 @@ function settingsApi() {
       return Response.json(
         {
           version: api.version,
-          guilds: {},
+          guilds: api.guilds,
           user_contexts: {},
           user_overrides: {},
           blocked_users: api.blocked,
@@ -137,6 +138,33 @@ async function until(check: () => boolean, ms = 3000) {
 }
 
 describe("settings sync", () => {
+  // `onChange` clears a guild's conversations, which are now stored (#59).
+  test("the first snapshot a bot ever holds is the baseline; later changes are reported", async () => {
+    const { api, runtime, sync } = fixture();
+    const changed: (string | undefined)[] = [];
+    runtime.onChange = (id) => changed.push(id);
+    api.guilds = { "100": { effort: "high" } };
+    await sync.pull();
+    expect(runtime.guild("100").effort).toBe("high");
+    expect(changed).toEqual([]);
+    api.guilds = { "100": { effort: "low" } };
+    api.version = 2;
+    await sync.pull();
+    expect(changed).toEqual(["100"]);
+  });
+  test("a snapshot restored from disk is compared with the one the API serves at start", async () => {
+    const { api, runtime, sync } = fixture();
+    const changed: (string | undefined)[] = [];
+    runtime.onChange = (id) => changed.push(id);
+    // What runtime.load() restores: settings as they were when the bot stopped.
+    runtime.replace({ version: 7, guilds: { "100": { effort: "high" }, "200": { effort: "high" } } } as never, false);
+    expect(changed).toEqual([]);
+    // Guild 100 was changed in the dashboard while the bot was down.
+    api.guilds = { "100": { effort: "low" }, "200": { effort: "high" } };
+    api.version = 8;
+    await sync.pull();
+    expect(changed).toEqual(["100"]);
+  });
   test("starts from the saved snapshot while the settings API is down", async () => {
     const { api, runtime, errors, sync } = fixture();
     // What runtime.load() restores from runtime_state.json after a restart.

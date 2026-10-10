@@ -6,6 +6,7 @@ import {
   isAutoRoute,
 } from "@hibana/shared/catalog";
 import type { Selection } from "./config";
+import type { ConversationStore } from "./conversation-store";
 import type { JevClient } from "./jev";
 import { triageInput } from "./jev-triage";
 import type { Message, Usage } from "./types";
@@ -123,25 +124,52 @@ export function routeHeader(selection: Selection): string {
 
 type Route = { selection: Selection; at: number };
 
-/** The route each channel last used. Process memory only, like History: after
- *  a restart both are gone and the next turn is routed again. */
+/** A stored route is kept only while it is still one Jev could choose: a
+ *  deploy can change the levels, and a retired model must not be requested. */
+const routable = (selection: Selection | undefined): selection is Selection =>
+  selection?.provider === AUTO_ROUTE_PROVIDER && selection.routed === true &&
+  AUTO_ROUTE_LEVELS.some((l) => l.model === selection.model && l.effort === selection.effort);
+
+/** The route each channel last used. With a store it outlives a restart, like
+ *  History (#59): Anthropic keeps the prompt cache for an hour either way, so
+ *  a deploy in the middle of a conversation must not send it to another model. */
 export class RouteMemory {
   private channels = new Map<string, Route>();
-  constructor(private now: () => number = Date.now) {}
+  constructor(
+    private now: () => number = Date.now,
+    private store?: ConversationStore,
+  ) {}
+  private route(channelId: string): Route | undefined {
+    const known = this.channels.get(channelId);
+    if (known || !this.store) return known;
+    const saved = this.store.loadRoute(channelId);
+    if (!saved || !routable(saved.selection) || !Number.isFinite(saved.at)) return undefined;
+    this.channels.set(channelId, saved);
+    return saved;
+  }
   /** The route still worth keeping: used within the cache TTL. */
   live(channelId: string): Selection | undefined {
-    const route = this.channels.get(channelId);
+    const route = this.route(channelId);
     return route && this.now() - route.at < ROUTE_CACHE_TTL_MS ? { ...route.selection } : undefined;
   }
   set(channelId: string, selection: Selection) {
-    this.channels.set(channelId, { selection: { ...selection }, at: this.now() });
+    const route = { selection: { ...selection }, at: this.now() };
+    this.channels.set(channelId, route);
+    this.store?.saveRoute(channelId, route);
   }
   /** A request just read or wrote the cache, which renews its TTL. */
   touch(channelId: string) {
-    const route = this.channels.get(channelId);
-    if (route) route.at = this.now();
+    const route = this.route(channelId);
+    if (!route) return;
+    route.at = this.now();
+    this.store?.saveRoute(channelId, route);
   }
   clear(channelId: string) {
     this.channels.delete(channelId);
+    this.store?.deleteRoute(channelId);
+  }
+  /** Removes stored routes too old to be kept. Called once after a start. */
+  prune() {
+    this.store?.pruneRoutes(this.now() - ROUTE_CACHE_TTL_MS);
   }
 }

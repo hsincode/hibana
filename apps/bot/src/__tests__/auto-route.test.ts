@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "discord.js";
 import pino from "pino";
-import { AUTO_ROUTE_FALLBACK, AUTO_ROUTE_LEVELS, MODEL_PRESETS } from "@hibana/shared/catalog";
+import { AUTO_ROUTE_FALLBACK, AUTO_ROUTE_LEVELS, AUTO_ROUTE_REQUEST_ONLY, MODEL_PRESETS } from "@hibana/shared/catalog";
 import { Agent } from "../agent";
 import {
   ROUTE_CACHE_TTL_MS,
@@ -51,13 +51,16 @@ const scored = (score: number, requested = "none") => async () => ({
 const request: Message[] = [{ role: "user", content: "この関数のバグを直して", turnStart: true }];
 const never = new AbortController().signal;
 
-test("the routing table is the owner's five levels and never uses max", () => {
+test("the routing table is the owner's five levels, without Sonnet, and never uses max", () => {
   expect(AUTO_ROUTE_LEVELS.map((l) => `${l.model}/${l.effort}`)).toEqual([
-    "claude-haiku-5-5/medium", "claude-haiku-5-5/high",
-    "claude-sonnet-5-5/medium", "claude-sonnet-5-5/high",
-    "claude-opus-5-5/medium",
+    "claude-haiku-5-5/medium", "claude-haiku-5-5/high", "claude-haiku-5-5/xhigh",
+    "claude-opus-5-5/medium", "claude-opus-5-5/high",
   ]);
-  for (const level of [...AUTO_ROUTE_LEVELS, AUTO_ROUTE_FALLBACK])
+  // Sonnet stays reachable, but only for a message that asks for it.
+  expect(AUTO_ROUTE_REQUEST_ONLY.map((l) => `${l.model}/${l.effort}`)).toEqual([
+    "claude-sonnet-5-5/medium", "claude-sonnet-5-5/high",
+  ]);
+  for (const level of [...AUTO_ROUTE_LEVELS, ...AUTO_ROUTE_REQUEST_ONLY, AUTO_ROUTE_FALLBACK])
     expect(["low", "medium", "high", "xhigh"]).toContain(level.effort);
   expect(AUTO_ROUTE_FALLBACK).toEqual({ model: "claude-haiku-5-5", effort: "high" });
   expect(MODEL_PRESETS.filter((p) => p.provider === "anthropic").map((p) => p.model)).toEqual([
@@ -72,8 +75,9 @@ test("Jev's difficulty score picks the nearest level", async () => {
   expect(JSON.stringify(input.questions.difficulty)).not.toMatch(/haiku|sonnet|opus/i);
   for (const [score, model, effort] of [
     [0, "claude-haiku-5-5", "medium"], [1.4, "claude-haiku-5-5", "high"],
-    [1.6, "claude-sonnet-5-5", "medium"], [3, "claude-sonnet-5-5", "high"],
-    [4, "claude-opus-5-5", "medium"], [5, "claude-opus-5-5", "medium"],
+    [1.6, "claude-haiku-5-5", "xhigh"], [2.4, "claude-haiku-5-5", "xhigh"],
+    [2.6, "claude-opus-5-5", "medium"], [3, "claude-opus-5-5", "medium"],
+    [4, "claude-opus-5-5", "high"], [5, "claude-opus-5-5", "high"],
   ] as const)
     expect((await evaluateRoute(request, scored(score), never)).selection)
       .toEqual({ provider: "anthropic", model, effort, routed: true });
@@ -87,9 +91,11 @@ test("Jev's difficulty score picks the nearest level", async () => {
 
 test("a model the user asks for wins, at its level nearest to the difficulty", async () => {
   for (const [score, requested, model, effort] of [
-    [0, "opus", "claude-opus-5-5", "medium"], [5, "haiku", "claude-haiku-5-5", "high"],
-    [0, "sonnet", "claude-sonnet-5-5", "medium"], [3, "sonnet", "claude-sonnet-5-5", "high"],
-    [5, "sonnet", "claude-sonnet-5-5", "high"], [0, "haiku", "claude-haiku-5-5", "medium"],
+    [0, "opus", "claude-opus-5-5", "medium"], [5, "opus", "claude-opus-5-5", "high"],
+    [5, "haiku", "claude-haiku-5-5", "xhigh"], [0, "haiku", "claude-haiku-5-5", "medium"],
+    // Sonnet has no level of its own: asking for it is the only way to it.
+    [0, "sonnet", "claude-sonnet-5-5", "medium"], [2, "sonnet", "claude-sonnet-5-5", "medium"],
+    [3, "sonnet", "claude-sonnet-5-5", "high"], [5, "sonnet", "claude-sonnet-5-5", "high"],
   ] as const) {
     const decided = await evaluateRoute(request, scored(score, requested), never);
     expect(decided.requested).toBe(requested);
@@ -140,9 +146,9 @@ test("routing asks Jev once and reports nothing when Jev is unavailable", async 
   let calls = 0;
   const decide: ToolRegistry["jev"]["decide"] = async () => { calls++; return scored(3)(); };
   const routed = await routeWith({}, decide);
-  expect(routed.result?.selection).toEqual({ provider: "anthropic", model: "claude-sonnet-5-5", effort: "high", routed: true });
+  expect(routed.result?.selection).toEqual({ provider: "anthropic", model: "claude-opus-5-5", effort: "medium", routed: true });
   expect(routed.result?.usage).toEqual(usage);
-  expect(routed.log).toMatchObject({ verdict: "classified", level: 3, model: "claude-sonnet-5-5", effort: "high" });
+  expect(routed.log).toMatchObject({ verdict: "classified", level: 3, model: "claude-opus-5-5", effort: "medium" });
   expect(JSON.stringify(routed.log)).not.toContain("バグ");
   expect(calls).toBe(1);
 
@@ -265,23 +271,23 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
   };
   try {
     await bot.respond("難しい設計の相談", { ...ctx });
-    expect(used.at(-1)).toBe("claude-opus-5-5/medium");
+    expect(used.at(-1)).toBe("claude-opus-5-5/high");
     // The route is announced before the model runs, as its own message, and
     // the stored history does not carry it.
     // (The failing completion-check mock adds a progress message in between.)
-    expect([sent[0], sent.at(-1)]).toEqual(["Auto Routing: **Opus 5.5 Medium**", "ok"]);
+    expect([sent[0], sent.at(-1)]).toEqual(["Auto Routing: **Opus 5.5 High**", "ok"]);
     expect(order.slice(0, 2)).toEqual(["notice", "model"]);
     expect(JSON.stringify(bot.history.get(ctx.channelId, undefined, JSON.stringify(bot.runtime.resolve(undefined, ctx.userId).selection), false, 0))).not.toContain("Auto Routing");
     // An easy follow-up stays on the routed model without asking Jev.
     score = 0;
     await bot.respond("ありがとう", { ...ctx });
-    expect(used.at(-1)).toBe("claude-opus-5-5/medium");
+    expect(used.at(-1)).toBe("claude-opus-5-5/high");
     expect(routings).toBe(1);
     // Only a newly chosen route is announced, not a turn that keeps it.
     expect(notices()).toHaveLength(1);
     // Naming a model asks Jev again; a mention keeps the route, a request replaces it.
     await bot.respond("Sonnet と Opus の違いは？", { ...ctx });
-    expect(used.at(-1)).toBe("claude-opus-5-5/medium");
+    expect(used.at(-1)).toBe("claude-opus-5-5/high");
     expect(notices()).toHaveLength(1);
     requested = "sonnet";
     await bot.respond("ここからは Sonnet で答えて", { ...ctx });
@@ -295,7 +301,7 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
     requested = "opus";
     score = 5;
     await bot.respond("Opus に戻して", { ...ctx });
-    expect(used.at(-1)).toBe("claude-opus-5-5/medium");
+    expect(used.at(-1)).toBe("claude-opus-5-5/high");
     routings = 1;
     requested = "none";
     score = 0;
@@ -310,8 +316,8 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
     expect(used.at(-1)).toBe("claude-haiku-5-5/medium");
     expect(routings).toBe(2);
     expect(notices()).toEqual([
-      "Auto Routing: **Opus 5.5 Medium**", "Auto Routing: **Sonnet 5.5 Medium**",
-      "Auto Routing: **Opus 5.5 Medium**", "Auto Routing: **Haiku 5.5 Medium**",
+      "Auto Routing: **Opus 5.5 High**", "Auto Routing: **Sonnet 5.5 Medium**",
+      "Auto Routing: **Opus 5.5 High**", "Auto Routing: **Haiku 5.5 Medium**",
     ]);
     // Cleared history has no cache to keep.
     bot.history.clear(ctx.channelId);
@@ -328,9 +334,9 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
     expect(notices()).toHaveLength(5);
     score = 3;
     await bot.respond("実装して", { ...ctx });
-    expect(used.at(-1)).toBe("claude-sonnet-5-5/high");
+    expect(used.at(-1)).toBe("claude-opus-5-5/medium");
     expect(routings).toBe(5);
-    expect(notice()).toBe("Auto Routing: **Sonnet 5.5 High**");
+    expect(notice()).toBe("Auto Routing: **Opus 5.5 Medium**");
     expect(notices()).toHaveLength(6);
     expect(new Set(used).has("auto/high")).toBe(false);
   } finally { await bot.close(); await rm(dir, { recursive: true, force: true }); }

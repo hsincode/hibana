@@ -2,6 +2,7 @@ import {
   AUTO_ROUTE_FALLBACK,
   AUTO_ROUTE_LEVELS,
   AUTO_ROUTE_PROVIDER,
+  AUTO_ROUTE_REQUEST_ONLY,
   MODEL_PRESETS,
   isAutoRoute,
 } from "@hibana/shared/catalog";
@@ -22,12 +23,15 @@ export const ROUTE_TIMEOUT_MS = 5000;
 export const ROUTE_CACHE_TTL_MS = 3600000;
 
 // One criterion per AUTO_ROUTE_LEVELS entry, easiest first. They describe the
-// request only and name no model.
+// request only and name no model. The line between the third and the fourth
+// is the line between Haiku and Opus (#35, 2026-10-10): work that stands on
+// its own stays below it, work that takes judgment about existing material or
+// competing options goes above it.
 const criteria = [
   "Greeting, small talk, or a one-line factual answer.",
   "A short explanation, translation, summary or rewrite of supplied text, or a simple lookup.",
-  "Ordinary multi-step work: writing or changing code, research across several sources, or a structured document.",
-  "Demanding but familiar work that needs careful reasoning or sustained effort: debugging a failure that can be reproduced, weighing design trade-offs, analysis with several constraints, or large work that follows established practice (big changes across many files, long documents, a broad investigation), where the difficulty is volume rather than insight.",
+  "Routine multi-step work that stands on its own and follows a clear request: writing a new script, component or configuration from a description, adding tests for supplied code, converting or reformatting supplied material, collecting facts from several sources into a comparison, or drafting an article, slides or another structured document.",
+  "Work that depends on judgment about existing material or competing options: changing, reviewing or refactoring an existing codebase, finding the cause of a failure or slowdown from code, logs or data, designing a system or choosing between options against stated requirements, analysis with several constraints, or large work across many files or sources.",
   "Work that needs deep or original reasoning, where one subtle mistake invalidates the result: proofs and formal arguments, root causes of rare concurrency or distributed-system failures, novel algorithms or protocols, security analysis of a design, or expert judgment under conflicting or ambiguous constraints.",
 ];
 if (criteria.length !== AUTO_ROUTE_LEVELS.length)
@@ -75,10 +79,13 @@ const routed = (choice: { model: string; effort: string }): Selection =>
 export const routeLevel = (level: number): Selection =>
   routed(AUTO_ROUTE_LEVELS[Math.min(AUTO_ROUTE_LEVELS.length - 1, Math.max(0, Math.round(level)))]!);
 
-/** The named model at the effort of its level nearest to the difficulty. */
+/** The named model at the effort of its level nearest to the difficulty.
+ *  Sonnet has no level of its own, so this is the only way to it. */
 export function routeRequested(family: Family, level: number): Selection {
-  const own = AUTO_ROUTE_LEVELS.map((choice, index) => ({ choice, index }))
-    .filter((l) => l.choice.model === families[family]);
+  const own = [
+    ...AUTO_ROUTE_LEVELS.map((choice, index) => ({ choice, index })),
+    ...AUTO_ROUTE_REQUEST_ONLY.map((choice) => ({ choice, index: choice.level })),
+  ].filter((l) => l.choice.model === families[family]);
   return routed(own.reduce((a, b) => Math.abs(b.index - level) < Math.abs(a.index - level) ? b : a).choice);
 }
 
@@ -124,11 +131,13 @@ export function routeHeader(selection: Selection): string {
 
 type Route = { selection: Selection; at: number };
 
-/** A stored route is kept only while it is still one Jev could choose: a
- *  deploy can change the levels, and a retired model must not be requested. */
+/** A stored route is kept only while it is still one a turn could be routed
+ *  to: a deploy can change the levels, and a retired model must not be
+ *  requested. */
 const routable = (selection: Selection | undefined): selection is Selection =>
   selection?.provider === AUTO_ROUTE_PROVIDER && selection.routed === true &&
-  AUTO_ROUTE_LEVELS.some((l) => l.model === selection.model && l.effort === selection.effort);
+  [...AUTO_ROUTE_LEVELS, ...AUTO_ROUTE_REQUEST_ONLY]
+    .some((l) => l.model === selection.model && l.effort === selection.effort);
 
 /** The route each channel last used. With a store it outlives a restart, like
  *  History (#59): Anthropic keeps the prompt cache for an hour either way, so

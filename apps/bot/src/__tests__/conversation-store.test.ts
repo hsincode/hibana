@@ -397,8 +397,14 @@ describe("auto route", () => {
     store.saveRoute("retired", { selection: { provider: "anthropic", model: "claude-retired", effort: "medium", routed: true }, at: now });
     store.saveRoute("max", { selection: { provider: "anthropic", model: "claude-opus-5-5", effort: "max", routed: true }, at: now });
     store.saveRoute("other", { selection: { provider: "codex_plus", model: "gpt-6-luna", effort: "medium" }, at: now });
+    // Sonnet is no longer a level (#35, 2026-10-10), but a conversation that
+    // was on it, or asked for it, keeps it while its cache lasts.
+    const sonnet = { provider: "anthropic", model: "claude-sonnet-5-5", effort: "high", routed: true };
+    store.saveRoute("sonnet", { selection: sonnet, at: now });
+    store.saveRoute("sonnet-xhigh", { selection: { ...sonnet, effort: "xhigh" }, at: now });
     const memory = new RouteMemory(() => now, store);
-    for (const channel of ["retired", "max", "other"]) expect(memory.live(channel)).toBeUndefined();
+    for (const channel of ["retired", "max", "other", "sonnet-xhigh"]) expect(memory.live(channel)).toBeUndefined();
+    expect(memory.live("sonnet")).toEqual(sonnet);
   });
 });
 
@@ -471,7 +477,7 @@ test("a restarted bot continues the conversation on the route it had", async () 
   };
   const first = boot();
   await first.respond("難しい設計の相談", { ...channel });
-  expect(requests.at(-1)!.model).toBe("claude-opus-5-5/medium");
+  expect(requests.at(-1)!.model).toBe("claude-opus-5-5/high");
   // SIGTERM during a deploy ends in close().
   await first.close();
 
@@ -481,9 +487,9 @@ test("a restarted bot continues the conversation on the route it had", async () 
     score = 0;
     await second.respond("ありがとう", { ...channel });
     const request = requests.at(-1)!;
-    expect(request.model).toBe("claude-opus-5-5/medium");
+    expect(request.model).toBe("claude-opus-5-5/high");
     expect(routings).toBe(1);
-    expect(sent.filter((text) => text.startsWith("Auto Routing"))).toEqual(["Auto Routing: **Opus 5.5 Medium**"]);
+    expect(sent.filter((text) => text.startsWith("Auto Routing"))).toEqual(["Auto Routing: **Opus 5.5 High**"]);
     // The turn from before the restart is in the request, ahead of the new one.
     const said = request.messages.filter((m) => m.role === "user" || m.role === "assistant").map((m) => m.content);
     expect(said.slice(-3)).toEqual(["難しい設計の相談", "reply 1", "ありがとう"]);

@@ -20,7 +20,7 @@
     "zod": "^3.24.0"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "bun check",
     "build": "bun build src/audit.ts src/catalog.ts src/settings.ts --target=bun --outdir=dist --packages=external"
   }
 }

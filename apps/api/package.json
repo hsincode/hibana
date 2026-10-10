@@ -6,7 +6,7 @@
     "dev": "bun --watch src/dev.ts",
     "start": "bun src/dev.ts",
     "test": "bun test src",
-    "typecheck": "bunx tsc --noEmit"
+    "typecheck": "bun check"
   },
   "dependencies": {
     "@elysiajs/cors": "^1.4.0",

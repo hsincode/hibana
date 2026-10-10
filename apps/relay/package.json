@@ -6,7 +6,7 @@
     "start": "bun src/main.ts",
     "key": "bun src/cli.ts key",
     "test": "bun test src",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "bun check"
   },
   "dependencies": {
     "elysia": "^1.4.0"

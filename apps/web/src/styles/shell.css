@@ -1,0 +1,210 @@
+/* シェル: 上部バー・サイドバー・本文の枠・コマンドパレット・ログイン。 */
+
+/* ============ 上部バー ============ */
+.topbar {
+  position: sticky; top: 0; z-index: var(--z-top);
+  display: flex; align-items: center; gap: var(--sp-3);
+  height: var(--topbar-h); padding: 0 var(--sp-4);
+  background: color-mix(in oklch, var(--bg) 78%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3);
+  border-bottom: 1px solid var(--line);
+}
+.brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 500; font-size: var(--fs-lg); letter-spacing: -0.02em; border-radius: var(--r-sm); }
+/* ロゴ: 単色の小さな面。色は付けない */
+.brand-mark { display: inline-grid; place-items: center; flex: none; width: 28px; height: 28px; border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--raised); color: var(--ink); }
+.brand-mark.lg { width: 44px; height: 44px; border-radius: var(--r-md); box-shadow: 0 0 30px -12px color-mix(in oklch, var(--f2) 70%, transparent); }
+.nav-toggle { display: none; }
+.palette-btn {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 8px 0 10px; margin-left: var(--sp-5);
+  width: min(320px, 34vw);
+  border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--field); color: var(--muted);
+  font-size: var(--fs-sm); text-align: left;
+  transition: border-color var(--dur-fast), color var(--dur-fast);
+}
+.palette-btn:hover { border-color: color-mix(in oklch, var(--f1) 55%, var(--line-strong)); color: var(--ink-2); }
+.palette-btn span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-spacer { flex: 1; min-width: 0; }
+
+/* 保存の状態。成功はトーストではなく、ここと行の右端の印で伝える */
+.save-state { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: var(--muted); font-size: var(--fs-xs); white-space: nowrap; }
+.save-glyph { width: 7px; height: 7px; flex: none; border: 1px solid var(--muted); border-radius: 50%; transition: background var(--dur-fast), border-color var(--dur-fast); }
+.save-state.is-saving { color: var(--ink-2); }
+.save-state.is-saving .save-glyph { border-color: var(--ink); background: transparent; }
+.save-state.is-saved { color: var(--ink); }
+.save-state.is-saved .save-glyph { background: var(--ok); border-color: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.save-state.is-failed { color: var(--danger); }
+/* 失敗は色だけでなく形（四角）でも分かるようにする */
+.save-state.is-failed .save-glyph { background: var(--danger); border-color: var(--danger); border-radius: 0; box-shadow: 0 0 8px var(--danger); }
+.save-sync { color: var(--muted); padding-left: 8px; border-left: 1px solid var(--line); }
+/* 保存ライン: 保存できたとき、上部バーの下端を光が 1 回だけ走る。失敗は赤が逆向きに走る */
+.saveline { position: absolute; left: 0; right: 0; bottom: -6px; height: 12px; overflow: hidden; pointer-events: none; }
+.saveline::before {
+  content: ""; position: absolute; top: 5px; bottom: 5px; left: 0; width: 34%; border-radius: 2px; opacity: 0;
+  background: linear-gradient(90deg, transparent, var(--f1) 28%, var(--f2) 58%, var(--f3) 84%, var(--f4));
+  filter: drop-shadow(0 0 5px var(--f2));
+  transform: translateX(-100%);
+}
+.saveline.run::before { animation: comet 780ms cubic-bezier(0.3, 0.1, 0.2, 1) 1; }
+.saveline.run-fail::before { background: linear-gradient(270deg, transparent, var(--danger) 70%); filter: drop-shadow(0 0 5px var(--danger)); animation: comet-back 780ms cubic-bezier(0.3, 0.1, 0.2, 1) 1; }
+@keyframes comet { 0% { transform: translateX(-100%); opacity: 1; } 88% { opacity: 1; } 100% { transform: translateX(296%); opacity: 0; } }
+@keyframes comet-back { 0% { transform: translateX(296%); opacity: 1; } 88% { opacity: 1; } 100% { transform: translateX(-100%); opacity: 0; } }
+
+.account-btn { display: inline-flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 6px 0 4px; border: 1px solid transparent; border-radius: var(--r-sm); background: transparent; color: var(--ink); font-size: var(--fs-sm); font-weight: 500; }
+.account-btn:hover, .account-btn[data-state="open"] { background: var(--wash); }
+.account-btn > .ic { color: var(--ink-2); }
+.account-name { max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ============ サイドバー ============ */
+.shell { display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr); align-items: start; }
+.side {
+  position: sticky; top: var(--topbar-h); height: calc(100vh - var(--topbar-h)); overflow-y: auto;
+  padding: var(--sp-4) var(--sp-3) var(--sp-5); border-right: 1px solid var(--line);
+}
+.side-nav { position: relative; display: flex; flex-direction: column; gap: 2px; }
+.nav-group { display: flex; flex-direction: column; gap: 2px; }
+.switcher { position: relative; margin-bottom: 6px; }
+.guild-switch {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 6px 8px;
+  border: 1px solid var(--line); border-radius: calc(var(--r-sm) + 2px); background: var(--surface); color: var(--ink); text-align: left; box-shadow: var(--card-shadow);
+  transition: border-color var(--dur-fast);
+}
+.guild-switch:hover, .guild-switch[aria-expanded="true"] { border-color: color-mix(in oklch, var(--f1) 55%, var(--line-strong)); }
+.guild-switch .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: var(--fs-md); }
+.guild-switch > .ic { color: var(--muted); }
+/* サーバー切替の面は、ボタンの真下に同じ幅で開く */
+.switcher .pop { position: absolute; left: 0; right: 0; top: calc(100% + 6px); min-width: 0; max-height: min(60vh, 440px); }
+.switcher .pop .search { margin: 4px 4px 6px; }
+.switch-list { display: flex; flex-direction: column; }
+.nav-label { margin: 18px 0 4px 14px; font-size: 11.5px; font-weight: 500; letter-spacing: 0.08em; color: var(--muted); }
+.nav-link {
+  display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 0 10px 0 14px;
+  border-radius: var(--r-sm); color: var(--ink-2); text-decoration: none; font-size: var(--fs-md);
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+.nav-link .ic { color: var(--muted); transition: color var(--dur-fast); }
+.nav-link:hover { background: var(--wash); color: var(--ink); }
+/* 現在地: 薄い色づけと、左で光る縦線（線はページを移ると滑って動く） */
+.nav-link[aria-current="page"] { background: var(--sel-wash); color: var(--ink); font-weight: 600; }
+.nav-link[aria-current="page"] .ic { color: var(--hot-ink); }
+.nav-indicator { position: absolute; left: 0; top: 0; width: 3px; height: 18px; border-radius: 2px; background: var(--foil-v); box-shadow: var(--glow-ind); opacity: 0; pointer-events: none; }
+.nav-indicator.is-on { opacity: 1; }
+.nav-indicator.is-moving { transition: transform 300ms var(--ease-out); }
+.side-backdrop { display: none; }
+
+/* ============ 本文 ============ */
+.main { --pad: 40px; min-width: 0; padding: var(--sp-6) var(--pad) 96px; }
+.page { max-width: 880px; display: flex; flex-direction: column; gap: var(--sp-6); }
+.page.is-wide { max-width: 1120px; }
+/* ページの登場: 上から順に、少し下から現れる */
+.page > * { animation: page-enter 380ms var(--ease-out) backwards; }
+.page > *:nth-child(2) { animation-delay: 40ms; }
+.page > *:nth-child(3) { animation-delay: 80ms; }
+.page > *:nth-child(4) { animation-delay: 120ms; }
+.page > *:nth-child(5) { animation-delay: 160ms; }
+.page > *:nth-child(n + 6) { animation-delay: 200ms; }
+@keyframes page-enter { from { opacity: 0; transform: translateY(10px); } }
+.page-head { display: flex; flex-direction: column; gap: var(--sp-2); }
+.page-head .lead { max-width: 68ch; color: var(--ink-2); }
+.page-head-row { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--sp-4); }
+.head-search { width: min(300px, 100%); }
+/* 見出し: 墨の字の尾だけに箔の色が入る */
+.page-head h1, .login-card h1 {
+  width: fit-content; max-width: 100%; color: var(--ink);
+  background: var(--title-text) 0 0 / 100% 100% no-repeat;
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+@media (forced-colors: active) {
+  .page-head h1, .login-card h1 { background: none; -webkit-text-fill-color: currentColor; }
+}
+.guild-heading { display: flex; align-items: center; gap: var(--sp-4); min-width: 0; }
+.guild-heading .titles { min-width: 0; flex: 1; }
+.guild-heading h1 { overflow-wrap: anywhere; }
+.guild-heading .sub { color: var(--muted); font-size: var(--fs-sm); }
+.guild-tabs { display: none; }
+
+/* ============ コマンドパレット ============ */
+.palette { width: min(640px, 100%); max-height: min(72vh, 560px); animation: rise-in 180ms var(--ease-out) backwards; }
+.palette-input { display: flex; align-items: center; gap: 10px; padding: 0 var(--sp-4); border-bottom: 1px solid var(--line); color: var(--muted); }
+.palette-input input { flex: 1; min-width: 0; height: 48px; border: 0; background: transparent; font-size: var(--fs-lg); color: var(--ink); }
+.palette-input input:focus-visible { outline: none; }
+.palette-input input::placeholder { color: var(--muted); }
+.palette-list { overflow-y: auto; padding: 4px; }
+.palette-group { padding: 8px 10px 4px; font-size: 11.5px; font-weight: 500; letter-spacing: 0.08em; color: var(--muted); }
+.palette-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 38px; padding: 0 10px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--ink); font-size: var(--fs-md); text-align: left; }
+.palette-item .ic { color: var(--muted); }
+.palette-item .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palette-item .where { color: var(--muted); font-size: var(--fs-xs); white-space: nowrap; }
+.palette-item[aria-selected="true"] { background: linear-gradient(var(--f3), var(--f2) 50%, var(--f1)) 0 50% / 2px 60% no-repeat, var(--sel-wash); }
+.palette-item[aria-selected="true"] .ic { color: var(--hot-ink); }
+.palette-item[aria-selected="true"] .where { color: var(--ink-2); }
+.palette-foot { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 8px var(--sp-4); border-top: 1px solid var(--line); color: var(--muted); font-size: var(--fs-xs); }
+.palette-empty { padding: var(--sp-5) var(--sp-4); color: var(--muted); }
+
+/* ============ ログイン ============ */
+.login { position: relative; min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); align-items: center; gap: var(--sp-7); padding: var(--sp-7) 8vw; }
+.login-theme { position: absolute; top: var(--sp-4); right: var(--sp-4); }
+.login-card { max-width: 360px; display: flex; flex-direction: column; gap: var(--sp-4); padding: var(--sp-6); border-radius: var(--r-lg); background: color-mix(in oklch, var(--surface) 86%, transparent); box-shadow: var(--shadow); }
+.login-card.frame::before { opacity: 0.75; }
+.login-card h1 { font-size: 44px; font-weight: 300; letter-spacing: -0.02em; background-image: var(--foil-text); }
+.login-card .sub { color: var(--ink-2); }
+.login-card .btn { min-height: 44px; font-size: var(--fs-md); }
+.login-foot { color: var(--muted); font-size: var(--fs-xs); }
+/* 図版: 星を箔の線で描き、周りに軌道を置く。星の線は 1 回だけ描かれて止まる */
+.login-plate { justify-self: center; width: min(440px, 100%); aspect-ratio: 1; }
+.login-plate svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.login-plate .star { fill: none; stroke: url(#plate-star) var(--f2); stroke-width: 0.22px; stroke-linejoin: round; animation: star-draw 1100ms var(--ease-out) backwards; }
+.login-plate .star-glow { fill: none; stroke: url(#plate-star) var(--f2); stroke-width: 0.7px; stroke-linejoin: round; opacity: 0.6; }
+.login-plate .orbit { fill: none; stroke: color-mix(in oklch, var(--f1) 55%, var(--line-strong)); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+.login-plate .orbit.b { stroke: color-mix(in oklch, var(--f2) 50%, var(--line-strong)); }
+.login-plate .orbit.c { stroke: color-mix(in oklch, var(--f3) 45%, var(--line-strong)); }
+.login-plate .ion.a { fill: var(--f1); } .login-plate .ion.b { fill: var(--f2); } .login-plate .ion.c { fill: var(--f3); }
+.login-plate .orbits { transform-origin: 50px 50px; animation: orbit-in 1200ms var(--ease-out) backwards; }
+@keyframes star-draw { from { stroke-dasharray: 100; stroke-dashoffset: 100; } to { stroke-dasharray: 100; stroke-dashoffset: 0; } }
+@keyframes orbit-in { from { opacity: 0; transform: rotate(-24deg) scale(0.92); } }
+
+/* ============ 狭い幅 ============ */
+@media (max-width: 1100px) {
+  .main { --pad: 32px; }
+}
+/* 1000px 以下: サイドバーは引き出しになり、サーバーの中では 5 ページのタブ帯を出す */
+@media (max-width: 1000px) {
+  .nav-toggle { display: inline-grid; margin-left: -6px; }
+  .shell { grid-template-columns: minmax(0, 1fr); }
+  /* 引き出しは不透明にする（下の本文が透けない） */
+  .side { display: none; position: fixed; top: var(--topbar-h); left: 0; bottom: 0; z-index: var(--z-drawer); width: min(300px, 86vw); height: auto; background: var(--bg); border-right-color: var(--line-strong); box-shadow: var(--shadow); }
+  .side.is-open { display: block; animation: fade-in var(--dur-fast) linear backwards; }
+  .side-backdrop.is-open { display: block; position: fixed; inset: var(--topbar-h) 0 0 0; z-index: calc(var(--z-drawer) - 1); background: var(--scrim); }
+  .nav-link, .guild-switch { min-height: 40px; }
+  .palette-btn { margin-left: var(--sp-2); }
+  .guild-tabs {
+    display: flex; gap: 2px; margin: var(--sp-2) calc(var(--pad) * -1) 0; padding: 0 var(--pad);
+    overflow-x: auto; border-bottom: 1px solid var(--line); scrollbar-width: none;
+  }
+  .guild-tabs::-webkit-scrollbar { display: none; }
+  .guild-tabs a { display: inline-flex; align-items: center; min-height: 42px; padding: 0 10px; color: var(--muted); font-size: var(--fs-sm); text-decoration: none; white-space: nowrap; }
+  .guild-tabs a[aria-current="page"] { color: var(--ink); font-weight: 600; background: var(--foil) 0 100% / 100% 2px no-repeat; }
+}
+@media (max-width: 900px) {
+  .login { grid-template-columns: minmax(0, 1fr); gap: var(--sp-5); padding: var(--sp-7) var(--sp-5); align-content: center; }
+  .login-plate { order: -1; width: min(220px, 60%); justify-self: start; }
+}
+@media (max-width: 760px) {
+  .nav-link, .palette-item { min-height: 40px; }
+  .brand { min-height: 40px; }
+  .brand-name { display: none; }
+  .palette-btn { width: 40px; min-height: 40px; flex: none; padding: 0; margin-left: 0; justify-content: center; border-color: transparent; background: transparent; color: var(--ink-2); }
+  .palette-btn span, .palette-btn kbd { display: none; }
+  .account-name, .account-btn > .ic { display: none; }
+  .account-btn { padding: 0 4px; min-height: 40px; }
+  .save-sync { display: none; }
+  /* 変化が無い間の案内は省き、保存中・保存済み・失敗だけを出す */
+  .save-state:not(.is-saving):not(.is-saved):not(.is-failed) .save-text { display: none; }
+  .topbar { gap: 4px; padding: 0 var(--sp-3); }
+  .main { --pad: 16px; padding-top: var(--sp-5); }
+  .page { gap: var(--sp-5); }
+  .guild-heading { flex-wrap: wrap; gap: var(--sp-3); }
+  .guild-heading .titles { flex: 1 1 60%; }
+  .head-search { width: 100%; }
+  .page-head-row { align-items: stretch; flex-direction: column; }
+  .login-card h1 { font-size: 36px; }
+}

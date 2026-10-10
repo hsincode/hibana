@@ -1,37 +1,37 @@
 import {
-  Sparkles,
-  Server,
-  Users,
-  UserRound,
-  LogOut,
-  Search,
+  ChevronDown,
+  ChevronLeft,
   ChevronRight,
-  ArrowLeft,
-  Inbox,
-  Route,
-  ShieldCheck,
-  Filter,
-  Compass,
-  Cpu,
-  Thermometer,
-  Globe,
-  Clock,
-  Mic,
-  MessagesSquare,
-  Wrench,
-  FlaskConical,
-  FileText,
-  SlidersHorizontal,
-  RotateCcw,
-  Trash2,
-  Save,
+  ChevronsUpDown,
   Check,
-  CircleCheck,
   CircleAlert,
-  Minus,
-  X,
-  Layers,
+  Cpu,
+  Download,
+  ExternalLink,
+  FileText,
   Gauge,
+  Info,
+  LayoutGrid,
+  LogOut,
+  Menu,
+  Monitor,
+  Moon,
+  Network,
+  Package,
+  Pencil,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  Server,
+  SlidersHorizontal,
+  Sparkles,
+  Sun,
+  Trash2,
+  UserRound,
+  Users,
+  X,
+  type LucideIcon,
 } from "lucide-react";
 import {
   useCallback,
@@ -45,280 +45,80 @@ import * as Dialog from "@radix-ui/react-dialog";
 
 /* ============================================================
    共通 UI プリミティブ
-   画面（App.tsx）側にマークアップ詳細を散らさないよう、
-   カード・フィールド・トースト等はここに集約する。
+   画面側にマークアップ詳細を散らさないよう、
+   面・印・トースト等はここに集約する。
    ============================================================ */
 
 /* ---------- icons ---------- */
 type IconProps = { size?: number; className?: string };
 
+/** 線の太さと `ic` クラス（縮まない・色は親に従う）をそろえる。 */
+const icon =
+  (Glyph: LucideIcon, base = 16) =>
+  ({ size = base, className }: IconProps) => (
+    <Glyph
+      size={size}
+      className={className ? `ic ${className}` : "ic"}
+      strokeWidth={1.6}
+      aria-hidden="true"
+    />
+  );
+
+/** favicon と同じ四芒星。ロゴとログインの図版で使う。 */
+export const LOGO_PATH =
+  "M16 6.5l2.9 7.5 7.5 2.9-7.5 2.9L16 27.3l-2.9-7.5L5.6 16.9l7.5-2.9L16 6.5z";
+
 export const Icon = {
   logo: ({ size = 18, className }: IconProps) => (
-    <Sparkles
-      size={size}
-      className={className}
-      strokeWidth={1.7}
+    <svg
+      className={className ? `ic ${className}` : "ic"}
+      width={size}
+      height={size}
+      viewBox="0 0 32 32"
       aria-hidden="true"
-    />
+    >
+      <path d={LOGO_PATH} fill="currentColor" />
+    </svg>
   ),
-  server: ({ size = 16, className }: IconProps) => (
-    <Server
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  users: ({ size = 16, className }: IconProps) => (
-    <Users
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  user: ({ size = 16, className }: IconProps) => (
-    <UserRound
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  logout: ({ size = 16, className }: IconProps) => (
-    <LogOut
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  search: ({ size = 16, className }: IconProps) => (
-    <Search
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  chevronRight: ({ size = 16, className }: IconProps) => (
-    <ChevronRight
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  arrowLeft: ({ size = 16, className }: IconProps) => (
-    <ArrowLeft
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  inbox: ({ size = 32, className }: IconProps) => (
-    <Inbox
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  route: ({ size = 16, className }: IconProps) => (
-    <Route
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  shield: ({ size = 16, className }: IconProps) => (
-    <ShieldCheck
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  filter: ({ size = 16, className }: IconProps) => (
-    <Filter
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  compass: ({ size = 16, className }: IconProps) => (
-    <Compass
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  cpu: ({ size = 16, className }: IconProps) => (
-    <Cpu
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  thermometer: ({ size = 16, className }: IconProps) => (
-    <Thermometer
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  globe: ({ size = 16, className }: IconProps) => (
-    <Globe
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  clock: ({ size = 16, className }: IconProps) => (
-    <Clock
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  mic: ({ size = 16, className }: IconProps) => (
-    <Mic
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  thread: ({ size = 16, className }: IconProps) => (
-    <MessagesSquare
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  tools: ({ size = 16, className }: IconProps) => (
-    <Wrench
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  flask: ({ size = 16, className }: IconProps) => (
-    <FlaskConical
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  doc: ({ size = 16, className }: IconProps) => (
-    <FileText
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  sliders: ({ size = 16, className }: IconProps) => (
-    <SlidersHorizontal
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  reset: ({ size = 16, className }: IconProps) => (
-    <RotateCcw
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  trash: ({ size = 16, className }: IconProps) => (
-    <Trash2
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  save: ({ size = 16, className }: IconProps) => (
-    <Save
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  check: ({ size = 16, className }: IconProps) => (
-    <Check
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  checkCircle: ({ size = 16, className }: IconProps) => (
-    <CircleCheck
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  alert: ({ size = 16, className }: IconProps) => (
-    <CircleAlert
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  minus: ({ size = 16, className }: IconProps) => (
-    <Minus
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  close: ({ size = 16, className }: IconProps) => (
-    <X size={size} className={className} strokeWidth={1.7} aria-hidden="true" />
-  ),
-  layers: ({ size = 16, className }: IconProps) => (
-    <Layers
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
-  gauge: ({ size = 16, className }: IconProps) => (
-    <Gauge
-      size={size}
-      className={className}
-      strokeWidth={1.7}
-      aria-hidden="true"
-    />
-  ),
+  server: icon(Server),
+  agent: icon(Network),
+  sliders: icon(SlidersHorizontal),
+  doc: icon(FileText),
+  skill: icon(Sparkles),
+  box: icon(Package),
+  grid: icon(LayoutGrid),
+  user: icon(UserRound),
+  users: icon(Users),
+  cpu: icon(Cpu),
+  gauge: icon(Gauge),
+  search: icon(Search),
+  chevronDown: icon(ChevronDown),
+  chevronRight: icon(ChevronRight),
+  chevronLeft: icon(ChevronLeft),
+  updown: icon(ChevronsUpDown),
+  close: icon(X),
+  menu: icon(Menu),
+  check: icon(Check),
+  sun: icon(Sun),
+  moon: icon(Moon),
+  monitor: icon(Monitor),
+  refresh: icon(RefreshCw),
+  download: icon(Download),
+  trash: icon(Trash2),
+  pencil: icon(Pencil),
+  plus: icon(Plus),
+  alert: icon(CircleAlert),
+  info: icon(Info),
+  external: icon(ExternalLink),
+  logout: icon(LogOut),
+  reset: icon(RotateCcw),
   discord: ({ size = 18, className }: IconProps) => (
     <svg
       width={size}
       height={size}
       viewBox="0 0 24 24"
       fill="currentColor"
-      className={className}
+      className={className ? `ic ${className}` : "ic"}
       aria-hidden="true"
     >
       <path d="M19.3 5.4A16.7 16.7 0 0 0 15.2 4l-.3.6c1.4.3 2.6.9 3.7 1.6a13.4 13.4 0 0 0-12.6-.4c.8-.5 1.9-1 3-1.2L8.8 4a16.7 16.7 0 0 0-4.1 1.4C2.1 9.3 1.4 13 1.7 16.7a16.8 16.8 0 0 0 5.1 2.6l1-1.7c-.9-.3-1.7-.8-2.4-1.3l.6-.4a12 12 0 0 0 10 0l.6.4c-.7.5-1.5 1-2.4 1.3l1 1.7a16.8 16.8 0 0 0 5.1-2.6c.4-4.3-.6-7.9-1-11.3zM8.7 14.6c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2zm6.6 0c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2z" />
@@ -326,14 +126,23 @@ export const Icon = {
   ),
 };
 
+/** サーバー設定の 5 ページの印（nav.ts の `path` で引く）。 */
+export const GUILD_PAGE_ICON: Record<string, ReactNode> = {
+  "": <Icon.agent />,
+  tools: <Icon.sliders />,
+  context: <Icon.doc />,
+  skills: <Icon.skill />,
+  artifacts: <Icon.box />,
+};
+
 /* ---------- provider marks ---------- */
 /**
  * モデルはプロバイダ数が多く、文字列 label だけだと一覧で探しづらい。
- * ブランドを想起できる簡易マーク + 固定色を持たせて、視覚で絞り込めるようにする。
+ * ブランドを想起できる簡易マークを持たせて、視覚で絞り込めるようにする。
+ * 色は付けない（印は文字と同じ色。色数を増やさないため。#61）。
  */
 export type ProviderMeta = {
   label: string;
-  color: string;
   mark: (p: IconProps) => ReactNode;
 };
 
@@ -354,10 +163,37 @@ const mark = (
   </svg>
 );
 
+const asterisk = "M12 3.5v17M4.5 7.8l15 8.4M4.5 16.2l15-8.4";
+const grokMark = (
+  <>
+    <path d="M5 19L15.5 5h3.5L8.5 19H5z" fill="currentColor" />
+    <path
+      d="M13.2 19l3.2-4.4H19L15.8 19h-2.6z"
+      fill="currentColor"
+      opacity="0.55"
+    />
+  </>
+);
+const codexMark = (
+  <>
+    <path
+      d="M12 2.8l8 4.6v9.2l-8 4.6-8-4.6V7.4l8-4.6z"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M12 7.2v9.6M7.8 9.6l8.4 4.8M16.2 9.6l-8.4 4.8"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      opacity="0.75"
+    />
+  </>
+);
+
 export const PROVIDERS: Record<string, ProviderMeta> = {
   opencode_go: {
     label: "OpenCode Go",
-    color: "#25c46a",
     mark: ({ size = 18, className }) =>
       mark(
         size,
@@ -384,7 +220,6 @@ export const PROVIDERS: Record<string, ProviderMeta> = {
   },
   deepseek: {
     label: "DeepSeek",
-    color: "#4d6bfe",
     mark: ({ size = 18, className }) =>
       mark(
         size,
@@ -397,59 +232,37 @@ export const PROVIDERS: Record<string, ProviderMeta> = {
   },
   grok_free: {
     label: "Grok Free",
-    color: "#8b93a7",
-    mark: ({ size = 18, className }) =>
-      mark(
-        size,
-        className,
-        <>
-          <path d="M5 19L15.5 5h3.5L8.5 19H5z" fill="currentColor" />
-          <path
-            d="M13.2 19l3.2-4.4H19L15.8 19h-2.6z"
-            fill="currentColor"
-            opacity="0.55"
-          />
-        </>,
-      ),
+    mark: ({ size = 18, className }) => mark(size, className, grokMark),
   },
+  // Grok Heavy: Free と同じ形。どちらの口座かは名前で区別する。
   grok_heavy: {
     label: "Grok Heavy",
-    color: "#f0a132",
-    mark: ({ size = 18, className }) =>
-      mark(
-        size,
-        className,
-        <>
-          <path d="M5 19L15.5 5h3.5L8.5 19H5z" fill="currentColor" />
-          <path
-            d="M13.2 19l3.2-4.4H19L15.8 19h-2.6z"
-            fill="currentColor"
-            opacity="0.55"
-          />
-        </>,
-      ),
+    mark: ({ size = 18, className }) => mark(size, className, grokMark),
   },
   claude_kiro: {
     label: "Claude Kiro",
-    color: "#d97757",
     mark: ({ size = 18, className }) =>
       mark(
         size,
         className,
         <g stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
-          <path d="M12 3.5v17M4.5 7.8l15 8.4M4.5 16.2l15-8.4" />
+          <path d={asterisk} />
         </g>,
       ),
   },
   // Anthropic 直結（従量課金）: 芯のないアスタリスクを輪で囲み、Kiro / Max と区別する。
   anthropic: {
     label: "Anthropic",
-    color: "#d97757",
     mark: ({ size = 18, className }) =>
       mark(
         size,
         className,
-        <g stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" fill="none">
+        <g
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          fill="none"
+        >
           <circle cx="12" cy="12" r="9" />
           <path d="M12 6.5v11M7.2 9.25l9.6 5.5M7.2 14.75l9.6-5.5" />
         </g>,
@@ -458,20 +271,18 @@ export const PROVIDERS: Record<string, ProviderMeta> = {
   // Claude Max: Kiro と同じアスタリスクに芯を足して、課金先が一目で分かるようにしてある。
   claude_max: {
     label: "Claude Max",
-    color: "#c9a227",
     mark: ({ size = 18, className }) =>
       mark(
         size,
         className,
         <g stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
-          <path d="M12 3.5v17M4.5 7.8l15 8.4M4.5 16.2l15-8.4" />
+          <path d={asterisk} />
           <circle cx="12" cy="12" r="2.1" fill="currentColor" stroke="none" />
         </g>,
       ),
   },
   codex_gemini: {
     label: "Gemini",
-    color: "#4b8dff",
     mark: ({ size = 18, className }) =>
       mark(
         size,
@@ -484,56 +295,24 @@ export const PROVIDERS: Record<string, ProviderMeta> = {
   },
   codex_plus: {
     label: "Codex Plus",
-    color: "#12a37e",
-    mark: ({ size = 18, className }) =>
-      mark(
-        size,
-        className,
-        <>
-          <path
-            d="M12 2.8l8 4.6v9.2l-8 4.6-8-4.6V7.4l8-4.6z"
-            stroke="currentColor"
-            strokeWidth="1.7"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M12 7.2v9.6M7.8 9.6l8.4 4.8M16.2 9.6l-8.4 4.8"
-            stroke="currentColor"
-            strokeWidth="1.3"
-            opacity="0.75"
-          />
-        </>,
-      ),
+    mark: ({ size = 18, className }) => mark(size, className, codexMark),
   },
   // Codex Pro: Codex Plus と同じホスト・同じ 2 モデルの別口座。どちらに課金され
-  // ているかが一目で分かるよう、同じ六角形マークに芯を足して色を変えてある。
+  // ているかが一目で分かるよう、同じ六角形マークに芯を足してある。
   codex_pro: {
     label: "Codex Pro",
-    color: "#e0a63c",
     mark: ({ size = 18, className }) =>
       mark(
         size,
         className,
         <>
-          <path
-            d="M12 2.8l8 4.6v9.2l-8 4.6-8-4.6V7.4l8-4.6z"
-            stroke="currentColor"
-            strokeWidth="1.7"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M12 7.2v9.6M7.8 9.6l8.4 4.8M16.2 9.6l-8.4 4.8"
-            stroke="currentColor"
-            strokeWidth="1.3"
-            opacity="0.75"
-          />
+          {codexMark}
           <circle cx="12" cy="12" r="2.1" fill="currentColor" />
         </>,
       ),
   },
   openrouter: {
     label: "OpenRouter",
-    color: "#a878ff",
     mark: ({ size = 18, className }) =>
       mark(
         size,
@@ -550,19 +329,16 @@ export const PROVIDERS: Record<string, ProviderMeta> = {
 
 const FALLBACK_PROVIDER: ProviderMeta = {
   label: "その他",
-  color: "#8b93a7",
   mark: ({ size = 18, className }) =>
     mark(
       size,
       className,
-      <>
-        <path
-          d="M12 3.5l8 4.4v8.2l-8 4.4-8-4.4V7.9l8-4.4z"
-          stroke="currentColor"
-          strokeWidth="1.7"
-          strokeLinejoin="round"
-        />
-      </>,
+      <path
+        d="M12 3.5l8 4.4v8.2l-8 4.4-8-4.4V7.9l8-4.4z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />,
     ),
 };
 
@@ -570,7 +346,7 @@ export function providerMeta(
   provider: string | undefined,
   label?: string,
 ): ProviderMeta {
-  if (provider === "chatgpt") return { ...PROVIDERS.codex_pro!, label: "ChatGPT", color: "#10a37f" };
+  if (provider === "chatgpt") return { ...PROVIDERS.codex_pro!, label: "ChatGPT" };
   if (provider && PROVIDERS[provider]) return PROVIDERS[provider];
   // provider を返さない旧 API 用: label の "Provider / Model" 前半で引く
   const head = label?.split("/")[0]?.trim().toLowerCase();
@@ -583,17 +359,21 @@ export function providerMeta(
   return FALLBACK_PROVIDER;
 }
 
-export function ProviderMark({
+/** プロバイダの印を入れた小さな枠。名前は隣に文字で出すので、印は飾りとして扱う。 */
+export function ProviderTile({
   provider,
   label,
-  size = 18,
+  large,
 }: {
   provider?: string;
   label?: string;
-  size?: number;
+  large?: boolean;
 }) {
-  const meta = providerMeta(provider, label);
-  return <>{meta.mark({ size })}</>;
+  return (
+    <span className={`mono-tile${large ? " lg" : ""}`} aria-hidden="true">
+      {providerMeta(provider, label).mark({ size: large ? 20 : 15 })}
+    </span>
+  );
 }
 
 /* ---------- avatar ---------- */
@@ -612,15 +392,16 @@ export function cdnUrl(
 export function Avatar({
   src,
   name,
-  square,
-  className = "",
+  small,
+  round,
 }: {
   src: string | null;
   name: string;
-  square?: boolean;
-  className?: string;
+  small?: boolean;
+  /** 人は丸、サーバーは角丸。 */
+  round?: boolean;
 }) {
-  const cls = `avatar ${square ? "avatar-sq" : ""} ${className}`.trim();
+  const cls = `avatar${small ? " sm" : ""}${round ? " round" : ""}`;
   const [broken, setBroken] = useState(false);
   if (src && !broken) {
     return (
@@ -633,7 +414,7 @@ export function Avatar({
       />
     );
   }
-  // 画像なしはイニシャル。頭文字だけだと同名で潰れるので 1 文字 + 色は付けず地味に。
+  // 画像なしはイニシャル 1 文字。
   return (
     <span className={cls} aria-hidden="true">
       {name.slice(0, 1).toUpperCase()}
@@ -642,122 +423,158 @@ export function Avatar({
 }
 
 /* ---------- layout blocks ---------- */
-export function Panel({
+/** ページの中の 1 節。見出しと説明の下に、設定行の面や表を置く。 */
+export function Section({
   id,
   title,
   desc,
-  icon,
   children,
-  foot,
 }: {
   id?: string;
   title: string;
-  desc?: string;
-  icon?: ReactNode;
+  desc?: ReactNode;
   children: ReactNode;
-  foot?: ReactNode;
 }) {
+  const auto = useId();
+  const headingId = `${id ?? auto}-t`;
   return (
-    <section
-      className="panel"
-      id={id}
-      aria-labelledby={id ? `${id}-h` : undefined}
-    >
-      <div className="panel-head">
-        <h2 id={id ? `${id}-h` : undefined}>
-          {icon && <span className="panel-icon">{icon}</span>}
+    <section className="sec" id={id} aria-labelledby={headingId}>
+      <header className="sec-head">
+        <h2 className="sec-title" id={headingId}>
           {title}
         </h2>
-        {desc && <p className="desc">{desc}</p>}
-      </div>
-      <div className="panel-body">{children}</div>
-      {foot && <div className="panel-foot">{foot}</div>}
+        {desc && <p className="sec-desc">{desc}</p>}
+      </header>
+      {children}
     </section>
   );
 }
 
-export function Field({
-  label,
-  hint,
-  icon,
-  wide,
-  children,
-}: {
+/** 読み取り板（サーバー設定の「実際の動作」、マイ設定の「あなたの上書き」）の 1 項目。 */
+export type EffectiveItem = {
   label: string;
-  hint?: string;
-  icon?: ReactNode;
-  wide?: boolean;
-  children: (id: string) => ReactNode;
+  value: string;
+  note?: string;
+  /** 保存した値とは違う値で動いている。 */
+  unused?: boolean;
+  warn?: boolean;
+};
+
+export function Effective({
+  title,
+  caption,
+  items,
+}: {
+  title: string;
+  caption: string;
+  items: EffectiveItem[];
 }) {
-  const id = useId();
+  const headingId = useId();
   return (
-    <div className={`field ${wide ? "field-wide" : ""}`}>
-      <label className="field-label" htmlFor={id}>
-        {icon}
-        {label}
-      </label>
-      {children(id)}
-      {hint && <p className="field-hint">{hint}</p>}
+    <section className="effective" aria-labelledby={headingId}>
+      <div className="effective-head">
+        <h2 id={headingId}>{title}</h2>
+        <p>{caption}</p>
+      </div>
+      <dl className={`eff-list${items.length === 3 ? " is-three" : ""}`}>
+        {items.map((item) => (
+          <div
+            key={item.label}
+            className={`eff-item${item.unused ? " is-unused" : ""}${item.warn ? " is-warn" : ""}`}
+          >
+            <dt>{item.label}</dt>
+            <dd>
+              <div
+                className={`eff-value${/[^\x00-\x7f]/.test(item.value) ? " is-text" : ""}`}
+              >
+                {item.value}
+              </div>
+              {item.note && <div className="eff-note">{item.note}</div>}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+/** セグメント: 2〜4 個の選択肢を並べ、選んだ値を常に見せる。 */
+export function Seg<T extends string>({
+  label,
+  labelledBy,
+  value,
+  options,
+  onChange,
+  mono,
+  wideOnMobile,
+  disabled,
+}: {
+  label?: string;
+  labelledBy?: string;
+  value: T;
+  options: { value: T; label: string; count?: number; disabled?: boolean }[];
+  onChange: (next: T) => void;
+  mono?: boolean;
+  wideOnMobile?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <div
+      className={`seg${mono ? " is-mono" : ""}${wideOnMobile ? " is-wide-mobile" : ""}`}
+      role="group"
+      aria-label={label}
+      aria-labelledby={labelledBy}
+    >
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          aria-pressed={value === o.value}
+          disabled={disabled || o.disabled}
+          onClick={() => {
+            if (value !== o.value) onChange(o.value);
+          }}
+        >
+          {o.label}
+          {o.count != null && <span className="count">{o.count}</span>}
+        </button>
+      ))}
     </div>
   );
 }
 
-/** Two explicit states keep the selected value visible without an extra menu.
- *  `onDefault` adds デフォルト, which clears a personal override back to the server. */
-export function BooleanSetting({
+/** ON / OFF。`onDefault` を渡すと「デフォルト」が加わり、個人の上書きをサーバー設定に戻せる。 */
+export function BoolSeg({
   label,
-  hint,
-  icon,
+  labelledBy,
   value,
   onChange,
   onDefault,
 }: {
-  label: string;
-  hint?: string;
-  icon?: ReactNode;
+  label?: string;
+  labelledBy?: string;
   value: boolean | null | undefined;
   onChange: (v: boolean) => void;
   onDefault?: () => void;
 }) {
-  const labelId = useId();
-  const current = value === true ? "on" : value === false ? "off" : onDefault ? "inherit" : "off";
-  // 各状態にアイコンを添える（色だけだと色覚特性で ON/OFF が判別しづらい）
-  const options: {
-    key: string;
-    text: string;
-    next: boolean | null;
-    glyph: ReactNode;
-  }[] = [
-    ...(onDefault ? [{ key: "inherit", text: "デフォルト", next: null, glyph: <Icon.layers size={13} /> }] : []),
-    { key: "on", text: "ON", next: true, glyph: <Icon.check size={13} /> },
-    { key: "off", text: "OFF", next: false, glyph: <Icon.close size={13} /> },
-  ];
+  const current =
+    value === true ? "on" : value === false ? "off" : onDefault ? "inherit" : "off";
   return (
-    <div className="field">
-      <div className="field-label" id={labelId}>
-        {icon}
-        {label}
-      </div>
-      <div className="segmented" role="group" aria-labelledby={labelId}>
-        {options.map((o) => (
-          <button
-            key={o.key}
-            type="button"
-            className={o.key}
-            aria-pressed={current === o.key}
-            onClick={() => {
-              if (current === o.key) return;
-              if (o.next === null) onDefault?.();
-              else onChange(o.next);
-            }}
-          >
-            {o.glyph}
-            {o.text}
-          </button>
-        ))}
-      </div>
-      {hint && <p className="field-hint">{hint}</p>}
-    </div>
+    <Seg
+      label={label}
+      labelledBy={labelledBy}
+      wideOnMobile
+      value={current}
+      options={[
+        ...(onDefault ? [{ value: "inherit" as const, label: "デフォルト" }] : []),
+        { value: "on" as const, label: "ON" },
+        { value: "off" as const, label: "OFF" },
+      ]}
+      onChange={(next) => {
+        if (next === "inherit") onDefault?.();
+        else onChange(next === "on");
+      }}
+    />
   );
 }
 
@@ -766,27 +583,33 @@ export function Badge({
   tone = "",
 }: {
   children: ReactNode;
-  tone?: "" | "accent" | "ok" | "muted" | "danger";
+  tone?: "" | "ok" | "warn" | "danger" | "solid";
 }) {
-  return (
-    <span className={`badge ${tone ? `badge-${tone}` : ""}`}>{children}</span>
-  );
+  return <span className={`badge${tone ? ` is-${tone}` : ""}`}>{children}</span>;
 }
 
 export function Empty({
   title,
   body,
   action,
+  heading,
 }: {
   title: string;
   body?: string;
   action?: ReactNode;
+  /** ページに他の見出しが無いとき、題を h1 にする。 */
+  heading?: boolean;
 }) {
   return (
     <div className="empty">
-      <Icon.inbox className="icon" />
-      <strong>{title}</strong>
-      {body && <p>{body}</p>}
+      {heading ? (
+        <h1 className="empty-title">
+          <strong>{title}</strong>
+        </h1>
+      ) : (
+        <strong>{title}</strong>
+      )}
+      {body && <span>{body}</span>}
       {action}
     </div>
   );
@@ -794,7 +617,7 @@ export function Empty({
 
 export function Alert({ children }: { children: ReactNode }) {
   return (
-    <div className="alert alert-error" role="alert">
+    <div className="alert" role="alert">
       <Icon.alert />
       <span>{children}</span>
     </div>
@@ -809,13 +632,13 @@ export function Skeleton({
   width?: number | string;
 }) {
   return (
-    <div className="skeleton" style={{ height, width: width ?? "100%" }} />
+    <span className="skeleton" style={{ height, width: width ?? "100%" }} />
   );
 }
 
 export function Loading({ label = "読み込み中…" }: { label?: string }) {
   return (
-    <div className="status-pill" role="status">
+    <div className="loading" role="status">
       <span className="spinner" />
       {label}
     </div>
@@ -828,14 +651,14 @@ export function Modal({
   onClose,
   title,
   desc,
-  icon,
+  size,
   children,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   desc?: string;
-  icon?: ReactNode;
+  size?: "wide" | "narrow";
   children: ReactNode;
 }) {
   const returnFocus = useRef<HTMLElement | null>(null);
@@ -849,40 +672,39 @@ export function Modal({
       }}
     >
       <Dialog.Portal>
-        <Dialog.Overlay className="modal-overlay" />
-        <Dialog.Content
-          className="modal"
-          aria-describedby={desc ? descriptionId : undefined}
-          onOpenAutoFocus={() => {
-            returnFocus.current = document.activeElement as HTMLElement;
-          }}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            returnFocus.current?.focus();
-          }}
-        >
-          <div className="modal-head">
-            <Dialog.Title>
-              {icon && <span className="panel-icon">{icon}</span>}
-              {title}
-            </Dialog.Title>
-            <button
-              type="button"
-              className="btn btn-ghost modal-x"
-              onClick={onClose}
-              aria-label="閉じる"
-              title="閉じる"
-            >
-              <Icon.close />
-            </button>
-          </div>
-          {desc && (
-            <Dialog.Description id={descriptionId} className="modal-desc">
-              {desc}
-            </Dialog.Description>
-          )}
-          <div className="modal-body">{children}</div>
-        </Dialog.Content>
+        {/* Content を Overlay の中に置く: 背の高いダイアログは Overlay ごとスクロールできる。 */}
+        <Dialog.Overlay className="overlay">
+          <Dialog.Content
+            className={`modal${size ? ` is-${size}` : ""}`}
+            aria-describedby={desc ? descriptionId : undefined}
+            onOpenAutoFocus={() => {
+              returnFocus.current = document.activeElement as HTMLElement;
+            }}
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              returnFocus.current?.focus();
+            }}
+          >
+            <header className="modal-head">
+              <Dialog.Title>{title}</Dialog.Title>
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={onClose}
+                aria-label="閉じる"
+                title="閉じる"
+              >
+                <Icon.close size={18} />
+              </button>
+            </header>
+            {desc && (
+              <Dialog.Description id={descriptionId} className="modal-desc">
+                {desc}
+              </Dialog.Description>
+            )}
+            <div className="modal-body">{children}</div>
+          </Dialog.Content>
+        </Dialog.Overlay>
       </Dialog.Portal>
     </Dialog.Root>
   );
@@ -910,9 +732,9 @@ export function ToastArea({ toasts }: { toasts: Toast[] }) {
   return (
     <div className="toast-area" aria-live="polite">
       {toasts.map((t) => (
-        <div key={t.id} className={`toast ${t.kind}`}>
-          {t.kind === "ok" ? <Icon.checkCircle /> : <Icon.alert />}
-          {t.text}
+        <div key={t.id} className={`toast${t.kind === "error" ? " is-danger" : ""}`}>
+          {t.kind === "ok" ? <Icon.check /> : <Icon.alert />}
+          <span>{t.text}</span>
         </div>
       ))}
     </div>
@@ -931,30 +753,12 @@ export function useDocumentTitle(title: string): void {
   }, [title]);
 }
 
-/* ---------- scroll spy ---------- */
-/** 設定セクションのサイドレールで、今見えている見出しを光らせる。 */
-export function useActiveSection(ids: string[], ready: boolean): string {
-  const [active, setActive] = useState(ids[0] ?? "");
+/* ---------- hash scroll ---------- */
+/** `/g/1/tools#mcp` のような節への直リンク。中身が描かれてから、その節へ送る。 */
+export function useHashScroll(ready: boolean): void {
   useEffect(() => {
     if (!ready) return;
-    const nodes = ids
-      .map((id) => document.getElementById(id))
-      .filter((n): n is HTMLElement => !!n);
-    if (nodes.length === 0) return;
-    const io = new IntersectionObserver(
-      (entries) => {
-        // 画面上部に一番近い可視セクションを採用する
-        const visible = entries
-          .filter((e) => e.isIntersecting)
-          .sort(
-            (a, b) => a.boundingClientRect.top - b.boundingClientRect.top,
-          )[0];
-        if (visible) setActive(visible.target.id);
-      },
-      { rootMargin: "-72px 0px -65% 0px", threshold: 0 },
-    );
-    nodes.forEach((n) => io.observe(n));
-    return () => io.disconnect();
-  }, [ids.join(","), ready]);
-  return active;
+    const id = decodeURIComponent(window.location.hash.slice(1));
+    if (id) document.getElementById(id)?.scrollIntoView({ block: "start" });
+  }, [ready]);
 }

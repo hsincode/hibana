@@ -1,8 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { api } from "./api";
-import { Alert, Badge, Empty, Skeleton, useDocumentTitle } from "./ui";
-import "./analytics.css";
+import { Alert, Badge, Empty, Icon, Section, Skeleton, useDocumentTitle } from "./ui";
 
 /* ============================================================
    利用料（Anthropic の cost report）
@@ -104,50 +102,53 @@ export function AnalyticsPage() {
   const report = loaded && (loading || loaded.month === shown) ? loaded : null;
 
   return (
-    <div className="page analytics">
-      <div className="page-head">
-        <div>
-          <h1>利用料</h1>
-          <p className="lead">
-            Anthropic の cost report（請求ベース・組織全体）を表示します。日付は UTC
-            区切り（日本時間の 9:00 に切り替わり）で、載るのは終わった日までです。進行中の日のぶんは、次の
-            9:00 を過ぎてから表示されます。
-          </p>
-        </div>
-      </div>
+    <div className="page is-wide">
+      <header className="page-head">
+        <h1>利用料</h1>
+        <p className="lead">
+          Anthropic の cost report（請求ベース・組織全体）を表示します。日付は UTC
+          区切り（日本時間の 9:00 に切り替わり）で、載るのは終わった日までです。進行中の日のぶんは、次の
+          9:00 を過ぎてから表示されます。
+        </p>
+      </header>
 
-      <div className="analytics-bar">
+      <div className="month-bar">
         <div className="month-nav" role="group" aria-label="表示する月">
           <button
-            className="btn btn-ghost icon-button"
+            type="button"
+            className="icon-btn bordered"
             aria-label="前の月"
             onClick={() => setMonth(shiftMonth(shown, -1))}
           >
-            <ChevronLeft size={18} aria-hidden="true" />
+            <Icon.chevronLeft />
           </button>
           <strong aria-live="polite">{monthLabel(shown)}</strong>
           <button
-            className="btn btn-ghost icon-button"
+            type="button"
+            className="icon-btn bordered"
             aria-label="次の月"
             // 今月より先は API も受け付けない。
             disabled={shown >= utcMonth()}
             onClick={() => setMonth(shiftMonth(shown, 1))}
           >
-            <ChevronRight size={18} aria-hidden="true" />
+            <Icon.chevronRight />
           </button>
         </div>
-        {report && !loading && (
-          <span className="analytics-fetched">{timeFormat.format(report.fetched_at)} に取得</span>
-        )}
-        <button
-          className="btn"
-          disabled={loading}
-          // API は同じ月を 1 分間キャッシュするので、それより短い間隔では同じ値が返る。
-          onClick={() => setReloads((n) => n + 1)}
-        >
-          <RefreshCw size={15} aria-hidden="true" />
-          再読み込み
-        </button>
+        <div className="month-meta">
+          {report && !loading && (
+            <span>{timeFormat.format(report.fetched_at)} に取得</span>
+          )}
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={loading}
+            // API は同じ月を 1 分間キャッシュするので、それより短い間隔では同じ値が返る。
+            onClick={() => setReloads((n) => n + 1)}
+          >
+            <Icon.refresh size={14} />
+            再読み込み
+          </button>
+        </div>
       </div>
 
       {err && <Alert>{err}</Alert>}
@@ -185,10 +186,11 @@ function Report({ m, stale }: { m: CostMonth; stale: boolean }) {
 
   return (
     <div className={`analytics-report${stale ? " is-stale" : ""}`} aria-busy={stale}>
-      <div className="stat-row">
+      <div className={`stats${latest ? "" : " is-three"}`}>
         <Stat
           label={m.current ? "今月の残り" : "予算の残り"}
           value={overBudget ? `−${usd(-m.remaining_usd)}` : usd(m.remaining_usd)}
+          negative={overBudget}
           badge={overBudget ? <Badge tone="danger">予算超過</Badge> : undefined}
         >
           <div
@@ -199,7 +201,10 @@ function Report({ m, stale }: { m: CostMonth; stale: boolean }) {
             aria-valuemax={100}
             aria-valuenow={Math.round(used * 100)}
           >
-            <span style={{ width: `${used * 100}%` }} />
+            <span className="meter-fill" style={{ width: `${used * 100}%` }} />
+            {[0, 25, 50, 75, 100].map((t) => (
+              <i key={t} style={{ left: t === 100 ? "calc(100% - 1px)" : `${t}%` }} />
+            ))}
           </div>
           <p className="stat-note">
             月の予算 {usd(m.monthly_budget_usd)} のうち {usd(m.spent_usd)} を使用
@@ -245,42 +250,38 @@ function Report({ m, stale }: { m: CostMonth; stale: boolean }) {
       </div>
 
       {m.days.length === 0 ? (
-        <p className="analytics-note">
+        <p className="note">
           この月で終わった日はまだありません。1 日のぶんは、UTC の日付が変わったあと（日本時間の 9:00
           以降）に表示されます。
         </p>
       ) : (
         <>
-          <section className="panel" aria-labelledby="cost-chart-h">
-            <div className="panel-head">
-              <h2 id="cost-chart-h">日毎の利用料</h2>
-              <p className="desc">
-                棒が点線（1日の目安 {usd(guideline)}）を超えた日が目安超過です。
-              </p>
-            </div>
-            <div className="panel-body">
-              <ul className="chart-legend">
+          <section className="chart-panel frame" aria-labelledby="cost-chart-h">
+            <div className="chart-head">
+              <div>
+                <h2 id="cost-chart-h">日毎の利用料</h2>
+                <p>棒が点線（1日の目安 {usd(guideline)}）を超えた日が目安超過です。</p>
+              </div>
+              <ul className="legend">
                 <li>
-                  <span className="key key-within" />
+                  <i className="k-in" />
                   目安以内
                 </li>
                 <li>
-                  <span className="key key-over" />
+                  <i className="k-over" />
                   目安超過
                 </li>
                 <li>
-                  <span className="key key-line" />
+                  <i className="k-guide" />
                   1日の目安
                 </li>
               </ul>
-              <CostChart m={m} />
             </div>
+            {/* 月を移ったら、棒が伸びる動きをもう一度見せる。 */}
+            <CostChart key={m.month} m={m} />
           </section>
 
-          <section className="panel" aria-labelledby="cost-table-h">
-            <div className="panel-head">
-              <h2 id="cost-table-h">日別の一覧</h2>
-            </div>
+          <Section title="日別の一覧">
             <div className="table-wrap">
               <table className="cost-table">
                 <thead>
@@ -300,7 +301,7 @@ function Report({ m, stale }: { m: CostMonth; stale: boolean }) {
                       <td className="num">{d.cost_usd === null ? "—" : usd(d.cost_usd)}</td>
                       <td>
                         {d.cost_usd === null ? (
-                          <Badge tone="muted">未集計</Badge>
+                          <Badge>未集計</Badge>
                         ) : (
                           <Verdict over={d.over} />
                         )}
@@ -314,7 +315,7 @@ function Report({ m, stale }: { m: CostMonth; stale: boolean }) {
                 </tbody>
               </table>
             </div>
-          </section>
+          </Section>
         </>
       )}
     </div>
@@ -324,19 +325,21 @@ function Report({ m, stale }: { m: CostMonth; stale: boolean }) {
 function Stat({
   label,
   value,
+  negative,
   badge,
   children,
 }: {
   label: string;
   value: string;
+  negative?: boolean;
   badge?: ReactNode;
   children?: ReactNode;
 }) {
   return (
     <div className="stat">
       <span className="stat-label">{label}</span>
-      <div className="stat-value">
-        <strong>{value}</strong>
+      <div className="stat-line">
+        <span className={`stat-value${negative ? " is-neg" : ""}`}>{value}</span>
         {badge}
       </div>
       {children}
@@ -409,92 +412,119 @@ function CostChart({ m }: { m: CostMonth }) {
   }
 
   const shownDay = active === null ? undefined : m.days[active];
+  // 塗りの定義は、同じページに別のグラフが増えても混ざらないよう、グラフごとに名前を分ける。
+  // useId は記号を含むので、url(#…) にそのまま書ける英数字だけにする。
+  const defs = `cost${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
 
   return (
-    <div
-      ref={wrap}
-      className="chart"
-      style={{ height: PAD_TOP + PLOT_H + AXIS_H }}
-      // 数値は下の表にすべてある。グラフはキーボードでも日を選べるようにしておく。
-      tabIndex={0}
-      role="group"
-      aria-label="日毎の利用料のグラフ。左右の矢印キーで日を選べます。数値は下の一覧にもあります"
-      onKeyDown={onKeyDown}
-      onFocus={() => setActive((i) => i ?? m.days.length - 1)}
-      onBlur={() => setActive(null)}
-      onPointerMove={(e) => pick(e.clientX)}
-      onPointerDown={(e) => pick(e.clientX)}
-      onPointerLeave={() => setActive(null)}
-    >
-      {width > 0 && (
-        <svg width={width} height={PAD_TOP + PLOT_H + AXIS_H} aria-hidden="true">
-          {active !== null && (
-            <rect
-              className="chart-active"
-              x={LEFT + band * active}
-              y={PAD_TOP}
-              width={band}
-              height={PLOT_H}
-            />
-          )}
-          {ticks.map((t) => (
-            <g key={t}>
-              <line className="chart-grid" x1={LEFT} x2={LEFT + plotW} y1={y(t)} y2={y(t)} />
-              <text className="chart-tick" x={LEFT - 8} y={y(t)} dy="0.32em" textAnchor="end">
-                {tickFormat.format(t)}
-              </text>
-            </g>
-          ))}
-          {m.days.map((d, i) => {
-            if (!d.cost_usd || d.cost_usd <= 0) return null;
-            // 0 でない日は、額が小さくても棒が見えるようにする。
-            const h = Math.max(base - y(d.cost_usd), 2);
-            const r = Math.min(4, barW / 2, h);
-            const x = center(i) - barW / 2;
-            const t = base - h;
-            return (
-              <path
-                key={d.date}
-                className={`chart-bar${d.over ? " is-over" : ""}`}
-                // 上だけ丸め、基線側は角のまま。
-                d={`M${x},${base}V${t + r}Q${x},${t} ${x + r},${t}H${x + barW - r}Q${x + barW},${t} ${x + barW},${t + r}V${base}Z`}
+    <>
+      {/* 読み取り欄: 選んだ日の値はグラフの外に出し、棒や凡例に重ねない。どの日かは列の網掛けで示す。 */}
+      <div className="chart-readout">
+        {shownDay && active !== null ? (
+          <div
+            className="chart-tip"
+            role="status"
+            style={{
+              // 端の日でも枠からはみ出さないよう、中心を内側に寄せる。
+              left: Math.min(Math.max(center(active), 84), Math.max(width - 84, 84)),
+            }}
+          >
+            <span>{day(shownDay.date)}</span>
+            <strong>{shownDay.cost_usd === null ? "未集計" : usd(shownDay.cost_usd)}</strong>
+            {shownDay.cost_usd !== null && (
+              <span className={shownDay.over ? "is-over" : undefined}>
+                {shownDay.over ? "目安超過 " : "目安以内 "}
+                {signedUsd(shownDay.cost_usd - guideline)}
+              </span>
+            )}
+          </div>
+        ) : (
+          <span className="chart-hint">棒に触れるか、グラフを選んで ← → で日を選べます。</span>
+        )}
+      </div>
+      <div
+        ref={wrap}
+        className="chart"
+        style={{ height: PAD_TOP + PLOT_H + AXIS_H }}
+        // 数値は下の表にすべてある。グラフはキーボードでも日を選べるようにしておく。
+        tabIndex={0}
+        role="group"
+        aria-label="日毎の利用料のグラフ。左右の矢印キーで日を選べます。数値は下の一覧にもあります"
+        onKeyDown={onKeyDown}
+        onFocus={() => setActive((i) => i ?? m.days.length - 1)}
+        onBlur={() => setActive(null)}
+        onPointerMove={(e) => pick(e.clientX)}
+        onPointerDown={(e) => pick(e.clientX)}
+        onPointerLeave={() => setActive(null)}
+      >
+        {width > 0 && (
+          <svg width={width} height={PAD_TOP + PLOT_H + AXIS_H} aria-hidden="true">
+            <defs>
+              {/* 軸の高さに対して色を掛ける（棒ごとではない）ので、高い日ほど暖かい色になる。 */}
+              <linearGradient id={`${defs}-bar`} gradientUnits="userSpaceOnUse" x1="0" x2="0" y1={base} y2={PAD_TOP}>
+                <stop offset="0" style={{ stopColor: "var(--f1)" }} />
+                <stop offset="0.46" style={{ stopColor: "var(--f2)" }} />
+                <stop offset="0.82" style={{ stopColor: "var(--f3)" }} />
+                <stop offset="1" style={{ stopColor: "var(--f4)" }} />
+              </linearGradient>
+              {/* 超過は色だけでなく斜線でも示す。 */}
+              <pattern id={`${defs}-over`} patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="rotate(45)">
+                <rect width="5" height="5" style={{ fill: "var(--danger)" }} />
+                <rect width="2" height="5" style={{ fill: "var(--danger-deep)" }} />
+              </pattern>
+            </defs>
+            {active !== null && (
+              <rect
+                className="chart-active"
+                x={LEFT + band * active}
+                y={PAD_TOP}
+                width={band}
+                height={PLOT_H}
               />
-            );
-          })}
-          <line className="chart-guide" x1={LEFT} x2={LEFT + plotW} y1={y(guideline)} y2={y(guideline)} />
-          <text className="chart-guide-label" x={LEFT + plotW + 8} y={y(guideline)} dy="0.32em">
-            目安
-          </text>
-          {Array.from({ length: m.days_in_month }, (_, i) => i + 1)
-            .filter((n) => n === 1 || n % 5 === 0)
-            .map((n) => (
-              <text key={n} className="chart-tick" x={center(n - 1)} y={base + 17} textAnchor="middle">
-                {n}
-              </text>
+            )}
+            {ticks.map((t) => (
+              <g key={t}>
+                <line className="chart-grid" x1={LEFT} x2={LEFT + plotW} y1={y(t)} y2={y(t)} />
+                <text className="chart-tick" x={LEFT - 8} y={y(t)} dy="0.32em" textAnchor="end">
+                  {tickFormat.format(t)}
+                </text>
+              </g>
             ))}
-        </svg>
-      )}
-      {shownDay && active !== null && (
-        <div
-          className="chart-tip"
-          role="status"
-          style={{
-            // 端の日でも枠からはみ出さないよう、中心を内側に寄せる。
-            left: Math.min(Math.max(center(active), 84), Math.max(width - 84, 84)),
-            // 棒や目安の線を隠さないよう、プロットの上に出す。どの日かは列の網掛けで示す。
-            bottom: AXIS_H + PLOT_H + 4,
-          }}
-        >
-          <span>{day(shownDay.date)}</span>
-          <strong>{shownDay.cost_usd === null ? "未集計" : usd(shownDay.cost_usd)}</strong>
-          {shownDay.cost_usd !== null && (
-            <span>
-              {shownDay.over ? "目安超過 " : "目安以内 "}
-              {signedUsd(shownDay.cost_usd - guideline)}
-            </span>
-          )}
-        </div>
-      )}
-    </div>
+            {m.days.map((d, i) => {
+              if (!d.cost_usd || d.cost_usd <= 0) return null;
+              // 0 でない日は、額が小さくても棒が見えるようにする。
+              const h = Math.max(base - y(d.cost_usd), 2);
+              const r = Math.min(4, barW / 2, h);
+              const x = center(i) - barW / 2;
+              const t = base - h;
+              return (
+                <path
+                  key={d.date}
+                  className={`chart-bar${d.over ? " is-over" : ""}`}
+                  // 棒は左の日から順に伸びる。
+                  style={{
+                    "--i": i,
+                    fill: d.over ? `url(#${defs}-over) var(--danger)` : `url(#${defs}-bar) var(--f2)`,
+                  } as CSSProperties}
+                  // 上だけ丸め、基線側は角のまま。
+                  d={`M${x},${base}V${t + r}Q${x},${t} ${x + r},${t}H${x + barW - r}Q${x + barW},${t} ${x + barW},${t + r}V${base}Z`}
+                />
+              );
+            })}
+            <line className="chart-guide" x1={LEFT} x2={LEFT + plotW} y1={y(guideline)} y2={y(guideline)} />
+            <text className="chart-guide-label" x={LEFT + plotW + 8} y={y(guideline)} dy="0.32em">
+              目安
+            </text>
+            {Array.from({ length: m.days_in_month }, (_, i) => i + 1)
+              .filter((n) => n === 1 || n % 5 === 0)
+              .map((n) => (
+                <text key={n} className="chart-tick" x={center(n - 1)} y={base + 17} textAnchor="middle">
+                  {n}
+                </text>
+              ))}
+          </svg>
+        )}
+      </div>
+    </>
   );
 }

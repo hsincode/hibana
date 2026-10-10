@@ -7,14 +7,8 @@ import {
 } from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
 import * as Dropdown from "@radix-ui/react-dropdown-menu";
-import {
-  Check,
-  ChevronDown,
-  ChevronUp,
-  Monitor,
-  Moon,
-  Sun,
-} from "lucide-react";
+import { ChevronUp } from "lucide-react";
+import { Icon } from "./ui";
 
 type OptionProps = { value: string; disabled?: boolean; children: ReactNode };
 const EMPTY = "__hibana_empty__";
@@ -51,18 +45,18 @@ export function Select({
       <SelectPrimitive.Trigger id={id} className="select-trigger" {...label}>
         <SelectPrimitive.Value placeholder={placeholder} />
         <SelectPrimitive.Icon>
-          <ChevronDown size={16} />
+          <Icon.chevronDown />
         </SelectPrimitive.Icon>
       </SelectPrimitive.Trigger>
       <SelectPrimitive.Portal>
         <SelectPrimitive.Content
-          className="select-menu"
+          className="pop select-menu"
           position="popper"
           sideOffset={6}
           collisionPadding={12}
         >
-          <SelectPrimitive.ScrollUpButton className="select-scroll">
-            <ChevronUp size={16} />
+          <SelectPrimitive.ScrollUpButton className="pop-scroll">
+            <ChevronUp size={16} aria-hidden="true" />
           </SelectPrimitive.ScrollUpButton>
           <SelectPrimitive.Viewport>
             {options.map((option) => (
@@ -73,19 +67,21 @@ export function Select({
                   option.props.disabled ||
                   (required && option.props.value === "")
                 }
-                className="select-item"
+                className="pop-item"
               >
-                <SelectPrimitive.ItemText>
-                  {option.props.children}
-                </SelectPrimitive.ItemText>
-                <SelectPrimitive.ItemIndicator>
-                  <Check size={16} />
+                <span className="grow">
+                  <SelectPrimitive.ItemText>
+                    {option.props.children}
+                  </SelectPrimitive.ItemText>
+                </span>
+                <SelectPrimitive.ItemIndicator className="end">
+                  <Icon.check size={14} />
                 </SelectPrimitive.ItemIndicator>
               </SelectPrimitive.Item>
             ))}
           </SelectPrimitive.Viewport>
-          <SelectPrimitive.ScrollDownButton className="select-scroll">
-            <ChevronDown size={16} />
+          <SelectPrimitive.ScrollDownButton className="pop-scroll">
+            <Icon.chevronDown />
           </SelectPrimitive.ScrollDownButton>
         </SelectPrimitive.Content>
       </SelectPrimitive.Portal>
@@ -94,7 +90,7 @@ export function Select({
 }
 
 type Theme = "system" | "light" | "dark";
-export function ThemeMenu() {
+export function ThemeMenu({ bordered }: { bordered?: boolean }) {
   const [theme, setTheme] = useState<Theme>(() => {
     try {
       const stored = localStorage.getItem("hibana-theme");
@@ -111,44 +107,47 @@ export function ThemeMenu() {
       /* Storage can be unavailable in private browsers. */
     }
   }, [theme]);
-  const ThemeIcon = theme === "light" ? Sun : theme === "dark" ? Moon : Monitor;
+  const ThemeIcon =
+    theme === "light" ? Icon.sun : theme === "dark" ? Icon.moon : Icon.monitor;
   return (
     <Dropdown.Root>
       <Dropdown.Trigger
-        className="btn btn-ghost icon-button"
+        className={`icon-btn${bordered ? " bordered" : ""}`}
         aria-label="外観を変更"
         title="外観を変更"
       >
-        <ThemeIcon size={19} />
+        <ThemeIcon size={18} />
       </Dropdown.Trigger>
       <Dropdown.Portal>
         <Dropdown.Content
-          className="dropdown-menu"
+          className="pop"
           align="end"
-          sideOffset={8}
-          collisionPadding={12}
+          sideOffset={6}
+          collisionPadding={8}
         >
-          <Dropdown.Label className="dropdown-label">外観</Dropdown.Label>
+          <Dropdown.Label className="pop-label">
+            <strong>外観</strong>
+          </Dropdown.Label>
           <Dropdown.RadioGroup
             value={theme}
             onValueChange={(next) => setTheme(next as Theme)}
           >
             {(
               [
-                { value: "light", label: "ライト", icon: Sun },
-                { value: "dark", label: "ダーク", icon: Moon },
-                { value: "system", label: "システム", icon: Monitor },
+                { value: "light", label: "ライト", icon: Icon.sun },
+                { value: "dark", label: "ダーク", icon: Icon.moon },
+                { value: "system", label: "システム", icon: Icon.monitor },
               ] as const
             ).map((item) => (
               <Dropdown.RadioItem
                 key={item.value}
                 value={item.value}
-                className="dropdown-item"
+                className="pop-item"
               >
-                <item.icon size={16} />
-                {item.label}
-                <Dropdown.ItemIndicator className="menu-check">
-                  <Check size={16} />
+                <item.icon />
+                <span className="grow">{item.label}</span>
+                <Dropdown.ItemIndicator className="end">
+                  <Icon.check size={14} />
                 </Dropdown.ItemIndicator>
               </Dropdown.RadioItem>
             ))}

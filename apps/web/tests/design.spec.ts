@@ -406,6 +406,28 @@ test("capture review gallery", async ({ page }) => {
   );
   test.setTimeout(180_000);
   await mockApi(page);
+  // The gallery is captured as a moderator, so the screens only they get are in it (#64).
+  await page.route("**/api/me", (route) => route.fulfill({ json: {
+    id: "1", username: "xuanling", avatar: null, role: "moderator", can_manage_users: true, can_moderate: true,
+  } }));
+  await page.route("**/api/blocked", (route) => route.fulfill({ json: { blocked: [
+    { discord_id: "987654321012345678", username: null, reason: "同じ依頼を短い間隔で繰り返したため", blocked_by: "1", blocked_at: Date.parse("2026-10-08T11:20:00Z") },
+  ] } }));
+  await page.route("**/api/logs*", (route) => route.fulfill({ json: {
+    logs: Array.from({ length: 6 }, (_, i) => ({
+      id: 6 - i, at: Date.parse("2026-10-09T02:50:00Z") - i * 420_000,
+      guild_id: i % 3 === 2 ? null : "100", guild_name: null, channel_id: `11880${i}0042`, channel_name: null,
+      user_id: "2", username: "2", trigger: i % 3 === 2 ? "dm" : "mention",
+      prompt: ["来週のリリースノートの下書きを作って。", "このエラーの原因を調べて: TypeError", "設計レビューの観点を 5 つ挙げて"][i % 3],
+      reply: i === 1 ? null : "承知しました。3 つの節に分けて作りました。",
+      provider: "deepseek", model: "DeepSeek V4",
+      error: i === 1 ? "provider_http" : null, failure_phase: i === 1 ? "agent" : null, failure_code: i === 1 ? "provider_http" : null,
+      http_status: i === 1 ? 529 : null, has_checkpoint: i === 1 ? true : null, failure_stage: i === 1 ? "stream" : null,
+      failure_reason: i === 1 ? "provider_error" : null, error_type: i === 1 ? "overloaded_error" : null, retries: i === 1 ? 2 : null,
+      effort: "high", latency_ms: 1800 + i * 640,
+    })),
+    next: null, retention_days: 30, enabled: true,
+  } }));
   const directory = "test-results/gallery";
   await mkdir(directory, { recursive: true });
   const manifest: { group: string; title: string; file: string }[] = [];
@@ -429,7 +451,8 @@ test("capture review gallery", async ({ page }) => {
     ["skills", "/g/100/skills", "サーバー設定: スキル"],
     ["artifacts", "/artifacts", "成果物一覧"],
     ["models", "/models", "モデル管理"],
-    ["users", "/users", "ユーザー管理"],
+    ["users", "/users", "ユーザー管理と利用停止"],
+    ["logs", "/logs", "会話ログ"],
     ["not-found", "/not-found", "404"],
   ];
   for (const theme of ["light", "dark"]) {
@@ -513,6 +536,20 @@ test("capture review gallery", async ({ page }) => {
     await expect(page.getByRole("dialog", { name: "モデルを選ぶ" })).toBeVisible();
     await capture("model-picker", "モデルを選ぶダイアログ", false);
     await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "サーバーの操作" }).click();
+    await page.getByRole("menuitem", { name: "このサーバーで bot を止める" }).click();
+    await expect(page.getByRole("dialog", { name: "このサーバーで bot を止める" })).toBeVisible();
+    await capture("stop-server", "サーバーの停止の確認", false);
+    await page.keyboard.press("Escape");
+    await page.goto("/users");
+    await page.getByRole("button", { name: "workspace-member の利用を停止" }).click();
+    await expect(page.getByRole("dialog", { name: "利用を停止" })).toBeVisible();
+    await capture("block-user", "利用停止の確認", false);
+    await page.keyboard.press("Escape");
+    await page.goto("/logs");
+    await page.locator("tr.log-row").nth(1).getByRole("button").click();
+    await expect(page.locator("tr.log-detail")).toBeVisible();
+    await capture("log-detail", "会話ログの 1 件を開いたところ", false);
     await page.goto("/g/100/skills");
     await page.getByRole("button", { name: "作成", exact: true }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
@@ -1119,4 +1156,416 @@ test("the two typefaces are served by the app itself", async ({ page, baseURL })
   expect(loaded).toEqual(expect.arrayContaining(["Outfit", "Red Hat Mono"]));
   // No font host, no CDN: every request went to the dashboard's own origin.
   expect([...hosts]).toEqual([new URL(baseURL!).host]);
+});
+
+/* ============================================================
+   Screens added for functions the API already had (#64): the marks in
+   the server list, stopping the bot for a server, blocking users, and
+   the conversation log.
+   ============================================================ */
+
+/** The account the other tests use has no moderation rights; these tests need one that does. */
+async function mockModerator(page: Page, me: Record<string, unknown> = {}) {
+  const writes = await mockApi(page, true);
+  await page.route("**/api/me", (route) => route.fulfill({ json: {
+    id: "1", username: "xuanling", avatar: null, role: "moderator",
+    can_manage_users: true, can_moderate: true, ...me,
+  } }));
+  return writes;
+}
+
+test("servers that are stopped, or that the account has not joined, are marked", async ({ page }) => {
+  await mockApi(page);
+  await page.route("**/api/guilds", (route) => route.fulfill({ json: { guilds: [
+    { ...guilds[0], bot_disabled: true, member: true },
+    { ...guilds[1], bot_disabled: false, member: false },
+    { ...guilds[2], bot_disabled: false, member: true },
+  ] } }));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  const card = (name: string) => page.getByRole("link", { name: new RegExp(name) }).filter({ has: page.locator(".name") });
+  await expect(card("Design workspace")).toContainText("停止中");
+  await expect(card("Design workspace")).not.toContainText("参加していない");
+  await expect(card("開発コミュニティ")).toContainText("参加していない");
+  await expect(card("開発コミュニティ")).not.toContainText("停止中");
+  await expect(card("Research lab")).not.toContainText(/停止中|参加していない/);
+  // The same state shows where servers are switched and searched.
+  await page.getByRole("button", { name: /^サーバーを切り替える/ }).click();
+  await expect(page.getByRole("option", { name: /Design workspace/ })).toContainText("停止中");
+  await expect(page.getByRole("option", { name: /Research lab/ })).not.toContainText("停止中");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Control+k");
+  await expect(page.getByRole("dialog", { name: "コマンドパレット" }).getByRole("option", { name: /^Design workspace/ })).toContainText("停止中");
+});
+
+test("a moderator stops and resumes the bot for a server, after confirming", async ({ page }) => {
+  const writes = await mockModerator(page);
+  let listReads = 0;
+  page.on("request", (request) => {
+    if (request.method() === "GET" && new URL(request.url()).pathname === "/api/guilds") listReads += 1;
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/g/100");
+  const pill = page.locator(".guild-heading .status-pill");
+  const status = page.locator(".topbar").getByRole("status");
+  const stopWrites = () => writes.filter((w) => "bot_disabled" in w.body).map((w) => w.body.bot_disabled);
+  await expect(pill).toHaveText("有効");
+
+  const menu = page.getByRole("button", { name: "サーバーの操作" });
+  await menu.click();
+  await page.getByRole("menuitem", { name: "このサーバーで bot を止める" }).click();
+  const dialog = page.getByRole("dialog", { name: "このサーバーで bot を止める" });
+  await expect(dialog).toContainText("Design workspace");
+  // Nothing is sent until the dialog is confirmed.
+  await dialog.getByRole("button", { name: "キャンセル" }).click();
+  await expect(dialog).toBeHidden();
+  expect(stopWrites()).toEqual([]);
+  await expect(pill).toHaveText("有効");
+
+  const readsBefore = listReads;
+  await menu.click();
+  await page.getByRole("menuitem", { name: "このサーバーで bot を止める" }).click();
+  await dialog.getByRole("button", { name: "止める", exact: true }).click();
+  await expect.poll(stopWrites).toEqual([true]);
+  await expect(pill).toHaveText("停止中");
+  await expect(status).toContainText("保存済み");
+  const notice = page.getByRole("note").filter({ hasText: "このサーバーでは bot を止めています" });
+  await expect(notice).toBeVisible();
+  // The server list is read again so the switcher and the list show 停止中 too.
+  await expect.poll(() => listReads).toBeGreaterThan(readsBefore);
+  // The page behind the closed dialog and menu stays usable.
+  await expect(page.locator("body")).not.toHaveCSS("pointer-events", "none");
+  // The state is part of the server, not of one page.
+  await page.getByRole("navigation", { name: "メイン", exact: true }).getByRole("link", { name: "ツールと挙動" }).click();
+  await expect(pill).toHaveText("停止中");
+  await expect(notice).toBeVisible();
+
+  await notice.getByRole("button", { name: "再開する" }).click();
+  const resume = page.getByRole("dialog", { name: "bot を再開する" });
+  await resume.getByRole("button", { name: "再開する" }).click();
+  await expect.poll(stopWrites).toEqual([true, false]);
+  await expect(pill).toHaveText("有効");
+  await expect(notice).toHaveCount(0);
+  await page.reload();
+  await expect(pill).toHaveText("有効");
+});
+
+test("a member sees whether the bot is stopped but is not offered the switch; a refusal puts the state back", async ({ page }) => {
+  // The default account can open the server but has no moderation rights.
+  const writes = await mockApi(page, true);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/g/100");
+  const pill = page.locator(".guild-heading .status-pill");
+  await expect(pill).toHaveText("有効");
+  await expect(page.getByRole("button", { name: "サーバーの操作" })).toHaveCount(0);
+
+  // Should the API refuse a moderator's request after all, the page returns to what is saved.
+  await page.route("**/api/me", (route) => route.fulfill({ json: {
+    id: "1", username: "xuanling", avatar: null, role: "moderator", can_manage_users: true, can_moderate: true,
+  } }));
+  await page.route("**/api/guilds/100/settings", (route) =>
+    route.request().method() === "PATCH" && "bot_disabled" in route.request().postDataJSON()
+      ? route.fulfill({ status: 403, json: { error: "only a moderator or administrator can stop or resume the bot for a server" } })
+      : route.fallback());
+  await page.reload();
+  await page.getByRole("button", { name: "サーバーの操作" }).click();
+  await page.getByRole("menuitem", { name: "このサーバーで bot を止める" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "止める", exact: true }).click();
+  await expect(page.locator(".topbar").getByRole("status")).toHaveText("保存に失敗");
+  await expect(pill).toHaveText("有効");
+  await expect(page.locator(".toast.is-danger")).toContainText("only a moderator or administrator");
+  await expect(page.getByRole("note")).toHaveCount(0);
+  expect(writes.some((w) => "bot_disabled" in w.body)).toBe(false);
+});
+
+test("a moderator blocks a user from the list or by Discord ID, and lifts the block", async ({ page }) => {
+  await mockModerator(page);
+  const blocked: { discord_id: string; username: string | null; reason: string | null; blocked_by: string; blocked_at: number }[] = [];
+  const users = [
+    { discord_id: "1", username: "xuanling", role: "moderator" },
+    { discord_id: "2", username: "workspace-member", role: "user" },
+    { discord_id: "3", username: "owner", role: "administrator" },
+  ];
+  const calls: string[] = [];
+  await page.route("**/api/users", (route) => route.fulfill({ json: {
+    users: users.map((u) => ({ ...u, blocked: blocked.some((b) => b.discord_id === u.discord_id) })),
+    assignable: ["user", "premium"],
+  } }));
+  await page.route("**/api/blocked", async (route) => {
+    const request = route.request();
+    if (request.method() === "POST") {
+      const body = request.postDataJSON() as { discord_id: string; reason: string | null };
+      calls.push(`POST ${JSON.stringify(body)}`);
+      blocked.unshift({
+        discord_id: body.discord_id, reason: body.reason, blocked_by: "1", blocked_at: Date.parse("2026-10-09T03:00:00Z"),
+        username: users.find((u) => u.discord_id === body.discord_id)?.username ?? null,
+      });
+      return route.fulfill({ json: { ok: true, discord_id: body.discord_id } });
+    }
+    return route.fulfill({ json: { blocked } });
+  });
+  await page.route("**/api/blocked/*", async (route) => {
+    const id = new URL(route.request().url()).pathname.split("/").pop()!;
+    calls.push(`${route.request().method()} ${id}`);
+    blocked.splice(blocked.findIndex((b) => b.discord_id === id), 1);
+    await route.fulfill({ json: { ok: true, discord_id: id } });
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/users");
+  const section = page.getByRole("region", { name: "利用停止" });
+  await expect(section.getByText("利用停止中のユーザーはいません。")).toBeVisible();
+  const row = (name: string) => page.locator("tbody tr").filter({ hasText: name }).first();
+  // Only someone with a weaker role can be blocked: not oneself, not an administrator.
+  await expect(row("xuanling").getByRole("button")).toHaveCount(0);
+  await expect(row("owner").getByRole("button", { name: /利用を停止/ })).toHaveCount(0);
+
+  // From the list, with a reason.
+  await page.getByRole("button", { name: "workspace-member の利用を停止" }).click();
+  const dialog = page.getByRole("dialog", { name: "利用を停止" });
+  await expect(dialog).toContainText("workspace-member");
+  await dialog.getByRole("textbox", { name: "理由（任意）" }).fill("荒らし");
+  await dialog.getByRole("button", { name: "利用を停止" }).click();
+  await expect(dialog).toBeHidden();
+  expect(calls).toEqual(['POST {"discord_id":"2","reason":"荒らし"}']);
+  await expect(row("workspace-member")).toContainText("利用停止");
+  const listed = section.locator("tbody tr");
+  await expect(listed).toHaveCount(1);
+  await expect(listed).toContainText("workspace-member");
+  await expect(listed).toContainText("荒らし");
+  // Who stopped them is shown by name when the list knows the ID.
+  await expect(listed).toContainText("xuanling");
+
+  // Lifting it, from the list of blocks.
+  await section.getByRole("button", { name: "workspace-member の停止を解除" }).click();
+  await expect(listed).toHaveCount(0);
+  expect(calls.at(-1)).toBe("DELETE 2");
+  await expect(row("workspace-member")).not.toContainText("利用停止");
+
+  // By ID: what the bot cannot match is refused before anything is sent.
+  const id = section.getByRole("textbox", { name: "Discord の ID" });
+  const byId = section.getByRole("button", { name: "この ID の利用を停止…" });
+  await expect(byId).toBeDisabled();
+  await id.fill("workspace-member");
+  await byId.click();
+  await expect(section.getByRole("alert")).toContainText("数字 5〜25 桁");
+  await id.fill("1");
+  await byId.click();
+  await expect(section.getByRole("alert")).toContainText("数字 5〜25 桁");
+  await expect(dialog).toBeHidden();
+  // A valid ID that is not in the list: the dialog says it cannot tell whose it is.
+  await id.fill("987654321012345678");
+  await byId.click();
+  await expect(dialog).toContainText("987654321012345678");
+  await expect(dialog).toContainText("誰のものかをここでは確かめられません");
+  await dialog.getByRole("button", { name: "利用を停止" }).click();
+  await expect(listed).toHaveCount(1);
+  expect(calls.at(-1)).toBe('POST {"discord_id":"987654321012345678","reason":null}');
+  await expect(listed).toContainText("（名前は分かりません）");
+  await expect(id).toHaveValue("");
+  // The same ID again is caught here rather than sent twice.
+  await id.fill("987654321012345678");
+  await byId.click();
+  await expect(section.getByRole("alert")).toContainText("すでに利用を停止しています");
+  expect(calls).toHaveLength(3);
+});
+
+test("blocking oneself by ID is refused, and accounts without moderation rights get neither blocks nor the log", async ({ page }) => {
+  await mockModerator(page, { id: "100000000000000001" });
+  await page.route("**/api/blocked", (route) => route.fulfill({ json: { blocked: [] } }));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/users");
+  const section = page.getByRole("region", { name: "利用停止" });
+  await section.getByRole("textbox", { name: "Discord の ID" }).fill("100000000000000001");
+  await section.getByRole("button", { name: "この ID の利用を停止…" }).click();
+  await expect(section.getByRole("alert")).toContainText("自分自身は止められません");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  // An account that manages users but may not moderate (or an older API that does not say).
+  await page.unroute("**/api/me");
+  await page.route("**/api/me", (route) => route.fulfill({ json: {
+    id: "1", username: "xuanling", avatar: null, role: "premium", can_manage_users: true,
+  } }));
+  const moderationRequests: string[] = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path === "/api/logs" || path === "/api/blocked") moderationRequests.push(path);
+  });
+  await page.goto("/users");
+  await expect(page.getByRole("heading", { name: "ユーザー", level: 1 })).toBeVisible();
+  await expect(page.getByRole("region", { name: "利用停止" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /利用を停止/ })).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "メイン", exact: true }).getByRole("link", { name: "会話ログ" })).toHaveCount(0);
+  await page.goto("/logs");
+  await expect(page).toHaveURL(/\/$/);
+  await page.keyboard.press("Control+k");
+  const palette = page.getByRole("dialog", { name: "コマンドパレット" });
+  await palette.getByRole("combobox").fill("会話ログ");
+  await expect(palette.getByRole("option")).toHaveCount(0);
+  expect(moderationRequests).toEqual([]);
+});
+
+test("a block on oneself, or on an equal or stronger role, is listed without the control to lift it", async ({ page }) => {
+  // The API checks the role when a block is placed but not when it is lifted, so the page applies the same rule to both.
+  await mockModerator(page, { id: "100000000000000001" });
+  const calls: string[] = [];
+  page.on("request", (request) => {
+    if (request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/api/blocked")) calls.push(request.method());
+  });
+  const at = Date.parse("2026-10-09T03:00:00Z");
+  await page.route("**/api/users", (route) => route.fulfill({ json: {
+    users: [
+      { discord_id: "100000000000000001", username: "xuanling", role: "moderator", blocked: true },
+      { discord_id: "100000000000000002", username: "peer-moderator", role: "moderator", blocked: true },
+      { discord_id: "100000000000000003", username: "workspace-member", role: "free", blocked: true },
+      { discord_id: "100000000000000004", username: "owner", role: "administrator", blocked: false },
+    ],
+    assignable: ["premium", "standard", "free"],
+  } }));
+  await page.route("**/api/blocked", (route) => route.fulfill({ json: { blocked: [
+    { discord_id: "100000000000000001", username: "xuanling", reason: null, blocked_by: "100000000000000004", blocked_at: at },
+    { discord_id: "100000000000000002", username: "peer-moderator", reason: null, blocked_by: "100000000000000004", blocked_at: at },
+    { discord_id: "100000000000000003", username: "workspace-member", reason: null, blocked_by: "100000000000000001", blocked_at: at },
+    { discord_id: "987654321012345678", username: null, reason: null, blocked_by: "100000000000000001", blocked_at: at },
+  ] } }));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/users");
+  const section = page.getByRole("region", { name: "利用停止" });
+  const listed = section.locator("tbody tr");
+  await expect(listed).toHaveCount(4);
+  // Offered for a weaker role and for an ID with no known role; not for oneself or a fellow moderator.
+  await expect(listed.filter({ hasText: "workspace-member" }).getByRole("button", { name: "workspace-member の停止を解除" })).toBeVisible();
+  await expect(listed.filter({ hasText: "987654321012345678" }).getByRole("button", { name: "987654321012345678 の停止を解除" })).toBeVisible();
+  await expect(listed.filter({ hasText: "xuanling" }).first().getByRole("button")).toHaveCount(0);
+  await expect(listed.filter({ hasText: "peer-moderator" }).getByRole("button")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /の停止を解除$/ })).toHaveCount(3);
+  await expect(page.getByRole("button", { name: /(xuanling|peer-moderator|owner) の(利用を停止|停止を解除)/ })).toHaveCount(0);
+
+  // By ID, someone the list shows to be of an equal or stronger role is refused before anything is sent.
+  const id = section.getByRole("textbox", { name: "Discord の ID" });
+  await id.fill("100000000000000004");
+  await section.getByRole("button", { name: "この ID の利用を停止…" }).click();
+  await expect(section.getByRole("alert")).toContainText("自分と同格以上のロールの相手は止められません");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(calls).toEqual([]);
+});
+
+test("the conversation log filters, opens a turn and reads on", async ({ page }) => {
+  await mockModerator(page);
+  await page.route("**/api/users", (route) => route.fulfill({ json: {
+    users: [{ discord_id: "2", username: "workspace-member", role: "user" }], assignable: [],
+  } }));
+  // 60 turns, newest first. The bot sends the ID in the username field and no server name.
+  const all = Array.from({ length: 60 }, (_, i) => {
+    const id = 60 - i;
+    const dm = id % 4 === 0;
+    const failed = id === 58;
+    return {
+      id, at: Date.parse("2026-10-09T03:00:00Z") - i * 60_000,
+      guild_id: dm ? null : "100", guild_name: null, channel_id: `90${id}`, channel_name: null,
+      user_id: id % 2 ? "2" : "777", username: id % 2 ? "2" : "777", trigger: dm ? "dm" : "mention",
+      prompt: id === 59 ? "deploy の手順を教えて\n2 行目" : `質問 ${id}`, reply: failed ? null : `返信 ${id}`,
+      provider: "deepseek", model: "DeepSeek V4",
+      error: failed ? "provider_http" : null, failure_phase: failed ? "agent" : null, failure_code: failed ? "provider_http" : null,
+      http_status: failed ? 529 : null, has_checkpoint: failed ? true : null, failure_stage: failed ? "stream" : null,
+      failure_reason: failed ? "provider_error" : null, error_type: failed ? "overloaded_error" : null, retries: failed ? 2 : null,
+      effort: "high", latency_ms: id === 60 ? 850 : 2400,
+    };
+  });
+  const queries: string[] = [];
+  let enabled = true;
+  await page.route("**/api/logs*", (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    queries.push(params.toString());
+    if (!enabled) return route.fulfill({ json: { logs: [], next: null, retention_days: 30, enabled: false } });
+    const before = Number(params.get("before")) || Infinity;
+    const limit = Number(params.get("limit"));
+    const scope = params.get("scope");
+    const q = params.get("q");
+    const rows = all.filter((l) => l.id < before && (scope === "dm" ? l.guild_id === null : scope === "guild" ? l.guild_id !== null : true) &&
+      (!q || l.prompt.includes(q)));
+    const logs = rows.slice(0, limit);
+    return route.fulfill({ json: { logs, next: logs.length === limit ? logs.at(-1)!.id : null, retention_days: 30, enabled: true } });
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/logs");
+  await expect(page.getByRole("heading", { name: "会話ログ", level: 1 })).toBeVisible();
+  await expect(page.getByText("保持は 30 日")).toBeVisible();
+  const rows = page.locator("tr.log-row");
+  await expect(rows).toHaveCount(50);
+  // Names come from the lists the dashboard already has; an ID nobody knows stays an ID.
+  await expect(rows.nth(1)).toContainText("Design workspace");
+  await expect(rows.nth(1)).toContainText("workspace-member");
+  await expect(rows.nth(0)).toContainText("DM");
+  await expect(rows.nth(0)).toContainText("777");
+  await expect(rows.nth(0)).toContainText("850 ms");
+  await expect(rows.nth(1)).toContainText("2.4 秒");
+  await expect(rows.nth(2)).toContainText("失敗");
+
+  // A turn opens from the keyboard and shows the whole request and reply.
+  const toggle = rows.nth(1).getByRole("button");
+  await toggle.focus();
+  await page.keyboard.press("Enter");
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  const detail = page.locator("tr.log-detail");
+  await expect(detail).toContainText("deploy の手順を教えて");
+  await expect(detail).toContainText("返信 59");
+  await expect(detail).toContainText("記録された項目");
+  // A failed turn shows why instead of a reply.
+  await rows.nth(2).click();
+  await expect(detail).toHaveCount(1);
+  await expect(detail).toContainText("失敗の詳細");
+  await expect(detail).toContainText("overloaded_error");
+  await expect(detail).toContainText("529");
+  await expect(detail).toContainText("—（返信なし）");
+  await rows.nth(2).click();
+  await expect(detail).toHaveCount(0);
+
+  // The filters are the API's: scope and text go out as query parameters.
+  await page.getByRole("group", { name: "範囲" }).getByRole("button", { name: "DM" }).click();
+  await expect(rows).toHaveCount(15);
+  expect(queries.at(-1)).toBe("limit=50&scope=dm");
+  await page.getByRole("group", { name: "範囲" }).getByRole("button", { name: "すべて" }).click();
+  await page.getByRole("searchbox", { name: "依頼・返信・ユーザー ID で検索" }).fill("deploy");
+  await expect(rows).toHaveCount(1);
+  expect(queries.at(-1)).toBe("limit=50&q=deploy");
+  await page.getByRole("searchbox").fill("どこにも無い語");
+  await expect(page.getByText("一致するログはありません。")).toBeVisible();
+  await page.getByRole("searchbox").fill("");
+  await expect(rows).toHaveCount(50);
+
+  // Older turns are read with the cursor the API returned.
+  await page.getByRole("button", { name: "さらに読み込む" }).click();
+  await expect(rows).toHaveCount(60);
+  expect(queries.at(-1)).toBe("limit=50&before=11");
+  await expect(page.getByText("ここまで（60 件）")).toBeVisible();
+  await expect(page.getByRole("button", { name: "さらに読み込む" })).toHaveCount(0);
+
+  for (const width of [768, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    await rows.nth(1).getByRole("button").click();
+    await expect(detail).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), `${width}px`).toBeLessThanOrEqual(0);
+    await rows.nth(1).getByRole("button").click();
+  }
+
+  // Recording is off unless the API is told to keep it.
+  enabled = false;
+  await page.reload();
+  await expect(page.getByText("会話ログは無効です")).toBeVisible();
+  await expect(page.getByText("WEB_LOGS_ENABLED")).toBeVisible();
+  await expect(page.getByRole("searchbox")).toHaveCount(0);
+});
+
+test("the user list with blocks fits every width", async ({ page }) => {
+  await mockModerator(page);
+  await page.route("**/api/blocked", (route) => route.fulfill({ json: { blocked: [
+    { discord_id: "2", username: "workspace-member", reason: "理由がとても長い場合。".repeat(12), blocked_by: "1", blocked_at: Date.parse("2026-10-09T03:00:00Z") },
+    { discord_id: "987654321012345678", username: null, reason: null, blocked_by: "555555555555555555", blocked_at: Date.parse("2026-10-08T03:00:00Z") },
+  ] } }));
+  for (const width of [1440, 768, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/users");
+    await expect(page.getByRole("region", { name: "利用停止" }).locator("tbody tr")).toHaveCount(2);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), `${width}px`).toBeLessThanOrEqual(0);
+  }
 });

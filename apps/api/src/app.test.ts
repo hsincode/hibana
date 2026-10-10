@@ -766,6 +766,40 @@ describe("guild settings", () => {
     expect(g2.temperature).toEqual(0.7);
   });
 
+  test("only a moderator or administrator can stop or resume the bot for a server", async () => {
+    const { app, store } = await setup();
+    const patch = (cookie: string, body: Record<string, unknown>) =>
+      app.handle(req("/api/guilds/g1/settings", { method: "PATCH", cookie, body: JSON.stringify(body) }));
+
+    // A member who can open the server's settings cannot flip the kill switch (#64)…
+    const refused = await patch("sess-free", { bot_disabled: true });
+    expect(refused.status).toBe(403);
+    expect((await refused.json()).error).toMatch(/moderator/i);
+    expect((await store.getGuild("g1")).bot_disabled).toBe(false);
+    // …and the refusal covers the whole request: nothing next to it is saved.
+    const mixed = await patch("sess-free", { bot_disabled: true, thread_only: true });
+    expect(mixed.status).toBe(403);
+    expect((await store.getGuild("g1")).thread_only).toBe(false);
+    // Their other settings still save.
+    expect((await patch("sess-free", { thread_only: true })).status).toBe(200);
+    expect((await store.getGuild("g1")).thread_only).toBe(true);
+
+    for (const cookie of ["sess-mod", "sess-admin"]) {
+      const stopped = await patch(cookie, { bot_disabled: true });
+      expect(stopped.status).toBe(200);
+      expect((await stopped.json()).settings.bot_disabled).toBe(true);
+      // Once stopped, a member cannot resume it either.
+      expect((await patch("sess-free", { bot_disabled: false })).status).toBe(403);
+      expect((await store.getGuild("g1")).bot_disabled).toBe(true);
+      expect((await patch(cookie, { bot_disabled: false })).status).toBe(200);
+      expect((await store.getGuild("g1")).bot_disabled).toBe(false);
+    }
+    // The server list reports the state to everyone who can see the server.
+    await patch("sess-mod", { bot_disabled: true });
+    const listed = await (await app.handle(req("/api/guilds", { cookie: "sess-free" }))).json();
+    expect(listed.guilds).toEqual([expect.objectContaining({ id: "g1", bot_disabled: true, member: true })]);
+  });
+
   test("internal snapshot PUT leaves personal overrides alone", async () => {
     const { app, store } = await setup();
     await app.handle(
@@ -1196,6 +1230,109 @@ describe("user overrides", () => {
     );
     expect(blank.status).toBe(200);
     expect((await store.getUserOverride("free-1")).context).toBeNull();
+  });
+});
+
+describe("blocked users", () => {
+  // /api/blocked takes Discord IDs (snowflakes) only, so these accounts need numeric ones.
+  const MOD = "200000000000000001";
+  const PEER = "200000000000000002";
+  const MEMBER = "200000000000000003";
+  const OWNER = "200000000000000004";
+  const STRANGER = "200000000000000005";
+
+  async function setupBlocks() {
+    const ctx = await setup({ adminIds: ["admin-1", OWNER] });
+    for (const [id, username, role] of [
+      [MOD, "mod-two", "moderator"],
+      [PEER, "peer", "moderator"],
+      [MEMBER, "member", "free"],
+      // Stored as free; WEB_ADMIN_IDS makes this account an administrator.
+      [OWNER, "owner", "free"],
+    ] as const) {
+      await ctx.store.upsertUser({ discord_id: id, username, avatar: null });
+      await ctx.store.setUserRole(id, role);
+    }
+    await ctx.store.putSession("sess-mod2", MOD, "tok-mod2", Date.now() + 60_000);
+    const block = (cookie: string | undefined, body: Record<string, unknown>) =>
+      ctx.app.handle(req("/api/blocked", { method: "POST", cookie, body: JSON.stringify(body) }));
+    const blockedIds = async () => (await ctx.store.listBlocked()).map((b) => b.discord_id).sort();
+    return { ...ctx, block, blockedIds };
+  }
+
+  test("only a moderator or administrator can read or change the block list", async () => {
+    const { app, block, blockedIds } = await setupBlocks();
+    expect((await app.handle(req("/api/blocked"))).status).toBe(401);
+    expect((await block(undefined, { discord_id: MEMBER })).status).toBe(401);
+    expect((await app.handle(req(`/api/blocked/${MEMBER}`, { method: "DELETE" }))).status).toBe(401);
+
+    expect((await app.handle(req("/api/blocked", { cookie: "sess-free" }))).status).toBe(403);
+    // An ID with no account here, so that only the role of the caller can be what refuses it.
+    const refused = await block("sess-free", { discord_id: STRANGER });
+    expect(refused.status).toBe(403);
+    expect((await refused.json()).error).toBe("forbidden");
+    expect(await blockedIds()).toEqual([]);
+
+    expect((await block("sess-mod2", { discord_id: STRANGER })).status).toBe(200);
+    expect((await block("sess-admin", { discord_id: MEMBER })).status).toBe(200);
+    expect((await app.handle(req(`/api/blocked/${STRANGER}`, { method: "DELETE", cookie: "sess-free" }))).status).toBe(403);
+    expect(await blockedIds()).toEqual([MEMBER, STRANGER]);
+  });
+
+  test("a block needs a Discord ID, and is refused for oneself and for an equal or stronger role", async () => {
+    const { block, blockedIds } = await setupBlocks();
+    // The bot matches on the numeric ID, so a name would block nobody.
+    for (const discord_id of ["member", "1234", "", `${MEMBER}x`]) {
+      const res = await block("sess-mod2", { discord_id });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("discord_id must be a snowflake");
+    }
+    const self = await block("sess-mod2", { discord_id: MOD });
+    expect(self.status).toBe(403);
+    expect((await self.json()).error).toBe("cannot block yourself");
+    // A fellow moderator, and an administrator named only by WEB_ADMIN_IDS.
+    for (const discord_id of [PEER, OWNER]) {
+      const res = await block("sess-mod2", { discord_id });
+      expect(res.status).toBe(403);
+      expect((await res.json()).error).toBe("cannot block that user");
+    }
+    expect(await blockedIds()).toEqual([]);
+  });
+
+  test("a block reaches the block list, the user list and the bot's snapshot, and lifting it removes it", async () => {
+    const { app, block, blockedIds } = await setupBlocks();
+    const snapshotIds = async () => {
+      const res = await app.handle(req("/internal/snapshot", { headers: { authorization: "Bearer test-internal" } }));
+      return ((await res.json()) as { blocked_users: string[] }).blocked_users.sort();
+    };
+    const before = Date.now();
+    // Someone who has logged in to the dashboard: the name is kept with the block.
+    const known = await block("sess-mod2", { discord_id: ` ${MEMBER} `, reason: "spam" });
+    expect(known.status).toBe(200);
+    expect(await known.json()).toEqual({ ok: true, discord_id: MEMBER });
+    // An ID the dashboard has never seen has no role to outrank and no name. A blank reason is no reason.
+    expect((await block("sess-mod2", { discord_id: STRANGER, reason: "   " })).status).toBe(200);
+
+    const listed = (await (await app.handle(req("/api/blocked", { cookie: "sess-mod2" }))).json()) as {
+      blocked: { discord_id: string; username: string | null; reason: string | null; blocked_by: string; blocked_at: number }[];
+    };
+    const byId = Object.fromEntries(listed.blocked.map((b) => [b.discord_id, b]));
+    expect(Object.keys(byId).sort()).toEqual([MEMBER, STRANGER]);
+    expect(byId[MEMBER]).toMatchObject({ username: "member", reason: "spam", blocked_by: MOD });
+    expect(byId[STRANGER]).toMatchObject({ username: null, reason: null, blocked_by: MOD });
+    expect(byId[MEMBER].blocked_at).toBeGreaterThanOrEqual(before);
+
+    const users = (await (await app.handle(req("/api/users", { cookie: "sess-mod2" }))).json()) as {
+      users: { discord_id: string; blocked: boolean }[];
+    };
+    expect(users.users.filter((u) => u.blocked).map((u) => u.discord_id)).toEqual([MEMBER]);
+    expect(await snapshotIds()).toEqual([MEMBER, STRANGER]);
+
+    const lifted = await app.handle(req(`/api/blocked/${MEMBER}`, { method: "DELETE", cookie: "sess-mod2" }));
+    expect(lifted.status).toBe(200);
+    expect(await lifted.json()).toEqual({ ok: true, discord_id: MEMBER });
+    expect(await blockedIds()).toEqual([STRANGER]);
+    expect(await snapshotIds()).toEqual([STRANGER]);
   });
 });
 

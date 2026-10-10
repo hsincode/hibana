@@ -49,7 +49,7 @@ make sandbox-smoke      # Docker隔離・ファイル操作の確認
 - Discord操作、ファイル編集・配信、Exa検索、外部MCP、スキルCRUD、静的サイト公開。
 - 制限付きDockerでのbash・メディア処理・ブラウザ・動画レンダリング。Python製の既存メディアスキルは資産として引き継ぎ。
 - GitHub device login、Surfshark / VPN Gate、xAI STT / S2S通話（オプトイン）。
-- サーバー／個人の設定、OAuth・ロール・利用停止、成果物・スキル管理のWeb画面。
+- サーバー／個人の設定、OAuth・ロール・利用停止、サーバー単位の停止、会話ログ（既定は無効。API の `WEB_LOGS_ENABLED`）、成果物・スキル管理のWeb画面。画面の構成は [docs/web-dashboard.md](docs/web-dashboard.md)。
 
 ## 運用・移行
 

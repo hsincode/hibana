@@ -5,6 +5,7 @@ import { apiCached, type GuildSummary, type Me } from "./api";
 import { ArtifactsPage } from "./Artifacts";
 import { GuildPage } from "./Guild";
 import { Login } from "./Login";
+import { LogsPage } from "./Logs";
 import { MePage } from "./Me";
 import { ModelsPage } from "./Models";
 import { guildPath } from "./nav";
@@ -68,6 +69,10 @@ export function App() {
                   element={
                     me.can_view_analytics ? <AnalyticsPage /> : <Navigate to="/" />
                   }
+                />
+                <Route
+                  path="/logs"
+                  element={me.can_moderate ? <LogsPage /> : <Navigate to="/" />}
                 />
                 <Route path="*" element={<NotFound />} />
               </Routes>

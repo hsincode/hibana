@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { Link, NavLink, Navigate, useLocation, useParams } from "react-router-dom";
+import * as Dropdown from "@radix-ui/react-dropdown-menu";
 import {
   api,
   apiCached,
@@ -12,8 +13,9 @@ import { AgentSections, guildEffective } from "./Agent";
 import { GuildArtifacts } from "./Artifacts";
 import { Select } from "./controls";
 import { GUILD_PAGES, LEGACY_SECTION_PAGE, guildPath } from "./nav";
-import { Row, SaveMarksContext, useReportSave, useRowTarget } from "./save";
+import { Row, RowMark, SaveMarksContext, useReportSave, useRowTarget } from "./save";
 import { ContextSection, useOptimisticPatch, type PatchFn } from "./settings";
+import { ReloadGuildsContext } from "./Shell";
 import { SkillManager } from "./Skills";
 import { FALLBACK_TRIGGERS, TriggerEditor } from "./Triggers";
 import {
@@ -22,6 +24,9 @@ import {
   BoolSeg,
   Effective,
   Empty,
+  Icon,
+  Modal,
+  Notice,
   Section,
   Skeleton,
   ToastArea,
@@ -108,6 +113,19 @@ export function GuildPage() {
   useHashScroll(ready && !!page);
   useRowTarget(ready && !!page);
 
+  // サーバー単位の停止（#64）。状態は誰にでも見せ、操作は Administrator / Moderator にだけ出す
+  // （API も、それ以外の人の変更を断る）。設定を読むまでは、一覧が返した値で出しておく。
+  const stopped = settings?.bot_disabled ?? guild?.bot_disabled;
+  const canStop = me?.can_moderate === true && !!settings;
+  // 確認のダイアログは、開いた時点の向き（止める / 再開する）を持つ。開いている間に状態が変わっても、書いてある操作だけを送る。
+  const [asking, setAsking] = useState<"stop" | "resume" | null>(null);
+  const reloadGuilds = useContext(ReloadGuildsContext);
+  const botMark = marks.marks["g-bot"];
+  useEffect(() => {
+    // 保存できたら、サイドバーの切替とサーバー一覧の「停止中」を追いつかせる。
+    if (botMark === "saved") reloadGuilds();
+  }, [botMark, reloadGuilds]);
+
   if (!id) return <Navigate to="/" replace />;
   // 1 ページだった頃の節へのリンクは、分かれた先のページへ送る。
   const legacy = path === "" ? LEGACY_SECTION_PAGE[location.hash.slice(1)] : undefined;
@@ -147,6 +165,39 @@ export function GuildPage() {
                 サーバー設定 · <span className="mono">{id}</span>
               </p>
             </div>
+            {stopped !== undefined && (
+              <div className="guild-status">
+                <RowMark k="g-bot" />
+                {/* 「有効」は設定の状態。bot のプロセスが動いているかどうかは、ここからは分からない。 */}
+                <span className={`status-pill${stopped ? " is-off" : ""}`}>
+                  {stopped ? "停止中" : "有効"}
+                </span>
+                {canStop && (
+                  // modal にしない: メニューから確認のダイアログを開くとき、閉じる側と開く側でフォーカスの取り合いにならないようにする。
+                  <Dropdown.Root modal={false}>
+                    <Dropdown.Trigger className="icon-btn bordered" aria-label="サーバーの操作">
+                      <Icon.more size={18} />
+                    </Dropdown.Trigger>
+                    <Dropdown.Portal>
+                      <Dropdown.Content className="pop" align="end" sideOffset={6} collisionPadding={8}>
+                        <Dropdown.Label className="pop-label">
+                          <strong>{stopped ? "bot を止めています" : "bot は有効です"}</strong>
+                        </Dropdown.Label>
+                        <Dropdown.Item
+                          className={`pop-item${stopped ? "" : " is-danger"}`}
+                          onSelect={() => setAsking(stopped ? "resume" : "stop")}
+                        >
+                          <Icon.power />
+                          <span className="grow">
+                            {stopped ? "再開する" : "このサーバーで bot を止める"}
+                          </span>
+                        </Dropdown.Item>
+                      </Dropdown.Content>
+                    </Dropdown.Portal>
+                  </Dropdown.Root>
+                )}
+              </div>
+            )}
           </div>
           {/* 狭い幅ではサイドバーが引き出しになるので、5 ページをタブ帯でも出す。 */}
           <nav className="guild-tabs" aria-label="サーバーのページ">
@@ -156,6 +207,19 @@ export function GuildPage() {
               </NavLink>
             ))}
           </nav>
+          {stopped && (
+            <Notice
+              action={
+                canStop && (
+                  <button type="button" className="btn btn-sm" onClick={() => setAsking("resume")}>
+                    再開する
+                  </button>
+                )
+              }
+            >
+              このサーバーでは bot を止めています。設定は変えられますが、bot はメッセージにも通話にも応答しません。
+            </Notice>
+          )}
         </header>
 
         {needsSettings && err && !ready && <Alert>{err}</Alert>}
@@ -206,6 +270,39 @@ export function GuildPage() {
           </Section>
         )}
         {page.path === "artifacts" && <GuildArtifacts guildId={id} push={push} />}
+
+        <Modal
+          open={asking !== null}
+          onClose={() => setAsking(null)}
+          title={asking === "resume" ? "bot を再開する" : "このサーバーで bot を止める"}
+          size="narrow"
+        >
+          <p>
+            <strong>{guild?.name ?? id}</strong> の bot を
+            {asking === "resume" ? "再開します。" : "止めます。"}
+          </p>
+          <p className="muted">
+            {asking === "resume"
+              ? "再開すると、このサーバーでまた応答するようになります。"
+              : "止めると、このサーバーでは bot がメッセージや通話に応答しなくなります。設定は消えません。"}
+          </p>
+          <p className="note">bot への反映は最大 30 秒です。</p>
+          <div className="modal-foot">
+            <button type="button" className="btn" onClick={() => setAsking(null)}>
+              キャンセル
+            </button>
+            <button
+              type="button"
+              className={asking === "resume" ? "btn btn-primary" : "btn btn-danger"}
+              onClick={() => {
+                setAsking(null);
+                patch({ bot_disabled: asking === "stop" }, "g-bot");
+              }}
+            >
+              {asking === "resume" ? "再開する" : "止める"}
+            </button>
+          </div>
+        </Modal>
 
         <ToastArea toasts={toasts} />
       </div>

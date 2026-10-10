@@ -142,7 +142,10 @@ kbd { padding: 1px 5px; border: 1px solid var(--line-strong); border-radius: 5px
 .empty-title { font-size: var(--fs-lg); line-height: 1.5; letter-spacing: 0; }
 .alert { display: flex; align-items: flex-start; gap: 10px; padding: var(--sp-3) var(--sp-4); border: 1px solid color-mix(in oklch, var(--danger) 55%, var(--line)); border-radius: calc(var(--r-sm) + 2px); background: var(--danger-soft); color: var(--ink); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .alert .ic { color: var(--danger); margin-top: 3px; }
-.alert > span { min-width: 0; }
+.alert > span { flex: 1; min-width: 0; }
+.alert > .btn { flex: none; }
+.alert.is-info { border-color: var(--line-strong); background: var(--surface); }
+.alert.is-info .ic { color: var(--hot-ink); }
 .skeleton { display: block; border-radius: var(--r-sm); background: var(--surface-2); }
 .skel-stack { display: flex; flex-direction: column; gap: var(--sp-4); max-width: 880px; }
 
@@ -233,6 +236,8 @@ th.num { font-family: var(--font-ui); }
 td .seg button { min-height: 28px; min-width: 0; padding: 0 9px; font-size: var(--fs-xs); }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
 .toolbar .grow { flex: 1 1 0; min-width: 0; }
+/* 検索の欄は、狭いときに潰れずに次の行へ回る */
+.toolbar .search.grow { flex-basis: 220px; }
 .counts { display: flex; flex-wrap: wrap; gap: 6px; }
 .note { max-width: 72ch; color: var(--muted); font-size: var(--fs-xs); line-height: 1.7; }
 

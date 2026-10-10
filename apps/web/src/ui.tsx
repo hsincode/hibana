@@ -6,7 +6,9 @@ import {
   Check,
   CircleAlert,
   Cpu,
+  Ban,
   Download,
+  Ellipsis,
   ExternalLink,
   FileText,
   Gauge,
@@ -20,8 +22,10 @@ import {
   Package,
   Pencil,
   Plus,
+  Power,
   RefreshCw,
   RotateCcw,
+  ScrollText,
   Search,
   Server,
   SlidersHorizontal,
@@ -112,6 +116,10 @@ export const Icon = {
   external: icon(ExternalLink),
   logout: icon(LogOut),
   reset: icon(RotateCcw),
+  more: icon(Ellipsis),
+  power: icon(Power),
+  ban: icon(Ban),
+  log: icon(ScrollText),
   discord: ({ size = 18, className }: IconProps) => (
     <svg
       width={size}
@@ -620,6 +628,23 @@ export function Alert({ children }: { children: ReactNode }) {
     <div className="alert" role="alert">
       <Icon.alert />
       <span>{children}</span>
+    </div>
+  );
+}
+
+/** 誤りではない知らせ（このサーバーは止めてある、など）。`action` は右に置く操作。 */
+export function Notice({
+  children,
+  action,
+}: {
+  children: ReactNode;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="alert is-info" role="note">
+      <Icon.info />
+      <span>{children}</span>
+      {action}
     </div>
   );
 }

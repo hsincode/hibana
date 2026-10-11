@@ -199,7 +199,8 @@ export class Hibana {
           i.respond(
             MODEL_PRESETS.filter(
               (p) =>
-                this.runtime.canSelect(p.id, i.user.id) &&
+                // Deprecated providers are not offered as a new choice (#67).
+                this.runtime.selectable(p.id, i.user.id) &&
                 (p.id.toLowerCase().includes(query) ||
                   p.label.toLowerCase().includes(query)),
             )

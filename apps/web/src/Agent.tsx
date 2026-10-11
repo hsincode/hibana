@@ -28,6 +28,7 @@ import {
 import { Row, RowMark, Trace } from "./save";
 import type { OverlaySettings, PatchFn } from "./settings";
 import {
+  Badge,
   BoolSeg,
   Icon,
   ProviderTile,
@@ -172,6 +173,12 @@ const EFFORT_UNDER_AUTO =
 const JEV_TASK_UNDER_MULTI =
   "サブエージェントが multi のときは並列の分担を優先するため使用しません。";
 const SERVER_DEFAULT = "デフォルト（サーバー設定）";
+// Anthropic 以外のプロバイダは非推奨（判断記録 #67）。選択中の人はそのまま使える。
+const DEPRECATED_MODEL =
+  "選択中のモデルは非推奨のプロバイダのものです。このまま使えますが、別のモデルに変えると一覧からは選び直せません。";
+// bot が service_tier を送るのは openai / codex_plus / codex_pro / chatgpt だけで、どれも非推奨。
+const SERVICE_TIER_HINT =
+  "OpenAI / Codex / ChatGPT に適用し、サブエージェントにも引き継ぎます。利用可否・料金・速度は接続先によります。これらは非推奨のプロバイダで、Anthropic のモデルには効きません。";
 
 type FixedEffort = Extract<RoleEffort, { mode: "fixed" }>["effort"];
 
@@ -220,9 +227,13 @@ export function AgentSections({
     : SUBAGENT_MODES;
 
   const efforts = c.efforts.filter((e) => e !== "ultra");
+  // 「固定」に切り替えたときの最初の値。非推奨のプリセットは新しく選べないので候補にしない。
   const firstPreset = () =>
-    pickable.find((p) => roleAllows(role, p.min_role, c.roles) &&
+    pickable.find((p) => !p.deprecated && roleAllows(role, p.min_role, c.roles) &&
       (!c.available_presets || c.available_presets.includes(p.id)))?.id;
+  // 候補が 1 つも無い人（Anthropic のプリセットを選べないプランなど）は、新しく「固定」にできない。
+  // すでに固定にしている行は、その値のまま残す。
+  const canFix = firstPreset() !== undefined;
   const roles = s.multi_agent_roles ?? defaultMultiAgentRoles();
   const rolesRow = `${px}-roles`;
   // Send the whole role map so the optimistic overlay never shows a partial one.
@@ -272,13 +283,27 @@ export function AgentSections({
         desc="親エージェントのモデルです。サブエージェントが multi のときは統括役が使います。"
       >
         <div className="rows">
-          <Row k={`${px}-preset`} name="モデル" block overridden={inherit && !!s.selection}>
+          <Row
+            k={`${px}-preset`}
+            name="モデル"
+            block
+            hint={current?.deprecated ? DEPRECATED_MODEL : undefined}
+            overridden={inherit && !!s.selection}
+          >
             <div className="model-card frame">
               {s.selection?.model ? (
                 <>
                   <ProviderTile provider={s.selection.provider} large />
                   <div className="model-meta">
-                    <div className="model-id">{s.selection.model}</div>
+                    <div className="model-id">
+                      {s.selection.model}
+                      {current?.deprecated && (
+                        <>
+                          {" "}
+                          <Badge tone="warn">非推奨</Badge>
+                        </>
+                      )}
+                    </div>
                     <div className="model-sub">
                       {providerMeta(s.selection.provider).label}
                       {current && (
@@ -378,7 +403,7 @@ export function AgentSections({
             name="Service Tier"
             mono
             htmlFor={`${px}-tier-sel`}
-            hint="OpenAI / Codex / ChatGPT に適用し、サブエージェントにも引き継ぎます。利用可否・料金・速度は接続先によります。"
+            hint={SERVICE_TIER_HINT}
             overridden={inherit && s.service_tier != null}
           >
             <Select
@@ -489,7 +514,9 @@ export function AgentSections({
                   {inherit && <option value="">{SERVER_DEFAULT}</option>}
                   <option value="auto">任意（エージェントが選択）</option>
                   <option value="same">同一（親エージェントと同じ）</option>
-                  <option value="fixed">固定（指定したモデル）</option>
+                  <option value="fixed" disabled={!canFix && s.subagent_model?.mode !== "fixed"}>
+                    固定（指定したモデル）
+                  </option>
                 </Select>
               </Row>
               <Row
@@ -601,7 +628,7 @@ export function AgentSections({
                                   }}>
                                   <option value="default">共通設定に従う</option>
                                   <option value="same">親と同じ</option>
-                                  <option value="fixed">固定</option>
+                                  <option value="fixed" disabled={!canFix && policy.model.mode !== "fixed"}>固定</option>
                                 </Select>
                                 {policy.model.mode === "fixed" && (
                                   <FixedModelButton

@@ -1,6 +1,7 @@
 import {
   MODEL_PRESETS,
   canonicalPresetId,
+  deprecatedPreset,
   isAutoRoute,
   serverShared,
   subagentsUnsupported,
@@ -165,6 +166,19 @@ export class Runtime {
       !this.snapshot.unpublished_presets.includes(p.id) &&
       this.providerAvailable(p.provider),
     );
+  }
+  /** Whether this user may newly pick the preset: `canSelect`, minus the
+   *  deprecated providers (#67, ADR-0010). Only the entrances that choose a
+   *  model ask this (`/switch`, `set_bot_model`). `canSelect` and `canUse`
+   *  keep their meaning, so a saved deprecated selection still runs, and a
+   *  child agent can still inherit a deprecated parent. */
+  selectable(preset: string, userId: string) {
+    return this.canSelect(preset, userId) && !deprecatedPreset(preset);
+  }
+  /** What `selectable` leaves, in catalog order. Empty for a user without the
+   *  plan, or while the bot has no Anthropic key. */
+  selectablePresets(userId: string) {
+    return MODEL_PRESETS.filter((p) => this.selectable(p.id, userId));
   }
   available() {
     return MODEL_PRESETS.filter(

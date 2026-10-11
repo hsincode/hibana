@@ -32,6 +32,7 @@ import definitions from "./definitions.json";
 import codexDefinitions from "./codex-definitions.json";
 import { collaborationNames, collaborationTools, collaborationValidationSchema, teamTools } from "../multi-agent-policy";
 import { Runtime } from "../runtime";
+import { refuseDeprecatedPreset } from "../deprecation";
 import { Agent } from "../agent";
 import { nativeSearchFor } from "../llm";
 import { JevClient, JEV_NOTICE_HEADER, jevInputSchema } from "../jev";
@@ -758,6 +759,9 @@ export class ToolRegistry {
             (p) => p.model === a.model && p.provider === a.provider,
           )?.id;
         if (!a.reset && !preset && (a.preset || a.model || a.provider)) throw new Error("Unknown preset");
+        // The tool description still lists the deprecated presets (it is part
+        // of the frozen tool surface), so a new choice of one is refused here (#67).
+        if (!a.reset) refuseDeprecatedPreset(this.runtime, ctx.guildId, ctx.userId, preset);
         patch = a.reset ? { preset: "reset", ultra_mode: null, multi_agent: null } : {
           ...(preset ? { preset } : {}),
           ...(a.ultra_mode === undefined ? {} : { ultra_mode: a.ultra_mode }),

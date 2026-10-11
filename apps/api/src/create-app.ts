@@ -4,6 +4,7 @@ import {
   BUILTIN_TRIGGERS,
   catalogPremium,
   catalogPublished,
+  deprecatedPreset,
   effectiveMinRole,
   REASONING_EFFORTS,
   EXA_MODES,
@@ -58,8 +59,10 @@ import {
   emptyGuild,
   normalizeGuild,
   guildPatchSchema,
+  newlyDeprecatedPresetIds,
   patchPresetIds,
   userOverridePatchSchema,
+  type SavedPresets,
 } from "./settings";
 import {
   isArtifactAction,
@@ -371,11 +374,13 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
         set.status = 403;
         return { error: hidden };
       }
-      const next = applyUserOverridePatch(
-        await store.getUserOverride(s.discord_id),
-        parsed.data,
-        store.defaults,
-      );
+      const current = await store.getUserOverride(s.discord_id);
+      const deprecated = refuseDeprecatedPatch(current, parsed.data);
+      if (deprecated) {
+        set.status = 403;
+        return { error: deprecated };
+      }
+      const next = applyUserOverridePatch(current, parsed.data, store.defaults);
       await store.putUserOverride(s.discord_id, next);
       await publish();
       return { settings: next, version: await store.version() };
@@ -408,12 +413,16 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
       // Everyone else only gets currently public presets — the unreleased
       // SKUs stay out of the picker JSON until an admin publishes them.
       // `min_role` is the live floor after the Premium overlay (picker lock).
+      // `deprecated` presets stay in the list: the dashboard shows one only
+      // where it is the current selection, and the PATCH routes refuse a new
+      // one (#67).
       const presets = SELECTABLE_PRESETS.filter(
         (p) => p.provider === "chatgpt" ? (staff || hasChatgpt) : staff || isPublished(p.id, overrides),
       ).map((p) => ({
         ...p,
         published: isPublished(p.id, overrides),
         min_role: effectiveMinRole(p.id, premium) ?? undefined,
+        deprecated: deprecatedPreset(p.id),
       }));
       return {
         presets,
@@ -632,7 +641,13 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           set.status = 403;
           return { error: hidden };
         }
-        const next = applyPatch(await store.getGuild(params.id), parsed.data, store.defaults);
+        const current = await store.getGuild(params.id);
+        const deprecated = refuseDeprecatedPatch(current, parsed.data);
+        if (deprecated) {
+          set.status = 403;
+          return { error: deprecated };
+        }
+        const next = applyPatch(current, parsed.data, store.defaults);
         await store.putGuild(params.id, next);
         await publish();
         return { settings: next, version: await store.version() };
@@ -1330,6 +1345,18 @@ function refuseUnpublishedPatch(
     }
   }
   return null;
+}
+
+/** Deprecated providers keep working where they are already saved; only a
+ *  PATCH that newly selects one is refused (#67, ADR-0010). The dashboard
+ *  routes ask this. `/internal/*` does not: the bot applies the same rule at
+ *  `/switch` and `set_bot_model` before it writes. */
+function refuseDeprecatedPatch(
+  saved: SavedPresets,
+  patch: Parameters<typeof patchPresetIds>[0],
+): string | null {
+  const [id] = newlyDeprecatedPresetIds(saved, patch);
+  return id ? `preset \`${id}\` is deprecated and cannot be newly selected` : null;
 }
 
 async function guildOk(

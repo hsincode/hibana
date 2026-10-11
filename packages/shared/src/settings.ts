@@ -8,6 +8,7 @@ import {
   TRIGGER_WORD_MAX_CHARS,
   canonicalModel,
   canonicalPresetId,
+  deprecatedPreset,
   isPresetId,
 } from "./catalog";
 
@@ -374,6 +375,56 @@ export function patchPresetIds(patch: {
     if (role?.model?.mode === "fixed" && role.model.preset)
       ids.push(canonicalPresetId(role.model.preset));
   return ids;
+}
+
+type FixedModel = { mode: string; preset?: string } | null | undefined;
+/** The saved values `newlyDeprecatedPresetIds` compares a PATCH with. Guild
+ *  rows and personal rows both fit. */
+export type SavedPresets = {
+  selection?: { provider: string; model: string } | null;
+  subagent_model?: FixedModel;
+  multi_agent_roles?: Partial<Record<string, { model?: FixedModel }>> | null;
+};
+
+const fixedPresetId = (model: FixedModel) =>
+  model?.mode === "fixed" && model.preset ? canonicalPresetId(model.preset) : undefined;
+
+/** A saved selection is provider + model; the catalog pairs are unique. */
+function selectionPresetId(selection: SavedPresets["selection"]) {
+  if (!selection) return undefined;
+  const model = canonicalModel(selection.provider, selection.model);
+  return MODEL_PRESETS.find((p) => p.provider === selection.provider && p.model === model)?.id;
+}
+
+/**
+ * Deprecated presets a PATCH would newly select (#67, ADR-0010). An empty
+ * list means the PATCH may go through.
+ *
+ * Each slot (the main preset, the common subagent model, each Multi-Agent
+ * role) is compared with what the row already stores in that same slot. The
+ * dashboard sends the whole role table on every edit, so a deprecated value
+ * that did not change must not be refused; neither is re-selecting the model
+ * a row is already on. `preset: "reset"` selects nothing and always passes.
+ * Nothing here rewrites a saved row: deprecated selections stay as they are.
+ */
+export function newlyDeprecatedPresetIds(
+  saved: SavedPresets | null | undefined,
+  patch: Parameters<typeof patchPresetIds>[0],
+): string[] {
+  const refused: string[] = [];
+  const check = (raw: string | undefined, kept: string | undefined) => {
+    if (!raw) return;
+    const id = canonicalPresetId(raw);
+    if (id !== kept && deprecatedPreset(id) && !refused.includes(id)) refused.push(id);
+  };
+  if (patch.preset && patch.preset !== "reset")
+    check(patch.preset, selectionPresetId(saved?.selection));
+  if (patch.subagent_model?.mode === "fixed")
+    check(patch.subagent_model.preset, fixedPresetId(saved?.subagent_model));
+  for (const [role, change] of Object.entries(patch.multi_agent_roles ?? {}))
+    if (change?.model?.mode === "fixed")
+      check(change.model.preset, fixedPresetId(saved?.multi_agent_roles?.[role]?.model));
+  return refused;
 }
 
 export function applyPatch(row: GuildRow, patch: GuildPatch, defaults = emptyGuild()): GuildRow {

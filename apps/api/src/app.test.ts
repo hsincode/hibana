@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createApp } from "./create-app";
 import { loadTestEnv, type WebEnv } from "./env";
-import { applyUserOverridePatch, emptyUserOverride, guildPatchSchema, userOverridePatchSchema } from "./settings";
+import { applyPatch, applyUserOverridePatch, emptyUserOverride, guildPatchSchema, userOverridePatchSchema } from "./settings";
 import { installPersonalDefaults, MemoryStore } from "./store";
 
 async function setup(envOverrides: Partial<WebEnv> = {}) {
@@ -316,21 +316,40 @@ describe("authz", () => {
         );
       });
 
-    await app.handle(
-      req("/api/catalog/presets/opus-5-1", {
-        cookie: "sess-admin",
-        method: "PATCH",
-        body: JSON.stringify({ published: true }),
-      }),
+    const publish = (id: string, published: boolean) =>
+      app.handle(
+        req(`/api/catalog/presets/${id}`, {
+          cookie: "sess-admin",
+          method: "PATCH",
+          body: JSON.stringify({ published }),
+        }),
+      );
+    const select = (preset: string) =>
+      app.handle(
+        req("/api/guilds/g1/settings", {
+          cookie: "sess-admin",
+          method: "PATCH",
+          body: JSON.stringify({ preset }),
+        }),
+      );
+    // Publishing opus-5-1 no longer makes it a new choice: every preset that
+    // ships unpublished belongs to a deprecated provider (#67).
+    await publish("opus-5-1", true);
+    const deprecated = await select("opus-5-1");
+    expect(deprecated.status).toBe(403);
+    expect(((await deprecated.json()) as { error: string }).error).toContain(
+      "deprecated",
     );
-    const ok = await app.handle(
-      req("/api/guilds/g1/settings", {
-        cookie: "sess-admin",
-        method: "PATCH",
-        body: JSON.stringify({ preset: "opus-5-1" }),
-      }),
+
+    // The publish switch itself, on a preset that can still be chosen.
+    await publish("anthropic-haiku-5-5", false);
+    const hidden = await select("anthropic-haiku-5-5");
+    expect(hidden.status).toBe(403);
+    expect(((await hidden.json()) as { error: string }).error).toContain(
+      "unpublished",
     );
-    expect(ok.status).toBe(200);
+    await publish("anthropic-haiku-5-5", true);
+    expect((await select("anthropic-haiku-5-5")).status).toBe(200);
   });
 
   test("admin can mark a public preset premium; free cannot", async () => {
@@ -422,14 +441,31 @@ describe("authz", () => {
       ((await cleared.json()) as { min_role: string | null }).min_role,
     ).toBeNull();
 
-    const ok = await app.handle(
-      req("/api/guilds/g1/settings", {
-        cookie: "sess-free",
+    // Without the floor, what stops a free user from newly choosing fable-5
+    // is only that its provider is deprecated (#67).
+    const select = (preset: string) =>
+      app.handle(
+        req("/api/guilds/g1/settings", {
+          cookie: "sess-free",
+          method: "PATCH",
+          body: JSON.stringify({ preset }),
+        }),
+      );
+    const refused = await select("fable-5");
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { error: string }).error).toContain(
+      "deprecated",
+    );
+    // Clearing the floor of a preset that can still be chosen opens it.
+    expect((await select("anthropic-haiku-5-5")).status).toBe(403);
+    await app.handle(
+      req("/api/catalog/presets/anthropic-haiku-5-5", {
+        cookie: "sess-admin",
         method: "PATCH",
-        body: JSON.stringify({ preset: "fable-5" }),
+        body: JSON.stringify({ premium: false }),
       }),
     );
-    expect(ok.status).toBe(200);
+    expect((await select("anthropic-haiku-5-5")).status).toBe(200);
 
     const catalog = await app.handle(
       req("/api/catalog", { cookie: "sess-free" }),
@@ -532,6 +568,137 @@ describe("authz", () => {
   });
 });
 
+// Decision record #67, ADR-0010: every provider except `anthropic` is
+// deprecated. The dashboard routes refuse a new choice of one; whatever is
+// already saved keeps working and is never rewritten.
+describe("deprecated providers", () => {
+  const ANTHROPIC = ["anthropic-auto", "anthropic-haiku-5-5", "anthropic-sonnet-5-5", "anthropic-opus-5-5"];
+  const ROUTES = ["/api/guilds/g1/settings", "/api/me/settings"] as const;
+  type App = Awaited<ReturnType<typeof setup>>["app"];
+  const patcher = (app: App, path: string, cookie = "sess-admin") => (body: unknown) =>
+    app.handle(req(path, { method: "PATCH", cookie, body: JSON.stringify(body) }));
+  const sol = { provider: "codex_plus", model: "gpt-6.1-sol", effort: "max" };
+
+  test("catalog marks every preset outside anthropic as deprecated and keeps listing it", async () => {
+    const { app } = await setup();
+    for (const cookie of ["sess-admin", "sess-free", undefined]) {
+      const res = await app.handle(req("/api/catalog", { cookie }));
+      expect(res.status).toBe(200);
+      const { presets } = (await res.json()) as {
+        presets: { id: string; provider: string; deprecated?: boolean }[];
+      };
+      for (const p of presets) expect(p.deprecated).toBe(p.provider !== "anthropic");
+      expect(presets.filter((p) => !p.deprecated).map((p) => p.id)).toEqual(ANTHROPIC);
+      // Still in the list, so a server that is on one can show what it is on.
+      for (const id of ["sol", "plus-luna", "opus-5", "fable-5", "ds-deepseek-flash"])
+        expect(presets.find((p) => p.id === id)?.deprecated).toBe(true);
+    }
+  });
+
+  test("a new choice of a deprecated preset is refused with 403 and saves nothing", async () => {
+    const { app, store } = await setup();
+    for (const path of ROUTES) {
+      const patch = patcher(app, path);
+      for (const body of [
+        { preset: "sol" },
+        // The default's model on another account is a new choice too.
+        { preset: "pro-luna" },
+        { subagent_model: { mode: "fixed", preset: "opus-5" } },
+        { multi_agent_roles: { reviewer: { model: { mode: "fixed", preset: "sol" } } } },
+        // One refused preset refuses the whole request.
+        { preset: "anthropic-opus-5-5", subagent_model: { mode: "fixed", preset: "sol" }, jev_enabled: false },
+      ]) {
+        const res = await patch(body);
+        expect(res.status).toBe(403);
+        expect(((await res.json()) as { error: string }).error).toContain("is deprecated");
+      }
+      for (const preset of ANTHROPIC) expect((await patch({ preset })).status).toBe(200);
+      expect((await patch({ subagent_model: { mode: "fixed", preset: "anthropic-haiku-5-5" } })).status).toBe(200);
+    }
+    const guild = await store.getGuild("g1");
+    expect(guild.selection).toMatchObject({ provider: "anthropic", model: "claude-opus-5-5" });
+    expect(guild.jev_enabled).toBe(true);
+    expect((await store.getUserOverride("admin-1")).jev_enabled).toBeNull();
+    // A personal row that follows the server has nothing saved, so even the
+    // server's own deprecated default is a new choice there.
+    const mine = await patcher(app, "/api/me/settings", "sess-free")({ preset: "plus-luna" });
+    expect(mine.status).toBe(403);
+    expect((await store.getUserOverride("free-1")).selection).toBeNull();
+  });
+
+  test("a saved deprecated selection is kept, can be sent again, and is not converted", async () => {
+    const { app, store } = await setup();
+    const roles = {
+      explorer: { model: { mode: "default" }, effort: { mode: "default" } },
+      worker: { model: { mode: "default" }, effort: { mode: "default" } },
+      reviewer: { model: { mode: "fixed", preset: "sol" }, effort: { mode: "default" } },
+    };
+    // Rows as they were saved before the deprecation.
+    const before = { preset: "sol", subagent_model: { mode: "fixed" as const, preset: "opus-5" }, multi_agent_roles: roles } as const;
+    await store.putGuild("g1", applyPatch(await store.getGuild("g1"), before as never));
+    await store.putUserOverride("admin-1", applyUserOverridePatch(emptyUserOverride(), before as never));
+    for (const path of ROUTES) {
+      const patch = patcher(app, path);
+      const read = async () =>
+        ((await (await app.handle(req(path, { cookie: "sess-admin" }))).json()) as {
+          settings: { selection: unknown; subagent_model: unknown; multi_agent_roles: Record<string, unknown>; effort: string };
+        }).settings;
+      expect((await read()).selection).toEqual(sol);
+      // The same values again: the dashboard resends them with other edits.
+      expect((await patch({ preset: "sol", effort: "low" })).status).toBe(200);
+      expect((await patch({ subagent_model: { mode: "fixed", preset: "opus-5" } })).status).toBe(200);
+      // The whole role table with only the explorer changed.
+      expect((await patch({ multi_agent_roles: {
+        ...roles, explorer: { model: { mode: "same" }, effort: { mode: "fixed", effort: "low" } },
+      } })).status).toBe(200);
+      // An unrelated setting.
+      expect((await patch({ jev_enabled: false })).status).toBe(200);
+      const kept = await read();
+      expect(kept.selection).toEqual({ ...sol, effort: "low" });
+      expect(kept.subagent_model).toEqual({ mode: "fixed", preset: "opus-5" });
+      expect(kept.multi_agent_roles.reviewer).toEqual(roles.reviewer);
+      expect(kept.multi_agent_roles.explorer).toEqual({ model: { mode: "same" }, effort: { mode: "fixed", effort: "low" } });
+      // Saved in one slot is not saved in another.
+      expect((await patch({ multi_agent_roles: { worker: { model: { mode: "fixed", preset: "sol" } } } })).status).toBe(403);
+      expect((await patch({ subagent_model: { mode: "fixed", preset: "sol" } })).status).toBe(403);
+      expect((await patch({ preset: "opus-5" })).status).toBe(403);
+      expect((await read()).selection).toEqual({ ...sol, effort: "low" });
+    }
+  });
+
+  test("the default stays selectable by reset, and by name while a server is on it", async () => {
+    const { app, store } = await setup();
+    expect(store.defaults.selection).toMatchObject({ provider: "codex_plus", model: "gpt-6-luna" });
+    const guild = patcher(app, "/api/guilds/g1/settings", "sess-free");
+    // A server that never chose anything is on the default preset already.
+    expect((await guild({ preset: "plus-luna", effort: "high" })).status).toBe(200);
+    expect((await store.getGuild("g1")).selection).toEqual({ ...store.defaults.selection!, effort: "high" });
+
+    await store.putGuild("g1", applyPatch(await store.getGuild("g1"), { preset: "sol" }));
+    await store.putUserOverride("free-1", applyUserOverridePatch(emptyUserOverride(), { preset: "sol" }));
+    // Away from the default, naming it is a new choice; reset is not.
+    expect((await guild({ preset: "plus-luna" })).status).toBe(403);
+    expect((await guild({ preset: "reset" })).status).toBe(200);
+    expect((await store.getGuild("g1")).selection).toEqual(store.defaults.selection);
+    const mine = patcher(app, "/api/me/settings", "sess-free");
+    expect((await mine({ preset: "reset" })).status).toBe(200);
+    expect((await store.getUserOverride("free-1")).selection).toBeNull();
+    // Once left, the deprecated preset cannot be chosen again.
+    expect((await guild({ preset: "sol" })).status).toBe(403);
+    expect((await mine({ preset: "sol" })).status).toBe(403);
+  });
+
+  test("/internal routes keep accepting deprecated presets from the bot", async () => {
+    const { app, store } = await setup();
+    const internal = (path: string, body: unknown) =>
+      app.handle(req(path, { method: "PATCH", headers: { authorization: "Bearer test-internal" }, body: JSON.stringify(body) }));
+    expect((await internal("/internal/guilds/g1", { preset: "sol" })).status).toBe(200);
+    expect((await store.getGuild("g1")).selection).toEqual(sol);
+    expect((await internal("/internal/users/1267156634686459907/settings", { preset: "opus-5" })).status).toBe(200);
+    expect((await store.getUserOverride("1267156634686459907")).selection).toMatchObject({ provider: "claude_kiro", model: "claude-opus-5" });
+  });
+});
+
 describe("guild settings", () => {
   test("Jev modes persist independently for guilds and users and reach the bot snapshot", async () => {
     const { app, store } = await setup();
@@ -578,11 +745,11 @@ describe("guild settings", () => {
       req("/api/guilds/g1/settings", {
         method: "PATCH",
         cookie: "sess-admin",
-        body: JSON.stringify({ subagent_model: { mode: "fixed", preset: "sol" } }),
+        body: JSON.stringify({ subagent_model: { mode: "fixed", preset: "anthropic-haiku-5-5" } }),
       }),
     );
     expect(fixed.status).toBe(200);
-    expect((await store.getGuild("g1")).subagent_model).toEqual({ mode: "fixed", preset: "sol" });
+    expect((await store.getGuild("g1")).subagent_model).toEqual({ mode: "fixed", preset: "anthropic-haiku-5-5" });
 
     const automatic = await app.handle(
       req("/api/guilds/g1/settings", {
@@ -667,6 +834,9 @@ describe("guild settings", () => {
       "tok-prem",
       Date.now() + 60_000,
     );
+    // fable-5 is deprecated (#67) and can only be chosen again where it is
+    // already saved, so the server starts on it. The floor still applies.
+    await store.putGuild("g1", applyPatch(await store.getGuild("g1"), { preset: "fable-5" }));
 
     const denied = await app.handle(
       req("/api/guilds/g1/settings", {
@@ -676,6 +846,7 @@ describe("guild settings", () => {
       }),
     );
     expect(denied.status).toBe(403);
+    expect(((await denied.json()) as { error: string }).error).toContain("Premium");
 
     const okPrem = await app.handle(
       req("/api/guilds/g1/settings", {
@@ -690,7 +861,7 @@ describe("guild settings", () => {
       req("/api/guilds/g1/settings", {
         method: "PATCH",
         cookie: "sess-admin",
-        body: JSON.stringify({ preset: "opus-5" }),
+        body: JSON.stringify({ preset: "anthropic-opus-5-5" }),
       }),
     );
     expect(okAdmin.status).toBe(200);
@@ -773,11 +944,16 @@ describe("guild settings", () => {
         method: "PATCH",
         cookie: "sess-free",
         body: JSON.stringify({
-          preset: "sol",
           context_text: "個人用",
           persona_override: true,
         }),
       }),
+    );
+    // A row from before `sol` was deprecated (#67): the dashboard route no
+    // longer takes it as a new choice, and nothing may convert it either.
+    await store.putUserOverride(
+      "free-1",
+      applyUserOverridePatch(await store.getUserOverride("free-1"), { preset: "sol" }),
     );
     const put = await app.handle(
       req("/internal/snapshot", {
@@ -963,26 +1139,28 @@ describe("user overrides", () => {
 
   test("personal subagent preset is isolated and can reset to auto", async () => {
     const { app, store } = await setup();
+    // The presets that can still be newly chosen are Premium-floor (#67), so
+    // the account that sets one here is the administrator.
     const fixed = await app.handle(
       req("/api/me/settings", {
         method: "PATCH",
-        cookie: "sess-free",
-        body: JSON.stringify({ subagent_model: { mode: "fixed", preset: "sol" } }),
+        cookie: "sess-admin",
+        body: JSON.stringify({ subagent_model: { mode: "fixed", preset: "anthropic-haiku-5-5" } }),
       }),
     );
     expect(fixed.status).toBe(200);
-    expect((await store.getUserOverride("free-1")).subagent_model).toEqual({ mode: "fixed", preset: "sol" });
-    expect((await store.getUserOverride("admin-1")).subagent_model).toBeNull();
+    expect((await store.getUserOverride("admin-1")).subagent_model).toEqual({ mode: "fixed", preset: "anthropic-haiku-5-5" });
+    expect((await store.getUserOverride("free-1")).subagent_model).toBeNull();
 
     const reset = await app.handle(
       req("/api/me/settings", {
         method: "PATCH",
-        cookie: "sess-free",
+        cookie: "sess-admin",
         body: JSON.stringify({ subagent_model: null }),
       }),
     );
     expect(reset.status).toBe(200);
-    expect((await store.getUserOverride("free-1")).subagent_model).toBeNull();
+    expect((await store.getUserOverride("admin-1")).subagent_model).toBeNull();
   });
 
   test("unauthenticated personal settings are 401", async () => {
@@ -1002,8 +1180,10 @@ describe("user overrides", () => {
 
   test("personal patch is isolated per user and starts at default", async () => {
     const { app, store } = await setup();
+    // Premium-floor presets are the only new choices left (#67), so the
+    // administrator is the one who picks; the free user is the bystander.
     const empty = await app.handle(
-      req("/api/me/settings", { cookie: "sess-free" }),
+      req("/api/me/settings", { cookie: "sess-admin" }),
     );
     expect(empty.status).toBe(200);
     expect(
@@ -1014,9 +1194,9 @@ describe("user overrides", () => {
     const res = await app.handle(
       req("/api/me/settings", {
         method: "PATCH",
-        cookie: "sess-free",
+        cookie: "sess-admin",
         body: JSON.stringify({
-          preset: "sol",
+          preset: "anthropic-haiku-5-5",
           effort: "high",
         }),
       }),
@@ -1027,11 +1207,11 @@ describe("user overrides", () => {
         selection: { model: string; effort: string };
       };
     };
-    expect(body.settings.selection.model).toBe("gpt-6.1-sol");
+    expect(body.settings.selection.model).toBe("claude-haiku-5-5");
     expect(body.settings.selection.effort).toBe("high");
 
-    const admin = await store.getUserOverride("admin-1");
-    expect(admin.selection).toBeNull();
+    const free = await store.getUserOverride("free-1");
+    expect(free.selection).toBeNull();
   });
 
   test("personal fable-5 is premium or stronger", async () => {
@@ -1049,6 +1229,11 @@ describe("user overrides", () => {
       Date.now() + 60_000,
     );
 
+    // fable-5 is deprecated (#67): both accounts already have it saved, so
+    // choosing it again is judged by the floor alone.
+    for (const id of ["free-1", "prem-1"])
+      await store.putUserOverride(id, applyUserOverridePatch(emptyUserOverride(), { preset: "fable-5" }));
+
     const denied = await app.handle(
       req("/api/me/settings", {
         method: "PATCH",
@@ -1057,6 +1242,7 @@ describe("user overrides", () => {
       }),
     );
     expect(denied.status).toBe(403);
+    expect(((await denied.json()) as { error: string }).error).toContain("Premium");
 
     const okPrem = await app.handle(
       req("/api/me/settings", {
@@ -1070,13 +1256,9 @@ describe("user overrides", () => {
 
   test("reset clears the personal model back to default", async () => {
     const { app, store } = await setup();
-    await app.handle(
-      req("/api/me/settings", {
-        method: "PATCH",
-        cookie: "sess-free",
-        body: JSON.stringify({ preset: "sol" }),
-      }),
-    );
+    // Saved before `sol` was deprecated (#67); reset has to keep working from it.
+    await store.putUserOverride("free-1", applyUserOverridePatch(emptyUserOverride(), { preset: "sol" }));
+    expect((await store.getUserOverride("free-1")).selection?.model).toBe("gpt-6.1-sol");
     const res = await app.handle(
       req("/api/me/settings", {
         method: "PATCH",
@@ -1624,27 +1806,35 @@ test("Multi-Agent persists as a fourth subagent mode for guild and personal sett
 test("Multi-Agent role overrides merge per role and enforce plan and visibility for their presets", async () => {
   const { app, store } = await setup();
   for (const path of ["/api/guilds/g1/settings", "/api/me/settings"]) {
-    const patch = (body: unknown) => app.handle(req(path, { method: "PATCH", cookie: "sess-free", body: JSON.stringify(body) }));
+    const as = (cookie: string) => (body: unknown) => app.handle(req(path, { method: "PATCH", cookie, body: JSON.stringify(body) }));
+    // The role presets that can still be newly chosen are Premium-floor (#67),
+    // so the administrator saves them and the free user shows the plan check.
+    const patch = as("sess-admin");
     // A role preset gets the same checks as the main and common presets.
-    expect((await patch({ multi_agent_roles: { reviewer: { model: { mode: "fixed", preset: "fable-5" } } } })).status).toBe(403);
+    const gated = await as("sess-free")({ multi_agent_roles: { reviewer: { model: { mode: "fixed", preset: "fable-5" } } } });
+    expect(gated.status).toBe(403);
+    expect(await gated.text()).toContain("Premium");
     const hidden = await patch({ multi_agent_roles: { reviewer: { model: { mode: "fixed", preset: "plus-astra" } } } });
     expect(hidden.status).toBe(403);
     expect(await hidden.text()).toContain("unpublished");
+    const deprecated = await patch({ multi_agent_roles: { reviewer: { model: { mode: "fixed", preset: "sol" } } } });
+    expect(deprecated.status).toBe(403);
+    expect(await deprecated.text()).toContain("deprecated");
     expect((await patch({ multi_agent_roles: { planner: { model: { mode: "same" } } } })).status).toBe(400);
-    expect((await patch({ multi_agent_roles: { reviewer: { model: { mode: "fixed", preset: "sol" } } } })).status).toBe(200);
+    expect((await patch({ multi_agent_roles: { reviewer: { model: { mode: "fixed", preset: "anthropic-haiku-5-5" } } } })).status).toBe(200);
     const res = await patch({ multi_agent_roles: { explorer: { effort: { mode: "fixed", effort: "low" } } } });
     expect(res.status).toBe(200);
     const { settings } = await res.json() as { settings: { multi_agent_roles: Record<string, unknown> } };
     expect(settings.multi_agent_roles).toEqual({
       explorer: { model: { mode: "default" }, effort: { mode: "fixed", effort: "low" } },
       worker: { model: { mode: "default" }, effort: { mode: "default" } },
-      reviewer: { model: { mode: "fixed", preset: "sol" }, effort: { mode: "default" } },
+      reviewer: { model: { mode: "fixed", preset: "anthropic-haiku-5-5" }, effort: { mode: "default" } },
     });
   }
   expect((await store.getGuild("g2")).multi_agent_roles?.reviewer.model).toEqual({ mode: "default" });
   const snapshot = await app.handle(req("/internal/snapshot", { headers: { authorization: "Bearer test-internal" } }));
   const data = await snapshot.json();
-  expect(data.user_overrides["free-1"].multi_agent_roles.reviewer.model).toEqual({ mode: "fixed", preset: "sol" });
+  expect(data.user_overrides["admin-1"].multi_agent_roles.reviewer.model).toEqual({ mode: "fixed", preset: "anthropic-haiku-5-5" });
 });
 
 test("personal defaults are installed once and later overrides stay", async () => {

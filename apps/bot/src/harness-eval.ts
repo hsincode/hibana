@@ -55,7 +55,8 @@ export type ArmResult = {
   /** Wall time of the turn, from the message arriving to the final reply. */
   ms: number;
   requests: number; input: number; cache_read: number; cache_write: number; output: number;
-  /** Billed per request by Anthropic and not in `cost`: the price table has no row for them. */
+  /** A search is billed per request and is not in `cost`, which is tokens
+   *  only; `billed` adds it. A fetch has no fee of its own. */
   searches: number; fetches: number;
   cost: number; models: string[];
   tools: Record<string, number>; blocked: string[]; asked: boolean; status_messages: number;
@@ -197,6 +198,13 @@ const mean = (values: number[]) => (values.length ? values.reduce((a, b) => a + 
 
 /** The owner's acceptance criteria (#69, 2026-10-11), decided before the run. */
 export const LIMIT = 1.2;
+/** USD per web search, billed on top of the tokens; a web fetch has no fee of
+ *  its own. Source: https://platform.claude.com/docs/en/about-claude/pricing
+ *  ("$10 per 1,000 searches"), read 2026-10-11. The shared price table has no
+ *  row for it, so a row's `cost` is tokens only and the fee is added here. */
+export const SEARCH_USD = 0.01;
+/** What a turn cost: its tokens and its searches. */
+export const billed = (r: ArmResult) => r.cost + r.searches * SEARCH_USD;
 
 /** Time and cost are compared over the cases both arms finished; a failure is
  *  counted and left out of them, so one arm failing fast does not look fast. */
@@ -221,7 +229,8 @@ export function summarize(
     return {
       failed: pairs.filter((p) => p[name].error).length,
       seconds: { median: quantile(done.map((r) => r.ms / 1000), 0.5), mean: mean(done.map((r) => r.ms / 1000)), p90: quantile(done.map((r) => r.ms / 1000), 0.9) },
-      cost: { total: done.reduce((t, r) => t + r.cost, 0), mean: mean(done.map((r) => r.cost)), median: quantile(done.map((r) => r.cost), 0.5) },
+      // Tokens and web searches together.
+      cost: { total: done.reduce((t, r) => t + billed(r), 0), mean: mean(done.map(billed)), median: quantile(done.map(billed), 0.5) },
       requests: mean(done.map((r) => r.requests)), searches: done.reduce((t, r) => t + r.searches, 0),
       shared_prefix: shared,
     };
@@ -238,9 +247,9 @@ export function summarize(
   // Per case, claude ÷ codex: below 1 means the Claude harness was faster or cheaper.
   const ratio = {
     seconds_median: quantile(both.map((p) => p.claude.ms / p.codex.ms), 0.5),
-    cost_median: quantile(both.filter((p) => p.codex.cost > 0).map((p) => p.claude.cost / p.codex.cost), 0.5),
+    cost_median: quantile(both.filter((p) => billed(p.codex) > 0).map((p) => billed(p.claude) / billed(p.codex)), 0.5),
     claude_faster: both.filter((p) => p.claude.ms < p.codex.ms).length,
-    claude_cheaper: both.filter((p) => p.claude.cost < p.codex.cost).length,
+    claude_cheaper: both.filter((p) => billed(p.claude) < billed(p.codex)).length,
   };
   return {
     pairs: pairs.length, both_finished: both.length, codex, claude, ratio,
@@ -340,7 +349,8 @@ export async function replay(c: Case, arm: Arm, first: boolean, o: ReplayOptions
       hooks.onCompletion = (record) => {
         records.push(record);
         onCompletion?.(record);
-        if (totals(records).cost > o.perArm) stop(`stopped: over $${o.perArm} for one turn`);
+        const sum = totals(records);
+        if (sum.cost + sum.searches * SEARCH_USD > o.perArm) stop(`stopped: over $${o.perArm} for one turn`);
       };
       hooks.onRetry = (notice) => { retries++; onRetry?.(notice); };
       hooks.onFeatureDisabled = (feature) => { rejected.push(String(feature)); onFeatureDisabled?.(feature); };
@@ -486,7 +496,7 @@ async function run() {
     prices: ANTHROPIC_PRICES, ...o, fake: Boolean(o.fake),
     image, image_id: (await Bun.$`docker image inspect ${image} --format {{.Id}}`.nothrow().quiet().text()).trim() || null,
   }) + "\n");
-  let spent = done.reduce((total, r) => total + r.cost, 0);
+  let spent = done.reduce((total, r) => total + billed(r), 0);
   for (const [i, c] of chosen.entries()) {
     // Alternate which harness goes first, so neither always runs second.
     const order: Arm[] = i % 2 ? ["claude", "codex"] : ["codex", "claude"];
@@ -505,23 +515,23 @@ async function run() {
         // Measuring after a warm-up that did not happen would be a cold turn in disguise.
         if (warmed.error) throw new Error(`The warm-up before case ${c.id} (${arm}) failed: ${warmed.error}`);
         await appendFile(join(dir, "warmups.jsonl"), JSON.stringify({ ...warmed, reply: "", ...stamp }) + "\n", { mode: 0o600 });
-        spent += warmed.cost;
+        spent += billed(warmed);
         console.log(`  warm-up ${arm.padEnd(6)} ${warmed.model} ${usd(warmed.cost)} input ${warmed.input} (read ${warmed.cache_read}, written ${warmed.cache_write})`);
       }
       const result = await replay(c, arm, arm === order[0], { ...o, files: join(dir, "files") });
       // Nothing was measured: stop instead of recording a failure of the harness.
       if (result.setup_failed) throw new Error(`Could not start the replay: ${result.error}`);
       await appendFile(file, JSON.stringify({ ...result, ...stamp }) + "\n", { mode: 0o600 });
-      spent += result.cost;
+      spent += billed(result);
       const used = Object.entries(result.tools).map(([tool, count]) => `${tool}×${count}`).join(" ");
-      console.log(`case ${c.id} (${c.history.length} earlier) ${arm.padEnd(6)} ${result.model} ${result.effort ?? "-"} ${(result.ms / 1000).toFixed(1)}s ${usd(result.cost)} ${result.requests} requests` +
+      console.log(`case ${c.id} (${c.history.length} earlier) ${arm.padEnd(6)} ${result.model} ${result.effort ?? "-"} ${(result.ms / 1000).toFixed(1)}s ${usd(billed(result))} ${result.requests} requests` +
         ` input ${result.input} (read ${result.cache_read}, written ${result.cache_write}) output ${result.output}` +
         `${result.searches ? ` ${result.searches} searches` : ""}${used ? ` [${used}]` : ""}${result.blocked.length ? ` blocked:${result.blocked.length}` : ""}` +
         `${result.files.length ? ` files:${result.files.length}` : ""}${result.retries ? ` retries:${result.retries}` : ""}${result.rejected.length ? ` rejected:${result.rejected.join(",")}` : ""}` +
         `${result.asked ? " asked" : ""}${result.error ? ` FAILED (${result.error.slice(0, 80)})` : ""}`);
     }
   }
-  console.log(`Done: ${usd(spent)} in total for run "${name}", warm-ups included (web searches are billed separately)`);
+  console.log(`Done: ${usd(spent)} in total for run "${name}", warm-ups and web searches included`);
 }
 
 type Deal = { id: string; pairs: { id: string; left: Arm }[] };

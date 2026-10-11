@@ -188,6 +188,22 @@ describe("measuring warm, and the owner's criteria", () => {
     expect(out.claude.shared_prefix).toEqual({ "claude-sonnet-5-5": { tokens: 16_000, cold_write_cost: 0.064 } });
   });
 
+  test("a web search is part of what a turn cost", () => {
+    // Anthropic bills $10 per 1,000 searches on top of the tokens.
+    const results = [
+      result({ case: "a", arm: "codex", cost: 0.03, searches: 1 }), result({ case: "a", arm: "claude", cost: 0.05, searches: 6 }),
+      result({ case: "b", arm: "codex", cost: 0.01 }), result({ case: "b", arm: "claude", cost: 0.01 }),
+    ];
+    const out = summarize(results);
+    expect(out.codex.cost.total).toBeCloseTo(0.03 + 0.01 + 0.01, 10);
+    expect(out.claude.cost.total).toBeCloseTo(0.05 + 0.06 + 0.01, 10);
+    expect(out.codex.searches).toBe(1);
+    expect(out.claude.searches).toBe(6);
+    // Per case: (0.05 + 0.06) / (0.03 + 0.01) = 2.75, and 1.
+    expect(out.ratio.cost_median).toBeCloseTo((2.75 + 1) / 2, 10);
+    expect(out.ratio.claude_cheaper).toBe(0);
+  });
+
   test("checks the three criteria the owner set, and not before every pair is judged", () => {
     const pair = (id: string, codex: Partial<ArmResult>, claude: Partial<ArmResult>) => [result({ case: id, arm: "codex", ...codex }), result({ case: id, arm: "claude", ...claude })];
     const key = ["a", "b", "c"].map((id) => ({ id, left: "claude" as const }));

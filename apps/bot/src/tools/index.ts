@@ -55,6 +55,8 @@ import { Vpn } from "./vpn";
 import { WebTools } from "./web";
 import { ImageTools } from "./image";
 import { askQuestions, questionsSchema } from "./questions";
+import { ClaudeAgents } from "../claude/agents";
+import { CLAUDE_TOOLS, claudeSurface, internalName, isClaudeTool, runClaudeTool, type ClaudeHost } from "../claude/tools";
 import { downloadPublic } from "../network";
 const sandboxNames = new Set([
   "bash",
@@ -89,6 +91,11 @@ export class ToolRegistry {
   readonly waiting = new Set<string>();
   private subagents: Semaphore;
   private validators = new Map<string, ReturnType<Ajv["compile"]>>();
+  // Kept apart from `validators`: Read, Glob and Grep are also alias names
+  // that the Codex-style harness accepts with looser arguments.
+  private claudeValidators = new Map<string, ReturnType<Ajv["compile"]>>();
+  private claudeAgents: ClaudeAgents;
+  private claudeHost: ClaudeHost;
   /** Workflow resume state survives the Discord turn that produced it. */
   readonly workflowJournals = new WorkflowJournals();
   readonly workflowFiles: WorkflowFiles;
@@ -119,6 +126,15 @@ export class ToolRegistry {
       this.validators.set(d.function.name, ajv.compile(d.function.parameters));
     for (const d of collaborationTools)
       this.validators.set(`agents__${d.function.name}`, ajv.compile(collaborationValidationSchema(d)));
+    for (const d of CLAUDE_TOOLS) this.claudeValidators.set(d.function.name, ajv.compile(d.function.parameters));
+    this.claudeAgents = new ClaudeAgents(runtime, agent, (c) => this.tools(c), (n, a, c) => this.execute(n, a, c), log);
+    this.claudeHost = {
+      sandbox: this.sandbox,
+      proxy: (ctx) => this.media.homeRoute(ctx),
+      integration: (name, args, ctx) => this.runTool(name, args, ctx),
+      ask: (args, ctx) => this.ask(args, ctx),
+      agent: (call, ctx) => this.claudeAgents.run(call, ctx),
+    };
   }
   async load() {
     await this.sandbox.probe();
@@ -225,7 +241,12 @@ export class ToolRegistry {
       }, "Jev route finished");
     }
   }
-  base(ctx: Context): ToolDef[] {
+  /** `listing` leaves out the checks on the caller's own role. The Claude
+   *  harness shows one tool list to everyone in a conversation, because a list
+   *  that changes with the speaker changes the head of every request (no
+   *  cache, and thinking blocks rejected). Who may run a tool is still
+   *  decided by the strict form when it is called. */
+  base(ctx: Context, listing = false): ToolDef[] {
     if (!this.runtime.config.toolsEnabled) return [];
     const settings = this.runtime.resolve(ctx.guildId, ctx.userId);
     const native = nativeSearchFor(
@@ -246,12 +267,12 @@ export class ToolRegistry {
       if (
         /^home_vpn_/.test(n) &&
         (!this.runtime.config.browserProxyUrl || !this.sandbox.available || ctx.depth > 0 ||
-          this.runtime.role(ctx.userId) !== "administrator")
+          (!listing && this.runtime.role(ctx.userId) !== "administrator"))
       ) return false;
       if (
         /^vpn_/.test(n) &&
         (!this.runtime.config.vpnEnabled ||
-          this.runtime.role(ctx.userId) !== "administrator" ||
+          (!listing && this.runtime.role(ctx.userId) !== "administrator") ||
           (n === "vpn_login_code" &&
             this.runtime.config.vpnProvider !== "surfshark"))
       )
@@ -331,8 +352,20 @@ export class ToolRegistry {
       { type: "function", function: { name: TASK_STOP_TOOL, description: TASK_STOP_DESCRIPTION, parameters: TASK_STOP_PARAMETERS } },
     ];
   }
+  /** The Claude harness's surface (#66): Claude Code's file and shell tools,
+   *  and the integration tools under their `mcp__` names. */
+  private claudeTools(ctx: Context): ToolDef[] {
+    const settings = this.runtime.resolve(ctx.guildId, ctx.userId);
+    return claudeSurface(this.base(ctx, true), {
+      sandbox: this.sandbox.available,
+      root: ctx.depth === 0,
+      role: ctx.agentRole,
+      agents: this.runtime.config.subagentEnabled && settings.subagent_enabled,
+    });
+  }
   tools(ctx: Context) {
     if (!this.runtime.config.toolsEnabled) return [];
+    if (ctx.harness === "claude") return this.claudeTools(ctx);
     const base = this.base(ctx);
     // Filter the final surface, not base(): harness-native aliases such as
     // shell_command/apply_patch are added later and must obey the role too.
@@ -362,6 +395,9 @@ export class ToolRegistry {
       } : t);
   }
   jevTaskMode(ctx: Context): boolean {
+    // The mode rewrites the tool list from a setting, which the Claude
+    // harness's fixed list cannot follow; its turns ignore the setting.
+    if (ctx.harness === "claude") return false;
     const settings = this.runtime.resolve(ctx.guildId, ctx.userId);
     // Multi-Agent parallelizes through role workers; a Jev decision before
     // every root operation serialized exactly the work it is meant to speed up.
@@ -397,6 +433,7 @@ export class ToolRegistry {
       this.runtime.guild(ctx.guildId).bot_disabled
     )
       throw new Error("Bot access disabled");
+    if (ctx.harness === "claude") return this.executeClaude(rawName, rawArgs, ctx);
     const { name, args: a } = normalizeTool(rawName, rawArgs);
     // Checked after normalization so use_tool wrappers and aliases cannot
     // reach a tool that the role's tool list does not expose.
@@ -425,6 +462,31 @@ export class ToolRegistry {
       name === "home_vpn_status" ? () => {} : this.media.beginHomeWork(ctx);
     try {
       return await this.runTool(name, a, ctx);
+    } finally {
+      finishHomeWork();
+    }
+  }
+  private async executeClaude(name: string, args: Json, ctx: Context): Promise<unknown> {
+    const internal = internalName(name);
+    if (!roleAllowsTool(ctx.agentRole, internal))
+      throw new Error(`A subagent of this type cannot use ${name}. Say what is needed in your report instead.`);
+    // Shown is not the same as allowed: the list is the same for everyone in
+    // the conversation, so an integration tool is checked again here against
+    // what this person may run.
+    const allowed = isClaudeTool(name)
+      ? this.claudeTools(ctx).some((t) => t.function.name === name)
+      : name.startsWith("mcp__") && this.base(ctx).some((t) => t.function.name === internal) &&
+        this.claudeTools(ctx).some((t) => t.function.name === name);
+    if (!allowed) throw new Error(`${name} is not available to you in this conversation.`);
+    const validator = isClaudeTool(name) ? this.claudeValidators.get(name) : this.validators.get(internal);
+    if (validator && !validator(args))
+      throw new Error(`Invalid arguments for ${name}: ${validator.errors?.map((e) => `${e.instancePath || "input"} ${e.message}`).join("; ")}`);
+    if (sandboxNames.has(internal) && !this.sandbox.available) throw new Error("The sandbox is unavailable.");
+    const finishHomeWork = internal === "home_vpn_status" ? () => {} : this.media.beginHomeWork(ctx);
+    try {
+      return isClaudeTool(name)
+        ? await runClaudeTool(this.claudeHost, name, args, ctx)
+        : await this.runTool(internal, args, ctx);
     } finally {
       finishHomeWork();
     }

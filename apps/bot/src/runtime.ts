@@ -24,6 +24,7 @@ import {
 import type { Config, Selection } from "./config";
 import { atomicJson, readJson, Serial } from "./io";
 import { ultracodeActive } from "./ultracode";
+import { harnessFor } from "./claude/select";
 export type Snapshot = {
   chatgpt_available?: boolean;
   version?: number;
@@ -202,13 +203,19 @@ export class Runtime {
     else selection = { ...selection, effort: effort ?? selection.effort };
     // Resolved Multi still implies Ultra, including when only one of the two
     // switches was stored on the personal row.
-    const multiAgent = pick(user.multi_agent, guild.multi_agent!);
+    // The Claude harness has one form of delegation, its Agent tool (#68). A
+    // stored Ultra or Multi-Agent choice counts as "on" there; neither the
+    // Workflow tool nor the collaboration tools are offered.
+    const claude = harnessFor(selection, this.config) === "claude";
+    const multiAgent = !claude && pick(user.multi_agent, guild.multi_agent!);
     const context = user.context ??
       (guildId ? guild.context : this.snapshot.user_contexts[userId || ""] ?? null);
     // The stored switches are kept; they apply again under another provider.
-    const subagentEnabled = !subagentsUnsupported(selection.provider) &&
+    // On the Codex-style harness an Anthropic turn still runs without
+    // subagents (#35), which is what `ANTHROPIC_HARNESS=codex` goes back to.
+    const subagentEnabled = (claude || !subagentsUnsupported(selection.provider)) &&
       pick(user.subagent_enabled, guild.subagent_enabled!);
-    const ultraMode = multiAgent || pick(user.ultra_mode, guild.ultra_mode!);
+    const ultraMode = !claude && (multiAgent || pick(user.ultra_mode, guild.ultra_mode!));
     return {
       ...guild,
       selection: selection as Selection,

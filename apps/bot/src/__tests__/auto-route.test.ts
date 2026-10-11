@@ -19,6 +19,7 @@ import {
 import { Hibana } from "../bot";
 import { loadConfig } from "../config";
 import { LlmClient } from "../llm";
+import { conversationKey } from "../claude/select";
 import { assertChildSelection, selectChild } from "../multi-agent-policy";
 import { Runtime } from "../runtime";
 import { ToolRegistry } from "../tools";
@@ -277,7 +278,7 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
     // (The failing completion-check mock adds a progress message in between.)
     expect([sent[0], sent.at(-1)]).toEqual(["Auto Routing: **Opus 5.5 High**", "ok"]);
     expect(order.slice(0, 2)).toEqual(["notice", "model"]);
-    expect(JSON.stringify(bot.history.get(ctx.channelId, undefined, JSON.stringify(bot.runtime.resolve(undefined, ctx.userId).selection), false, 0))).not.toContain("Auto Routing");
+    expect(JSON.stringify(bot.history.get(ctx.channelId, undefined, conversationKey(bot.runtime.resolve(undefined, ctx.userId).selection, "claude"), false, 0, true))).not.toContain("Auto Routing");
     // An easy follow-up stays on the routed model without asking Jev.
     score = 0;
     await bot.respond("ありがとう", { ...ctx });
@@ -342,15 +343,32 @@ test("a conversation keeps its route until the cache expires; a fallback is not 
   } finally { await bot.close(); await rm(dir, { recursive: true, force: true }); }
 });
 
-test("Anthropic turns run without subagents, whatever the stored mode", async () => {
+const ANTHROPIC_PRESETS = ["anthropic-auto", "anthropic-haiku-5-5", "anthropic-sonnet-5-5", "anthropic-opus-5-5"];
+
+test("on the Claude harness an Anthropic turn delegates through its own subagents, never Ultra or Multi-Agent (#68)", async () => {
   const runtime = new Runtime(config({ MULTI_AGENT: "true" }));
   runtime.snapshot.user_roles.owner = "premium";
   expect(runtime.resolve("g1", "member")).toMatchObject({ subagent_enabled: true, multi_agent: true });
-  for (const preset of ["anthropic-auto", "anthropic-haiku-5-5", "anthropic-sonnet-5-5", "anthropic-opus-5-5"]) {
+  for (const preset of ANTHROPIC_PRESETS) {
+    // A stored Ultra or Multi-Agent choice means "on" here: the switch stays,
+    // the Workflow tool and the collaboration tools do not come with it.
+    await runtime.patch("g1", { preset, subagent_enabled: true, ultra_mode: true }, "owner");
+    expect(runtime.resolve("g1", "member")).toMatchObject({ subagent_enabled: true, ultra_mode: false, multi_agent: false, ultracode: false });
+    await runtime.patch("g1", { subagent_enabled: false }, "owner");
+    expect(runtime.resolve("g1", "member").subagent_enabled).toBe(false);
+  }
+  // The stored switches apply again, as stored, under another provider.
+  await runtime.patch("g1", { preset: "sol", subagent_enabled: true, ultra_mode: true }, "owner");
+  expect(runtime.resolve("g1", "member")).toMatchObject({ subagent_enabled: true, ultra_mode: true });
+});
+
+test("with ANTHROPIC_HARNESS=codex an Anthropic turn runs without subagents, as before (#35)", async () => {
+  const runtime = new Runtime(config({ MULTI_AGENT: "true", ANTHROPIC_HARNESS: "codex" }));
+  runtime.snapshot.user_roles.owner = "premium";
+  for (const preset of ANTHROPIC_PRESETS) {
     await runtime.patch("g1", { preset, subagent_enabled: true, ultra_mode: true }, "owner");
     expect(runtime.resolve("g1", "member")).toMatchObject({ subagent_enabled: false, ultracode: false });
   }
-  // The stored switch applies again under another provider.
   await runtime.patch("g1", { preset: "sol" }, "owner");
   expect(runtime.resolve("g1", "member").subagent_enabled).toBe(true);
 });

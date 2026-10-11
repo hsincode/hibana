@@ -2,10 +2,11 @@ import type { ServiceTier } from "@hibana/shared/settings";
 import type { Config, Selection } from "./config";
 import { recommendedEffort } from "./config";
 import { addUsage, type Json, type Message, type ToolCall, type ToolDef, type Usage } from "./types";
-import { apiFailure, ProviderError } from "./llm-errors";
+import { apiFailure, ProviderError, type RequestFeature } from "./llm-errors";
 import { concreteSelection, routedEffort } from "./auto-route";
 import { readCompletion } from "./llm-stream";
 import { requestCompletion, type RequestHooks, type RetryNotice } from "./llm-request";
+import { thinkingUpdates } from "./claude/select";
 import { PrefixAudit, type PrefixReport, type RequestTrace } from "./prefix-audit";
 export { retryDelay } from "./llm-request";
 
@@ -181,6 +182,15 @@ export function toResponses(messages: Message[]): {
 // top-level `system` as before.
 export const midConversationSystem = (model: string) =>
   /claude-(opus-5|opus-4-8|fable-5|mythos-5|sonnet-5-5)/.test(model);
+function imageBlock(url: string): Json {
+  const data = /^data:([^;]+);base64,(.+)$/.exec(url);
+  return {
+    type: "image",
+    source: data
+      ? { type: "base64", media_type: data[1], data: data[2] }
+      : { type: "url", url },
+  };
+}
 export function toAnthropic(messages: Message[], midSystem = true): {
   system: string;
   messages: { role: string; content: Json[] }[];
@@ -205,11 +215,17 @@ export function toAnthropic(messages: Message[], midSystem = true): {
       continue;
     }
     if (m.role === "tool") {
+      // Only the Claude harness sets `is_error` or puts images on a result;
+      // without them this is the plain text result it always was.
+      const images = (m.images ?? []).map(imageBlock);
       push("user", [
         {
           type: "tool_result",
           tool_use_id: m.tool_call_id,
-          content: m.content || "",
+          content: images.length
+            ? [...(m.content ? [{ type: "text", text: m.content }] : []), ...images]
+            : m.content || "",
+          ...(m.is_error && { is_error: true }),
         },
       ]);
       continue;
@@ -220,15 +236,7 @@ export function toAnthropic(messages: Message[], midSystem = true): {
       continue;
     }
     if (m.content) blocks.push({ type: "text", text: m.content });
-    for (const url of m.images ?? []) {
-      const data = /^data:([^;]+);base64,(.+)$/.exec(url);
-      blocks.push({
-        type: "image",
-        source: data
-          ? { type: "base64", media_type: data[1], data: data[2] }
-          : { type: "url", url },
-      });
-    }
+    for (const url of m.images ?? []) blocks.push(imageBlock(url));
     for (const tc of m.tool_calls ?? [])
       blocks.push({
         type: "tool_use",
@@ -257,8 +265,28 @@ export type Completion = {
   incomplete: boolean;
   /** Anthropic `pause_turn`: the server tool loop stopped and can be resumed. */
   paused?: boolean;
+  /** Anthropic with `thinking.display: "updates"`: the note the model wrote
+   *  before its tool calls, which this API returns as a thinking block. */
+  progress?: string;
+  /** The output limit ended the response inside a tool call's arguments; the
+   *  half-written call is not in `message`. */
+  cutToolUse?: boolean;
+  /** A compaction request returned its summary block (in `providerBlocks`). */
+  compacted?: boolean;
 };
 export function normalizeUsage(raw: Json = {}): Usage {
+  // A compaction request generates no reply, so Anthropic reports zero at the
+  // top level and the summarization call under `iterations`. Without this the
+  // call would be logged, and priced, as free.
+  const iterations = Array.isArray(raw.iterations) ? raw.iterations as Json[] : [];
+  if (iterations.length && !Number(raw.input_tokens ?? 0) && !Number(raw.output_tokens ?? 0) && raw.prompt_tokens === undefined) {
+    const sum = (key: string) => iterations.reduce((total, i) => total + Number(i[key] ?? 0), 0);
+    raw = {
+      ...raw, input_tokens: sum("input_tokens"), output_tokens: sum("output_tokens"),
+      cache_read_input_tokens: sum("cache_read_input_tokens"),
+      cache_creation_input_tokens: sum("cache_creation_input_tokens"),
+    };
+  }
   const cacheRead = Number(
       (raw.prompt_tokens_details as Json)?.cached_tokens ??
         (raw.input_tokens_details as Json)?.cached_tokens ??
@@ -361,7 +389,13 @@ export function parseCompletion(
     // HTTP 200 with stop_reason "refusal" is a classifier decline, not an
     // empty answer. Retrying the same request would decline again.
     if (data.stop_reason === "refusal") throw new ProviderError("refusal", false);
+    // The conversation no longer fits the model's window. Same outcome as the
+    // HTTP 400 for an oversized prompt: the caller shortens it.
+    if (data.stop_reason === "model_context_window_exceeded") throw new ProviderError("context_length", false);
     const content = (data.content ?? []) as Json[];
+    const notes = content
+      .filter((x) => x.type === "thinking" && typeof x.thinking === "string" && x.thinking.trim())
+      .map((x) => String(x.thinking).trim());
     return {
       message: {
         role: "assistant",
@@ -379,6 +413,9 @@ export function parseCompletion(
       usage: normalizeUsage(data.usage as Json),
       incomplete: data.stop_reason === "max_tokens",
       paused: data.stop_reason === "pause_turn",
+      ...(notes.length && { progress: notes.at(-1) }),
+      ...(data.cut_tool_use === true && { cutToolUse: true }),
+      ...(data.stop_reason === "compaction" && { compacted: content.some((x) => x.type === "compaction") }),
     };
   }
   const choice = (data.choices as Json[])?.[0];
@@ -416,15 +453,27 @@ export type RequestRecord = {
   turn?: string;
   usage: Usage;
   usage_detail?: UsageDetail;
+  /** The model declined (`stop_reason: "refusal"`). Anthropic bills what was
+   *  generated before the decline, so the request is recorded all the same. */
+  refused?: true;
   /** False when the provider sent no usage: the zeros are then unknown, not free. */
   usage_reported: boolean;
   /** Whole call, including reconnect backoff and credential lookup. */
   latency_ms: number;
   prefix?: PrefixReport;
 };
-export type LlmHooks = RequestHooks & { onCompletion?: (record: RequestRecord) => void };
+export type LlmHooks = RequestHooks & {
+  onCompletion?: (record: RequestRecord) => void;
+  /** An optional request feature was rejected and is left out from now on. */
+  onFeatureDisabled?: (feature: RequestFeature) => void;
+};
+const hasCompaction = (turns: { content: Json[] }[]) => turns.some((t) => t.content.some((b) => b.type === "compaction"));
 export class LlmClient {
   private audit = new PrefixAudit();
+  // Features the Claude harness asks for but can work without. Anthropic
+  // rejects a request that names one it does not offer this account or model;
+  // the request is then sent again without it, and this process stops asking.
+  private disabled = new Set<RequestFeature>();
   constructor(
     private config: Config,
     private fetcher: (
@@ -446,6 +495,11 @@ export class LlmClient {
       resumes?: number;
       onRetry?: (notice: RetryNotice) => Promise<void> | void;
       trace?: RequestTrace;
+      /** The turn runs on the Claude harness (#66). Changes the request only
+       *  for `anthropic`; the Claude Max gateway keeps its own shape (#67). */
+      claude?: boolean;
+      /** Ask for a summary of `messages` instead of a reply (Claude harness). */
+      compaction?: boolean;
     } = {},
   ): Promise<Completion> {
     selection = concreteSelection(selection);
@@ -508,10 +562,19 @@ export class LlmClient {
         body.prompt_cache_key = promptCacheKey(options.trace.channel);
     } else if (protocol === "anthropic") {
       path = "/messages";
+      const claude = Boolean(options.claude) && selection.provider === "anthropic";
       const { system, messages: turns } = toAnthropic(
         messages,
-        midConversationSystem(selection.model),
+        // Opus 5.5, Sonnet 5.5 and Haiku 5.5 all take a system message inside
+        // the conversation; the older list below leaves Haiku out.
+        claude || midConversationSystem(selection.model),
       );
+      // Tool search: the integration tools are sent in full but enter the
+      // model's context only when it searches for them.
+      const search = claude && this.config.claudeToolSearch && !this.disabled.has("tool_search") && tools.some((t) => t.defer);
+      // Thinking counts toward max_tokens on all three models and cannot be
+      // switched off on two of them; a smaller limit cuts agentic replies short.
+      if (claude) max = 64000;
       body = {
         model: selection.model,
         // Explicit 1h breakpoint on the stable tools + system prefix, so it
@@ -524,11 +587,15 @@ export class LlmClient {
         messages: turns,
         max_tokens: max,
         stream: true,
-        tools: tools.map((t) => ({
-          name: t.function.name,
-          description: t.function.description,
-          input_schema: t.function.parameters,
-        })),
+        tools: [
+          ...(search ? [{ type: "tool_search_tool_bm25_20251119", name: "tool_search_tool_bm25" }] : []),
+          ...tools.map((t) => ({
+            name: t.function.name,
+            description: t.function.description,
+            input_schema: t.function.parameters,
+            ...(search && t.defer && { defer_loading: true }),
+          })),
+        ],
       };
       headers["anthropic-version"] = "2023-06-01";
       headers["x-api-key"] = endpoint.apiKey;
@@ -539,7 +606,24 @@ export class LlmClient {
         (body.tools as Json[]).push(...anthropicWebTools(selection.model, new Set(tools.map(t => t.function.name))));
       // Claude Max serves only 4.7+ models, which reject `budget_tokens` and
       // sampling parameters; adaptive thinking plus effort is the only shape.
-      if (effort === "none") body.thinking = { type: "disabled" };
+      if (claude) {
+        // Opus 5.5 and Sonnet 5.5 write the notes between tool calls into
+        // thinking blocks that come back empty unless asked for; the Discord
+        // status line is made from them.
+        const updates = thinkingUpdates(selection.model) && !this.disabled.has("thinking_updates");
+        body.thinking = { type: "adaptive", ...(updates && { display: "updates" }) };
+        // Always explicit: the default differs by model (medium on Opus and
+        // Haiku, high on Sonnet), and thinking cannot be turned off here.
+        body.output_config = { effort: effort && effort !== "none" ? effort : "low" };
+        if (options.compaction) body.compaction = { type: "summarize" };
+        const betas = [
+          ...(updates ? ["thinking-display-updates-2026-08-18"] : []),
+          // Needed to ask for a summary and on every later request that
+          // carries the summary block.
+          ...(options.compaction || hasCompaction(turns) ? ["compact-2026-09-04"] : []),
+        ];
+        if (betas.length) headers["anthropic-beta"] = betas.join(",");
+      } else if (effort === "none") body.thinking = { type: "disabled" };
       else {
         body.thinking = { type: "adaptive" };
         if (effort) body.output_config = { effort };
@@ -590,6 +674,7 @@ export class LlmClient {
     const audit = this.hooks.onCompletion && options.trace ? this.audit.observe(options.trace, body) : undefined;
     let usageReported = false;
     let detail: UsageDetail | undefined;
+    let reported: Json | undefined;
     let completion: Completion;
     try {
       completion = await requestCompletion({
@@ -626,6 +711,7 @@ export class LlmClient {
           const data = await readCompletion(response, protocol, signal, activity);
           usageReported = Object.keys((data.usage ?? {}) as Json).length > 0;
           detail = usageDetail(data.usage as Json);
+          reported = data.usage as Json;
           return parseCompletion(data, protocol);
         },
         signal: options.signal,
@@ -653,6 +739,22 @@ export class LlmClient {
       }
     } catch (error) {
       if (error instanceof ProviderError) {
+        const feature = error.feature;
+        if (options.claude && (feature === "tool_search" || feature === "thinking_updates") && !this.disabled.has(feature)) {
+          this.disabled.add(feature);
+          this.hooks.onFeatureDisabled?.(feature);
+          return this.complete(selection, messages, tools, options);
+        }
+        if (error.kind === "refusal" && reported)
+          try {
+            this.hooks.onCompletion?.({
+              provider: selection.provider, model: selection.model, protocol,
+              channel: options.trace?.channel, agent: options.trace?.agent, round: options.trace?.round,
+              ...(options.trace?.turn && { turn: options.trace.turn }),
+              usage: normalizeUsage(reported), ...(detail && { usage_detail: detail }), refused: true,
+              usage_reported: usageReported, latency_ms: Date.now() - started,
+            });
+          } catch {}
         error.diagnostics = { ...error.diagnostics, provider: selection.provider, model: selection.model };
         error.message = `LLM ${selection.provider}: ${error.message}`;
       }

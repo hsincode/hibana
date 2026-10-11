@@ -257,6 +257,8 @@ export class Sandbox {
     timeoutSecs = 120,
     workdir = "/workspace",
     proxy?: { server: string; username: string; password: string },
+    /** Characters kept per stream; the default suits a result sent whole. */
+    maxOutput?: number,
   ) {
     if (!this.available) throw new Error("Docker sandbox is unavailable");
     if (!command.trim()) throw new Error("Command is required");
@@ -336,6 +338,7 @@ export class Sandbox {
         timeout: Math.max(1, Math.min(360, timeoutSecs)) * 1000,
         signal: ctx.signal,
         env: { ...process.env, ...proxyEnv },
+        maxOutput,
       });
     } finally {
       await processRun("docker", ["rm", "-f", name], {
@@ -382,9 +385,12 @@ export class Sandbox {
       const count = content.split(oldText).length - 1;
       if (!count || (count > 1 && !all))
         throw new Error(`Expected unique match; found ${count}`);
+      // A function, not the string: as a string, `$&`, `$1` and `$$` in the
+      // new text are replacement patterns, and code that contains them (shell,
+      // regexes, template literals, prices) was written back altered.
       const next = all
-        ? content.replaceAll(oldText, newText)
-        : content.replace(oldText, newText);
+        ? content.replaceAll(oldText, () => newText)
+        : content.replace(oldText, () => newText);
       await this.quota(
         await this.root(ctx),
         Math.max(0, Buffer.byteLength(next) - Buffer.byteLength(content)),

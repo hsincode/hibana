@@ -25,6 +25,10 @@ import { Voice } from "./voice";
 import { commands, handleCommand } from "./commands";
 import { imagePrompt, shouldRespond, splitMessage } from "./triggers";
 import { assemblePrompt } from "./harness";
+import { ClaudeCompaction, userMessage } from "./claude/context";
+import { stripThinking } from "./claude/progress";
+import { claudeSystem, contextBlock, contextMessage } from "./claude/prompt";
+import { conversationKey, harnessFor, keyHarness } from "./claude/select";
 import { atomicJson, readJson, Serial } from "./io";
 import { UsageLedger } from "./usage-ledger";
 import {
@@ -89,6 +93,7 @@ export class Hibana {
   readonly llm: LlmClient;
   readonly agent: Agent;
   readonly history: History;
+  private compaction: ClaudeCompaction;
   /** History and auto routes on disk, so a restart keeps them (#59). */
   readonly conversations: ConversationStore;
   readonly usage: UsageLedger;
@@ -129,6 +134,7 @@ export class Hibana {
     );
     this.llm = new LlmClient(config, fetch, {
       onRetry: notice => this.log.warn(notice, "LLM reconnecting"),
+      onFeatureDisabled: feature => this.log.warn({ feature }, "Anthropic rejected an optional request feature; continuing without it"),
       onCompletion: record => {
         this.log.info(record, "LLM request completed");
         this.usage.record(record);
@@ -139,6 +145,7 @@ export class Hibana {
     // stay in process memory.
     this.conversations = new ConversationStore(config.conversationDbPath, (e) => this.report(e));
     this.history = new History(config, this.conversations);
+    this.compaction = new ClaudeCompaction(config, this.history, this.llm, log);
     this.routes = new RouteMemory(Date.now, this.conversations);
     this.tools = new ToolRegistry(this.runtime, this.client, this.agent, this.log);
     this.sync = new WebSync(this.runtime, this.tools, (e) => this.report(e));
@@ -314,8 +321,19 @@ export class Hibana {
     // authors never reach here, and voice transcripts do not use this path.
     const keyword = this.config.ultracodeKeywordTrigger && hasUltracodeKeyword(m.content) &&
       workflowsEnabled(this.config, this.runtime.resolve(m.guildId ?? undefined, m.author.id));
-    const current = this.active.get(m.channelId);
-    if (current?.accepting && current.userId === m.author.id) {
+    let current = this.active.get(m.channelId);
+    if (current?.accepting && current.userId === m.author.id && current.ctx.harness === "claude") {
+      // Built before it is queued: the Claude harness sends images as data
+      // and dates each message. The turn may end while the images download,
+      // in which case the message starts a turn of its own below.
+      const prompt = await userMessage(text, images, this.shutdown.signal);
+      current = this.active.get(m.channelId);
+      if (current?.accepting && current.userId === m.author.id) {
+        current.pending.push(prompt);
+        current.request.abort(new Error("User steering"));
+        return;
+      }
+    } else if (current?.accepting && current.userId === m.author.id) {
       const prompt: Message = { role: "user", content: text, images, turnStart: true };
       if (keyword) {
         this.keywordPrompts.add(prompt);
@@ -391,12 +409,16 @@ export class Hibana {
       const settings = this.runtime.resolve(ctx.guildId, ctx.userId);
       // History.put overwrites the channel usage figure. This path spent no
       // tokens, so keep the previous figure instead of storing zeros.
+      // Under the key and rules of the harness this conversation runs on: a
+      // read under another key would discard the conversation.
+      const claude = harnessFor(settings.selection, this.config) === "claude";
       this.history.get(
         ctx.channelId,
         ctx.guildId,
-        JSON.stringify(settings.selection),
+        conversationKey(settings.selection, claude ? "claude" : "codex"),
         ctx.thread,
         settings.thread_history_max_age_secs ?? this.config.threadHistoryAge,
+        claude,
       );
       const usage = this.history.info(ctx.channelId).usage ?? emptyUsage();
       this.history.put(
@@ -559,9 +581,15 @@ export class Hibana {
     typing();
     const timer = setInterval(typing, 8000);
     const settings = this.runtime.resolve(ctx.guildId, ctx.userId);
+    // Anthropic's own API runs on the Claude harness, everything else on the
+    // Codex-style one (#66). The flag travels on the context so the tools and
+    // the loop branch on the same decision.
+    const claude = harnessFor(settings.selection, this.config) === "claude";
+    if (claude) ctx.harness = "claude";
     // History keeps the stored selection as its key: turning Ultracode on or
     // off changes the effort sent, not the conversation (Claude Code keeps it).
-    const key = JSON.stringify(settings.selection);
+    // The key also names the harness, so neither continues the other's turns.
+    const key = conversationKey(settings.selection, claude ? "claude" : "codex");
     const ultracode = settings.ultracode;
     // An auto preset is replaced below, once the history is known.
     let selection = turnSelection(settings.selection, ultracode);
@@ -578,6 +606,9 @@ export class Hibana {
     try {
       const candidate = retry ?? this.checkpoints[`${ctx.channelId}/${ctx.userId}`];
       const pending = candidate && checkpointInScope(candidate, ctx) && Date.now() - candidate.at < 7200000
+        // A checkpoint written under the other harness names tools this one
+        // does not have; it is left to expire instead of being resumed.
+        && (keyHarness(candidate.selectionKey) === "claude") === claude
         ? candidate : undefined;
       checkpointPersisted = Boolean(pending);
       if (retry && !pending) throw new Error("再開できる作業はありません。");
@@ -588,8 +619,10 @@ export class Hibana {
         key,
         ctx.thread,
         settings.thread_history_max_age_secs ?? this.config.threadHistoryAge,
+        claude,
       );
-      if (ctx.thread && !pending) {
+      // The Claude harness summarizes threads and channels alike, below.
+      if (ctx.thread && !pending && !claude) {
         failurePhase = "history_compaction";
         await this.history.compact(
           ctx.channelId,
@@ -617,15 +650,35 @@ export class Hibana {
         if (route.announce) await send(routeHeader(selection));
       }
       failurePhase = "prompt_assembly";
-      const prefix = await assemblePrompt(
-        this.runtime,
-        ctx,
-        this.config.skillsEnabled ? await this.tools.skillCatalog(ctx) : "",
-      );
+      const skills = this.config.skillsEnabled ? await this.tools.skillCatalog(ctx) : "";
+      const prefix = claude ? [await claudeSystem(this.runtime)] : await assemblePrompt(this.runtime, ctx, skills);
+      const nativeSearch = nativeSearchFor(settings.selection, settings.exa_mode, this.config.webSearch);
+      if (claude) {
+        ctx.rootSelection = selection;
+        if (!pending) {
+          failurePhase = "history_compaction";
+          const spent = await this.compaction.run({
+            channelId: ctx.channelId, selection, prefix, prior, tools: this.tools.tools(ctx),
+            nativeSearch, signal: ctx.signal, turn: ctx.turnId,
+          });
+          if (spent) {
+            routeUsage = routeUsage ? (addUsage(routeUsage, spent), routeUsage) : spent;
+            prior = this.history.get(ctx.channelId, ctx.guildId, key, ctx.thread,
+              settings.thread_history_max_age_secs ?? this.config.threadHistoryAge, true);
+          }
+          failurePhase = "prompt_assembly";
+        }
+      }
       const resumed = pending ? resumeCheckpoint(pending, prefix, settings.selection) : undefined;
       const messages: Message[] = resumed?.messages ?? [...prefix, ...prior];
       const seed = resumed?.historyStart ?? messages.length;
-      if (text) {
+      if (text && claude) {
+        // Who the bot is here and what this place has. Sent when the
+        // conversation does not carry it yet, and again only when it changed.
+        const block = contextMessage(await contextBlock(this.runtime, ctx, skills), messages);
+        if (block) messages.push(block);
+        messages.push(await userMessage(text, ctx.images, ctx.signal));
+      } else if (text) {
         // Claude Code attaches these system reminders to a typed prompt only
         // while dynamic workflows are on; /retry resumes add none.
         const workflows = workflowsEnabled(this.config, settings);
@@ -655,11 +708,9 @@ export class Hibana {
         maxRounds: this.config.maxRounds,
         serviceTier: settings.service_tier,
         temperature: settings.temperature,
-        nativeSearch: nativeSearchFor(
-          settings.selection,
-          settings.exa_mode,
-          this.config.webSearch,
-        ),
+        nativeSearch,
+        // Stored turns still hold the thinking blocks the API just rejected.
+        onThinkingStripped: () => this.history.rewrite(ctx.channelId, stripThinking),
         execute: (name, args, c) => this.tools.execute(name, args, c),
         checkpoint: (messages) => this.saveCheckpoint(ctx, messages, seed, key),
         takeSteering: () => {
@@ -674,7 +725,8 @@ export class Hibana {
         requestSignal: () =>
           AbortSignal.any([this.shutdown.signal, state.request.signal]),
       };
-      const result = this.config.toolsEnabled && this.config.subagentEnabled && settings.subagent_enabled
+      // The Claude harness delegates through its Agent tool, inside the loop.
+      const result = !claude && this.config.toolsEnabled && this.config.subagentEnabled && settings.subagent_enabled
         ? await new MultiAgentSession(this.runtime, this.agent, c => this.tools.tools(c), {
           // A resumed checkpoint continues earlier work; a fresh triage could
           // pre-start an explorer that repeats research already in the history.
@@ -702,7 +754,8 @@ export class Hibana {
       this.history.put(
         ctx.channelId,
         result.messages.slice(Math.min(seed, result.messages.length - 1)),
-        result.usage,
+        claude ? { ...result.usage, context_tokens: result.context } : result.usage,
+        claude,
       );
       failurePhase = "checkpoint_clear";
       await this.clearCheckpoint(ctx);
@@ -750,7 +803,10 @@ export class Hibana {
       if (!this.shutdown.signal.aborted) {
         const failureCode = classifyFailure(error, failurePhase);
         const httpStatus = httpStatusOf(error);
-        if (error instanceof ProviderError && error.kind === "context_length") this.history.shrink(ctx.channelId);
+        // Dropping turns is how the other harness shortens a conversation; this
+        // one summarizes it before the next turn instead.
+        if (error instanceof ProviderError && error.kind === "context_length")
+          claude ? this.compaction.markOversized(ctx.channelId) : this.history.shrink(ctx.channelId);
         const failureReport: FailureReport = {
           failure_code: failureCode,
           failure_phase: failurePhase,

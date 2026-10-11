@@ -118,10 +118,25 @@ export async function readCompletion(
       } else if (type === "message_stop") {
         if (!started || !finish) throw interrupted();
         // A call without arguments streams one empty partial_json (#42); its
-        // block keeps the `{}` it started with. An input cut off mid-JSON
-        // still fails to parse here and the request is retried.
-        for (const [index, input] of inputs) if (input) blocks.get(index)!.input = JSON.parse(input);
-        return { content: [...blocks.entries()].sort(([a], [b]) => a - b).map(([, block]) => block), usage, stop_reason: finish };
+        // block keeps the `{}` it started with.
+        let cut = false;
+        for (const [index, input] of inputs) if (input) {
+          try {
+            blocks.get(index)!.input = JSON.parse(input);
+          } catch (error) {
+            // The output limit can end a response inside a tool call's
+            // arguments. That is a complete response, not a broken stream:
+            // asking again with the same limit ends at the same place, and
+            // retrying it sent (and billed) the request five more times.
+            if (finish !== "max_tokens") throw error;
+            blocks.delete(index);
+            cut = true;
+          }
+        }
+        return {
+          content: [...blocks.entries()].sort(([a], [b]) => a - b).map(([, block]) => block),
+          usage, stop_reason: finish, ...(cut && { cut_tool_use: true }),
+        };
       }
     } else {
       if (data.usage) usage = data.usage as Json;

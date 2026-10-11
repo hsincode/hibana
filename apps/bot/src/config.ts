@@ -195,6 +195,29 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
         : resolve(env.CONVERSATION_DB_PATH || `${dataDir}/conversations.db`),
     promptFile: resolve(env.PROMPT_FILE || "prompt.md"),
     personaFile: resolve(env.PERSONA_FILE || "persona.md"),
+    // Which harness runs `anthropic` turns (#66): the Claude one, or the
+    // Codex-style one that every other provider keeps (#67). `codex` is the
+    // way back without a deploy; it also starts those conversations afresh.
+    anthropicHarness: env.ANTHROPIC_HARNESS === "codex" ? "codex" as const : "claude" as const,
+    // Deployment rules for the Claude harness. Resolved beside the code, not
+    // against the working directory, so tests and the service read one file.
+    claudePromptFile: resolve(env.CLAUDE_PROMPT_FILE || `${import.meta.dir}/../prompt.claude.md`),
+    // Claude harness: once the last request of a conversation was larger than
+    // this, the next turn first has the API summarize it (#66). Haiku 5.5
+    // bills a prompt above 100,000 tokens on a higher rate card, so its
+    // conversations are summarized before they reach it.
+    claudeCompactTokens: numberEnv(env, "CLAUDE_COMPACT_TOKENS", 150000, 10000),
+    claudeCompactTokensHaiku: numberEnv(env, "CLAUDE_COMPACT_TOKENS_HAIKU", 80000, 10000),
+    // Integration tools are found through Anthropic's tool search instead of
+    // being sent to the model up front; off sends every definition each time.
+    claudeToolSearch: flag(env, "CLAUDE_TOOL_SEARCH", true),
+    // Subagents of the Claude harness (#68): how many run at once in one turn
+    // and in the whole bot, how many one turn may start, and how many tool
+    // rounds one may take. They bound spend; no dollar limit exists yet.
+    claudeAgentTurnConcurrency: Math.floor(numberEnv(env, "CLAUDE_AGENT_TURN_CONCURRENT", 3, 1, 16)),
+    claudeAgentConcurrency: Math.floor(numberEnv(env, "CLAUDE_AGENT_MAX_CONCURRENT", 6, 1, 64)),
+    claudeAgentsPerTurn: Math.floor(numberEnv(env, "CLAUDE_AGENTS_PER_TURN", 6, 0, 64)),
+    claudeAgentRounds: Math.floor(numberEnv(env, "CLAUDE_AGENT_MAX_ROUNDS", 32, 1, 512)),
     toolsEnabled: flag(env, "TOOLS_ENABLED", true),
     sandboxEnabled: flag(env, "SANDBOX_ENABLED", true),
     sandboxImage: env.SANDBOX_IMAGE || "hibana-sandbox:latest",

@@ -41,6 +41,9 @@ const config = (env: NodeJS.ProcessEnv = {}) =>
     LLM_MODEL: "gpt-6-luna",
     CODEX_PLUS_API_KEY: "fixture",
     ANTHROPIC_API_KEY: "fixture",
+    // `anthropic` runs on the Claude harness by default (#66). This is the
+    // setting that puts it back on the frozen one.
+    ANTHROPIC_HARNESS: "codex",
     JEV_API_KEY: "fixture",
     SANDBOX_ENABLED: "false",
     SKILLS_ENABLED: "false",
@@ -86,8 +89,8 @@ test("the harness assembles the same prompt and tool surface for every subagent 
   try {
     const surfaces: Record<string, unknown> = {};
     const { parts, ref } = references();
-    // Anthropic is listed too: until the Claude harness is selected for it
-    // (#66), its turns use this harness, without subagents (#35).
+    // Anthropic is listed too: with ANTHROPIC_HARNESS=codex its turns go back
+    // to this harness, without subagents (#35), and must find it unchanged.
     for (const selection of [
       { provider: "codex_plus", model: "gpt-6-luna" },
       { provider: "claude_max", model: "claude-opus-5-5" },

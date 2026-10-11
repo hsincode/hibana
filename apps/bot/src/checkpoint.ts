@@ -12,7 +12,7 @@ export type Checkpoint = {
 export function checkpointSnapshot(ctx: Context, messages: Message[], historyStart: number, selectionKey: string): Checkpoint {
   // turnId names one run in the logs; a resumed turn gets its own, so the
   // stored checkpoint keeps the shape it had before the id existed.
-  const { signal, progress, notify, jevTaskProgress, jevExecutions, recordToolUsage, pendingImages, team, agentPath, agentSelection, openStatus, turnId, ...saved } = ctx;
+  const { signal, progress, notify, jevTaskProgress, jevExecutions, recordToolUsage, pendingImages, team, agentPath, agentSelection, openStatus, turnId, agentCalls, rootSelection, ...saved } = ctx;
   // The agent keeps appending to its live array. Retaining that reference made
   // /retry use different history from the on-disk checkpoint after a failure.
   return structuredClone({ ctx: saved, messages, at: Date.now(), historyStart, selectionKey });

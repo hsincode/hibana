@@ -1,0 +1,186 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "Bash",
+      "description": "Runs a shell command in the workspace sandbox and returns its output and exit code.\n\nEvery call starts a new container from the same image. /workspace is mounted read-write and is the only thing that persists: a `cd`, an exported variable or a background process is gone when the command ends, so chain steps that depend on each other in one command (`cd app && bun test`). The container has 512 MiB of memory, one CPU, 128 processes and a 256 MiB /tmp. Its root filesystem is read-only and HOME is /tmp, so caches and installs that are not under /workspace are lost. Host credentials are not present.\n\nA command is stopped at its timeout: 120 seconds unless `timeout` asks for more, and never more than 360 seconds. Split longer work into steps that each fit.\n\nOutput longer than 30,000 characters is not returned in full. It is saved to a file under /workspace/.hibana/tool-output/, and the result names that file and shows the start and the end of the output; read or search the file for the rest.\n\nInstalled: bash, git, gh, curl, jq, file, zip and unzip, ripgrep, bun, node, deno, go (cgo off), python3 with PyYAML, Pillow, reportlab, openpyxl, qrcode, numpy, matplotlib, opencv and weasyprint, ffmpeg and ffprobe, ImageMagick, rsvg-convert, pandoc, poppler (pdftoppm, pdfinfo), ghostscript, yt-dlp. Japanese fonts: IPA Gothic and Mincho under /usr/share/fonts/opentype/. Built-in skill files are mounted read-only at /skills/<name>/.\n\nIf the result says the container could not start, changing the command will not help: report it.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["command"],
+        "properties": {
+          "command": { "type": "string", "minLength": 1, "description": "The command line, run by `bash -lc` with /workspace as the working directory." },
+          "timeout": { "type": "number", "minimum": 1000, "maximum": 360000, "description": "Milliseconds before the command is stopped. Default 120000." },
+          "description": { "type": "string", "description": "What the command does, in a few words. Shown to the user as the status line while it runs." }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "Read",
+      "description": "Reads a file in the workspace and returns its text with line numbers.\n\nOne call returns at most 2,000 lines and 60,000 characters, starting at `offset`. When the file continues past what was returned, the result ends with a note giving the total number of lines; call again with a later `offset` or search the file instead. Lines longer than 2,000 characters are cut.\n\nAn image (png, jpg, gif, webp, up to 8 MiB) is returned as an image you can see rather than as text. Other binary formats are not decoded; convert them with a shell command first (for a PDF, poppler's `pdftotext` extracts the text and `pdftoppm` renders pages to images).\n\nThis reads files only. To see what a directory contains, list it by pattern.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file_path"],
+        "properties": {
+          "file_path": { "type": "string", "minLength": 1, "description": "Path under /workspace, absolute (/workspace/src/a.ts) or relative to it (src/a.ts)." },
+          "offset": { "type": "integer", "minimum": 1, "description": "First line to return, counting from 1. Default 1." },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 2000, "description": "Number of lines to return. Default 2000." }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "Edit",
+      "description": "Replaces one exact piece of text in a workspace file with another.\n\n`old_string` has to appear in the file character for character, including indentation and line breaks; nothing is matched loosely and no pattern syntax applies to either string. It also has to appear exactly once: when it appears several times the edit is refused, and you either include more surrounding text to single out one place or set `replace_all` to change every occurrence.\n\nLine numbers shown when reading a file are not part of the file; leave them out of both strings. The file is written back as UTF-8, so a file that is not valid UTF-8 is refused.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file_path", "old_string", "new_string"],
+        "properties": {
+          "file_path": { "type": "string", "minLength": 1, "description": "Path under /workspace." },
+          "old_string": { "type": "string", "minLength": 1, "description": "The text to replace, exactly as it is in the file." },
+          "new_string": { "type": "string", "description": "The text to put in its place. Must differ from old_string." },
+          "replace_all": { "type": "boolean", "description": "Replace every occurrence instead of requiring exactly one. Default false." }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "Write",
+      "description": "Creates a file in the workspace with the given content, replacing the file if it already exists. Missing parent directories are created. Use it for new files and full rewrites; to change part of an existing file, replace that part instead of resending the whole file.\n\nWriting is refused when the workspace would exceed its storage quota.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file_path", "content"],
+        "properties": {
+          "file_path": { "type": "string", "minLength": 1, "description": "Path under /workspace." },
+          "content": { "type": "string", "description": "The complete content of the file." }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "Glob",
+      "description": "Lists workspace files whose path matches a glob pattern, most recently modified first.\n\nPatterns are matched against the path relative to the searched directory: `**/*.ts` finds TypeScript files at any depth, `src/*.json` only directly in src, `*` the files directly in the directory. At most 200 paths are returned; when more match, the result says how many were left out. Directories themselves are not listed, and symbolic links are not followed.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["pattern"],
+        "properties": {
+          "pattern": { "type": "string", "minLength": 1, "description": "Glob pattern, for example **/*.md." },
+          "path": { "type": "string", "description": "Directory to search, under /workspace. Default: the workspace root." }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "Grep",
+      "description": "Searches the contents of workspace files with a regular expression (ripgrep syntax) and returns where it matches.\n\n`output_mode` chooses what comes back: `files_with_matches` (default) lists the files that contain a match, `content` shows the matching lines with file and line number, and `count` gives the number of matching lines per file. Results are cut after `head_limit` lines.\n\nFiles ignored by .gitignore and hidden files are skipped, as ripgrep does by default. A search runs for at most 20 seconds.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["pattern"],
+        "properties": {
+          "pattern": { "type": "string", "minLength": 1, "description": "Regular expression to search for. Escape literal braces and dots." },
+          "path": { "type": "string", "description": "File or directory to search, under /workspace. Default: the workspace root." },
+          "glob": { "type": "string", "description": "Only search files matching this glob, for example *.ts." },
+          "type": { "type": "string", "description": "Only search files of this ripgrep type, for example js, py, md." },
+          "output_mode": { "type": "string", "enum": ["files_with_matches", "content", "count"], "description": "Default files_with_matches." },
+          "-i": { "type": "boolean", "description": "Ignore case." },
+          "-A": { "type": "integer", "minimum": 0, "maximum": 50, "description": "Lines of context after each match (content mode)." },
+          "-B": { "type": "integer", "minimum": 0, "maximum": 50, "description": "Lines of context before each match (content mode)." },
+          "-C": { "type": "integer", "minimum": 0, "maximum": 50, "description": "Lines of context before and after each match (content mode)." },
+          "multiline": { "type": "boolean", "description": "Let a pattern match across line breaks." },
+          "head_limit": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum number of result lines. Default 250." }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "AskUserQuestion",
+      "description": "Asks the person who made the request one to three multiple-choice questions in the channel and waits for the answers.\n\nEach question is shown with its options as buttons, and the person can also answer in their own words, so do not add an \"other\" option. Put the option you recommend first. Only the person who made the request can answer. Waiting ends after five minutes: an unanswered question comes back marked as unanswered, which is not consent to anything.\n\nUse it when a choice is the user's to make and you cannot settle it from the request or by looking things up, and before a destructive step that was not clearly asked for. It is not for confirming work you were already asked to do.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["questions"],
+        "properties": {
+          "questions": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["question", "header", "options"],
+              "properties": {
+                "question": { "type": "string", "minLength": 1, "description": "The full question, ending with a question mark." },
+                "header": { "type": "string", "minLength": 1, "maxLength": 12, "description": "A label of at most 12 characters shown above the question." },
+                "options": {
+                  "type": "array",
+                  "minItems": 2,
+                  "maxItems": 3,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["label", "description"],
+                    "properties": {
+                      "label": { "type": "string", "minLength": 1, "description": "Short text of the choice." },
+                      "description": { "type": "string", "description": "What choosing it means." }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "Skill",
+      "description": "Loads a skill: the instructions written for one kind of task, with a list of the scripts and reference files that come with it.\n\nThe skills available in this conversation are listed in the context block by name and description. Give the name exactly as listed. The result is the skill's instructions; follow them for the task at hand. Loading a skill posts a short notice in the channel. A skill's own files are also copied under /workspace/.skills/<name>/ (built-in ones are at /skills/<name>/).",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["skill"],
+        "properties": {
+          "skill": { "type": "string", "minLength": 1, "description": "Name of the skill, as listed." },
+          "args": { "type": "string", "description": "Optional note on what the skill is being loaded for." }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "Agent",
+      "description": "Starts a subagent on a task and returns its final report.\n\nA subagent works in a fresh context: it sees none of this conversation, only the `prompt` you write, so state the goal, what is already known, the files or sources to look at, and the form the report should take. It works in the same workspace. Only its last message comes back; its intermediate steps do not.\n\nTypes:\n- `Explore`: a fast read-only researcher. It can read and search workspace files, read messages and search the web, and cannot run commands, change files or post anything. Use it to find where something is or to gather facts from many places.\n- `general-purpose`: runs on the same model as you, with the shell and file tools. It cannot deliver files, post messages, change settings, ask the user questions or start subagents. Use it for a self-contained piece of work that can proceed alongside others.\n\nSubagents started in the same response run side by side, and their reports arrive together. Limits apply per turn and per subagent; a call beyond them returns an error instead of running.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["description", "prompt", "subagent_type"],
+        "properties": {
+          "description": { "type": "string", "minLength": 1, "maxLength": 80, "description": "Three to five words naming the task. Shown to the user as a status line." },
+          "prompt": { "type": "string", "minLength": 1, "description": "The complete task for the subagent." },
+          "subagent_type": { "type": "string", "enum": ["Explore", "general-purpose"] }
+        }
+      }
+    }
+  }
+]

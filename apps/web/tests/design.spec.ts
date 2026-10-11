@@ -1239,16 +1239,29 @@ test("実際の動作 shows what a combination of settings does, not just what w
   await expect(item("サブエージェント")).toContainText("on");
   await expect(page.getByText("いまは使われません。")).toHaveCount(0);
 
-  // Anthropic / Auto: Jev decides the model and effort, and subagents are off whatever was saved.
-  custom = { selection: { provider: "anthropic", model: "auto", effort: "high" }, effort: "high", ultra_mode: true, multi_agent: true };
+  // Anthropic / Auto: Jev decides the model and effort. Subagents are its own
+  // Agent tool (#68): a saved Ultra or Multi-Agent runs as "on" there.
+  custom = { selection: { provider: "anthropic", model: "auto", effort: "high" }, effort: "high", ultra_mode: true, multi_agent: true, jev_task_enabled: true };
   await page.reload();
   await expect(item("モデル")).toContainText("Jev が会話ごとに選ぶ");
   await expect(item("effort")).toContainText("Jev が決める");
   await expect(item("effort")).toContainText("保存値 high は使われません。");
-  await expect(item("サブエージェント")).toContainText("off");
+  await expect(item("サブエージェント")).toHaveText(/^サブエージェント\s*on/);
   await expect(item("サブエージェント")).toContainText("保存値 multi");
+  await expect(item("Jev 行動選択")).toContainText("Anthropic のモデルでは使いません。");
   await expect(unused("g-effort")).toBeVisible();
   await expect(unused("g-mode")).toBeVisible();
+  await expect(unused("g-jev-task")).toBeVisible();
+  // A plain "on" or "off" is what runs, so nothing is marked as unused.
+  custom = { selection: { provider: "anthropic", model: "claude-opus-5-5", effort: "high" }, effort: "high", subagent_enabled: true };
+  await page.reload();
+  await expect(item("サブエージェント")).toHaveText(/^サブエージェント\s*on$/);
+  await expect(unused("g-mode")).toHaveCount(0);
+  custom = { ...custom, subagent_enabled: false };
+  await page.reload();
+  await expect(item("サブエージェント")).toHaveText(/^サブエージェント\s*off$/);
+  custom = { selection: { provider: "anthropic", model: "auto", effort: "high" }, effort: "high", ultra_mode: true, multi_agent: true };
+  await page.reload();
   // The controls stay usable: the saved value applies again under another provider.
   await expect(page.getByRole("combobox", { name: "effort", exact: true })).toBeEnabled();
 

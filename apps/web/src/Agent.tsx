@@ -13,8 +13,8 @@ import {
 import {
   AUTO_ROUTE_FALLBACK,
   REASONING_EFFORTS,
+  agentToolOnly,
   isAutoRoute,
-  subagentsUnsupported,
 } from "@hibana/shared/catalog";
 import { useState } from "react";
 import type { Catalog } from "./api";
@@ -51,15 +51,18 @@ function interplay(s: OverlaySettings) {
     !!selection?.provider &&
     !!selection.model &&
     isAutoRoute({ provider: selection.provider, model: selection.model });
-  // Anthropic のターンはサブエージェントなしで動く。保存値は残り、他のプロバイダで使われる。
-  const noSubagents = subagentsUnsupported(selection?.provider);
+  // Anthropic のターンは Claude 向けのハーネスで動き、委譲は Agent ツールだけ（#68）。
+  // モードは off か on で、保存値の ultra / multi は on として動く。保存値は残り、他のプロバイダで使われる。
+  const agentTool = agentToolOnly(selection?.provider);
   const mode = subagentMode(s);
   return {
     auto,
-    noSubagents,
+    agentTool,
     mode,
-    ultraActive: mode === "ultra" && !noSubagents,
-    multiActive: mode === "multi" && !noSubagents,
+    // Anthropic で「on として動く」保存値。
+    reduced: agentTool && (mode === "ultra" || mode === "multi"),
+    ultraActive: mode === "ultra" && !agentTool,
+    multiActive: mode === "multi" && !agentTool,
   };
 }
 
@@ -69,7 +72,7 @@ function interplay(s: OverlaySettings) {
  * bot の環境変数や接続の状態までは分からないので、見出しの説明でそう断る。
  */
 export function guildEffective(s: OverlaySettings): EffectiveItem[] {
-  const { auto, noSubagents, mode, ultraActive, multiActive } = interplay(s);
+  const { auto, agentTool, reduced, mode, ultraActive, multiActive } = interplay(s);
   const selection = s.selection;
   const savedEffort = s.effort ?? selection?.effort ?? "max";
   const jev = s.jev_enabled === true;
@@ -119,15 +122,14 @@ export function guildEffective(s: OverlaySettings): EffectiveItem[] {
     items.push({ label: "effort", value: savedEffort });
   }
 
-  if (noSubagents) {
+  if (agentTool) {
     items.push({
       label: "サブエージェント",
-      value: "off",
-      note:
-        mode === "off"
-          ? "Anthropic のモデルでは常に off。"
-          : `Anthropic のモデルでは常に off。保存値 ${mode} は他のモデルに切り替えると使われます。`,
-      unused: mode !== "off",
+      value: mode === "off" ? "off" : "on",
+      note: reduced
+        ? `Anthropic のモデルでは on として動きます。保存値 ${mode} は他のモデルに切り替えると使われます。`
+        : undefined,
+      unused: reduced,
     });
   } else {
     items.push({
@@ -138,7 +140,14 @@ export function guildEffective(s: OverlaySettings): EffectiveItem[] {
   }
 
   items.push({ label: "Jev 判定", value: onOff(s.jev_enabled) });
-  if (multiActive && s.jev_task_enabled === true) {
+  if (agentTool && s.jev_task_enabled === true) {
+    items.push({
+      label: "Jev 行動選択",
+      value: "使わない",
+      note: "Anthropic のモデルでは使いません。保存値は ON。",
+      unused: true,
+    });
+  } else if (multiActive && s.jev_task_enabled === true) {
     items.push({
       label: "Jev 行動選択",
       value: "使わない",
@@ -164,8 +173,10 @@ const ROLE_META: Record<MultiAgentRole, { label: string; body: string }> = {
   reviewer: { label: "検証", body: "回答案や成果物を独立に確認します。納品前のレビューも担当します。" },
 };
 
-const ANTHROPIC_NO_SUBAGENTS =
-  "Anthropic のモデル（Auto を含む）ではサブエージェントは常に off で動き、この設定は他のモデルに切り替えると使われます。";
+const ANTHROPIC_AGENT_TOOL =
+  "Anthropic のモデル（Auto を含む）では off と on だけが効き、ultra / multi は on として動きます。保存した値は他のモデルに切り替えると使われます。";
+const ANTHROPIC_NO_JEV_TASK =
+  "Anthropic のモデル（Auto を含む）では、保存した値を保ったまま実行しません。";
 const EFFORT_UNDER_ULTRA =
   "サブエージェントが ultra（Ultracode）の間は xhigh で動き、この値は ultra を外すと使われます。";
 const EFFORT_UNDER_AUTO =
@@ -215,7 +226,7 @@ export function AgentSections({
   // as selected via provider+model, they just cannot newly pick it.
   const pickable = c.presets.filter((p) => p.published !== false);
   const current = c.presets.find((p) => matchesSelection(p, s.selection)) ?? null;
-  const { auto, noSubagents, ultraActive, multiActive } = interplay(s);
+  const { auto, agentTool, reduced, ultraActive, multiActive } = interplay(s);
 
   // All three switches null is デフォルト. subagentMode() would otherwise
   // read that as "on", because a missing Ultra flag is not Ultra.
@@ -441,14 +452,14 @@ export function AgentSections({
       <Section
         id="agents"
         title="サブエージェント"
-        desc={`変更は次のメッセージから反映され、処理中の応答には適用されません。${inherit && noSubagents ? ` ${ANTHROPIC_NO_SUBAGENTS}` : ""}`}
+        desc={`変更は次のメッセージから反映され、処理中の応答には適用されません。${inherit && agentTool ? ` ${ANTHROPIC_AGENT_TOOL}` : ""}`}
       >
         <div className="rows">
           <Row
             k={`${px}-mode`}
             name="モード"
             block
-            unused={!inherit && noSubagents && mode !== "off" ? ANTHROPIC_NO_SUBAGENTS : undefined}
+            unused={!inherit && reduced ? ANTHROPIC_AGENT_TOOL : undefined}
             overridden={inherit && !modeDefault}
           >
             <div className={`modes${inherit ? " has-default" : ""}`} role="radiogroup" aria-label="サブエージェント">
@@ -724,7 +735,11 @@ export function AgentSections({
             name="Jev 行動選択モード"
             inline
             hint={`親が操作候補を用意し、Jev が各操作を選んで実行します。Jev 判定とは独立しています。${jevMulti ? JEV_TASK_UNDER_MULTI : "既定は OFF です。"}${serverDefault}`}
-            unused={!inherit && multiActive && s.jev_task_enabled === true ? "multi の間は、保存した値を保ったまま実行しません。" : undefined}
+            unused={
+              inherit || s.jev_task_enabled !== true ? undefined
+                : agentTool ? ANTHROPIC_NO_JEV_TASK
+                : multiActive ? "multi の間は、保存した値を保ったまま実行しません。" : undefined
+            }
             overridden={inherit && s.jev_task_enabled != null}
           >
             {(nameId) => (

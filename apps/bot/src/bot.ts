@@ -25,6 +25,7 @@ import { Voice } from "./voice";
 import { commands, handleCommand } from "./commands";
 import { imagePrompt, shouldRespond, splitMessage } from "./triggers";
 import { assemblePrompt } from "./harness";
+import { DeprecationNotices } from "./deprecation";
 import { ClaudeCompaction, userMessage } from "./claude/context";
 import { stripThinking } from "./claude/progress";
 import { claudeSystem, contextBlock, contextMessage } from "./claude/prompt";
@@ -94,6 +95,8 @@ export class Hibana {
   readonly agent: Agent;
   readonly history: History;
   private compaction: ClaudeCompaction;
+  /** Tells a server or person once that their chosen provider is deprecated (#67). */
+  readonly deprecation: DeprecationNotices;
   /** History and auto routes on disk, so a restart keeps them (#59). */
   readonly conversations: ConversationStore;
   readonly usage: UsageLedger;
@@ -127,6 +130,7 @@ export class Hibana {
       partials: [Partials.Channel],
     });
     this.runtime = new Runtime(config);
+    this.deprecation = new DeprecationNotices(this.runtime, (e) => this.report(e));
     this.usage = new UsageLedger(
       join(config.dataDir, "anthropic_usage.json"),
       undefined,
@@ -537,6 +541,9 @@ export class Hibana {
       }
     };
     ctx.notify = send;
+    // Its own message, never part of the conversation sent to the model, so
+    // the deprecated providers' requests stay as they are. Never throws.
+    await this.deprecation.announce(ctx.guildId, ctx.userId, send);
     const suppressEmbeds = this.runtime.resolve(ctx.guildId, ctx.userId)
       .suppress_embeds
       ? 4
@@ -906,6 +913,7 @@ export class Hibana {
     await Promise.allSettled([...this.tasks]);
     await this.runtime.persist();
     await this.usage.flush();
+    await this.deprecation.flush();
     this.conversations.close();
     this.client.destroy();
   }

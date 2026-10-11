@@ -95,7 +95,7 @@ stateDiagram-v2
 |---|---|---|
 | モデルが Anthropic / Auto で、Jev 判定が ON | モデルは「Jev が会話ごとに選ぶ」、effort は「Jev が決める」 | [Anthropic の auto routing](jev.md#anthropic-の-auto-routing) |
 | モデルが Anthropic / Auto で、Jev 判定が OFF | `AUTO_ROUTE_FALLBACK` のモデルと effort | 同上（「Jev が使えないとき」） |
-| モデルが Anthropic（Auto と固定の 3 モデル） | サブエージェントは off | 同上（「サブエージェントは off です」） |
+| モデルが Anthropic（Auto と固定の 3 モデル） | サブエージェントは off か on。保存値の ultra / multi は on。Jev 行動選択は「使わない」 | [ハーネス](harness.md#サブエージェント)（#68）。bot を `ANTHROPIC_HARNESS=codex` で従来のハーネスに戻している間は、実際には off で動きます（画面からは分かりません） |
 | サブエージェントが ultra（Anthropic 以外） | effort は xhigh | [Ultracode](ultracode.md) |
 | サブエージェントが multi（Anthropic 以外）で、Jev 行動選択モードが ON | Jev 行動選択は「使わない」 | [Jev 判定と行動選択モード](jev.md) |
 

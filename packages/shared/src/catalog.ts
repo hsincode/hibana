@@ -281,8 +281,18 @@ export const AUTO_ROUTE_REQUEST_ONLY = [
 /** Used whenever Jev cannot classify the request. */
 export const AUTO_ROUTE_FALLBACK = { model: "claude-haiku-5-5", effort: "high" } as const;
 
-/** Anthropic turns, auto included, run without subagents (#35). */
+/** On the Codex-style harness, Anthropic turns (auto included) run without
+ *  subagents (#35). That harness serves Anthropic only when the bot is set
+ *  back to it (`ANTHROPIC_HARNESS=codex`); see `agentToolOnly` for the default. */
 export function subagentsUnsupported(provider: string | undefined): boolean {
+  return provider === AUTO_ROUTE_PROVIDER;
+}
+
+/** Anthropic turns run on the Claude harness, which delegates through its own
+ *  Agent tool (#68): there the stored mode is off or on, and a stored Ultra or
+ *  Multi-Agent choice counts as on. Jev's action-selection mode is not used
+ *  either. The dashboard says so with this; the bot decides in `resolve`. */
+export function agentToolOnly(provider: string | undefined): boolean {
   return provider === AUTO_ROUTE_PROVIDER;
 }
 

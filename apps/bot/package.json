@@ -9,7 +9,8 @@
     "typecheck": "bun check",
     "test": "bun test src",
     "route-eval": "bun src/route-eval.ts",
-    "claude-smoke": "bun src/claude/smoke.ts"
+    "claude-smoke": "bun src/claude/smoke.ts",
+    "harness-eval": "bun src/harness-eval.ts"
   },
   "dependencies": {
     "@hibana/shared": "workspace:*",

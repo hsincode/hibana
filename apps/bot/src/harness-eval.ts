@@ -490,8 +490,11 @@ async function run() {
   const image = o.image ?? loadConfig({ PROVIDER: "anthropic", ANTHROPIC_API_KEY: "-", LOG_DIR: "", RUNTIME_STATE_PATH: "" }).sandboxImage;
   await appendFile(join(dir, "meta.jsonl"), JSON.stringify({
     ...stamp,
-    // Anything uncommitted anywhere: the price table and the harness are outside apps/bot.
-    dirty: (await Bun.$`git status --porcelain`.text()).trim() !== "",
+    // A change to any tracked file, anywhere: the price table and the harness
+    // are outside apps/bot. Untracked files are counted apart; a scratch
+    // directory is not a change to the code that ran.
+    dirty: (await Bun.$`git status --porcelain --untracked-files=no`.text()).trim() !== "",
+    untracked: (await Bun.$`git status --porcelain`.text()).split("\n").filter((line) => line.startsWith("??")).length,
     bun: Bun.version, platform: `${process.platform} ${process.arch}`,
     prices: ANTHROPIC_PRICES, ...o, fake: Boolean(o.fake),
     image, image_id: (await Bun.$`docker image inspect ${image} --format {{.Id}}`.nothrow().quiet().text()).trim() || null,

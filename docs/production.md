@@ -228,4 +228,4 @@ Anthropic 公式 API（`provider: anthropic`）のターンは、Claude 向け�
   - `Conversation summarized`（`method` が `api` なら API の要約、`prompt` なら会話の中で頼んだ要約）と、失敗時の `Conversation summary by the API failed`
   - `Subagent completed` / `Subagent failed`
 - 画像をデータとして会話に保存するので、`conversations.db` は以前より大きくなります（大きさは実測していません）
-- 実 API での確認は、手元から Haiku 5.5 で行った手動のスクリプトだけです（2026-10-11、`docs/harness.md` の「実 API での確認」）。未確認: Opus 5.5 / Sonnet 5.5 での動作、本番でのキャッシュの効き、要約とサブエージェントの費用
+- 実 API での確認は、手元から Haiku 5.5 で行った手動のスクリプトだけです（2026-10-11、`docs/harness.md` の「実 API での確認」）。Opus 5.5 / Sonnet 5.5 には、新旧の比較（#69）で会話だけのターンを送りました。未確認: この 2 つのモデルでツールを呼ぶターン、本番でのキャッシュの効き、要約とサブエージェントの費用

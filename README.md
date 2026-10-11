@@ -13,7 +13,7 @@ Advisor、旧来の自動モデルRouter、品質検証（verify）、速度優�
 
 ハーネス（システムプロンプト・ツール・ループ）は 2 つあります。Anthropic 公式 API のターンは、Claude Code の設計に寄せた Claude 向けのハーネスで動きます。それ以外のプロバイダーは非推奨で、従来の Codex 型のハーネスのまま変えずに残しています。bot の環境変数 `ANTHROPIC_HARNESS=codex` で、Anthropic も従来のハーネスに戻せます（判断記録 #66・#67・#68、[docs/harness.md](docs/harness.md)）。Claude 向けのハーネスは、実際の API での確認と前後の比較（#69）がまだです。
 
-これとは別に、プロバイダー「Anthropic Workspace」（`anthropic_workspace`）のターンは、Claude Managed Agents のセッションで動きます。ループ・会話・作業領域（チャンネルごとのクラウドのコンテナ）は Anthropic 側にあり、Hibana はプロンプトと、Discord・設定のツールを渡します。モデルは Anthropic と同じ 3 つ（Auto は無し）で、Haiku 5.5 で ultra を選んだときだけ、公式 API の dynamic workflows を使います（Haiku Ultra）。専用の鍵 `ANTHROPIC_WORKSPACE_API_KEY` が要り、プリセットは最初は非公開です。1 ターン・1 日・月の金額、1 ターンの時間、同時ターン数に上限があります（既定値は AI の案で、本人未確認）。`/clear` は、会話に加えてクラウドの作業ファイルも消します。**実際の API では、まだ 1 回も動かしていません**（判断記録 #76、[ADR-0011](docs/adr/0011-add-anthropic-workspace-provider.md)、[docs/harness.md](docs/harness.md)）。
+これとは別に、プロバイダー「Anthropic Workspace」（`anthropic_workspace`）のターンは、Claude Managed Agents のセッションで動きます。ループ・会話・作業領域（チャンネルごとのクラウドのコンテナ）は Anthropic 側にあり、Hibana はプロンプトと、Discord・設定のツールを渡します。モデルは Anthropic と同じ 3 つ（Auto は無し）で、Haiku 5.5 で ultra を選んだときだけ、公式 API の dynamic workflows を使います（Haiku Ultra）。専用の鍵 `ANTHROPIC_WORKSPACE_API_KEY` が要り、プリセットは最初は非公開です（公開は Web の `/models` から。`WEB_API_URL` を空にした bot だけの構成では公開できず、使えるのは `PROVIDER=anthropic_workspace` を既定にしたときだけです）。1 ターン・1 日・月の金額、1 ターンの時間、同時ターン数に上限があります（既定値は AI の案で、本人未確認）。`/clear` は、会話に加えてクラウドの作業ファイルも消します（workflow run が開いたままのセッションは、削除が拒否されて残ることがあります）。**実際の API では、まだ 1 回も動かしていません**（判断記録 #76、[ADR-0011](docs/adr/0011-add-anthropic-workspace-provider.md)、[docs/harness.md](docs/harness.md)）。
 
 ## 開発
 

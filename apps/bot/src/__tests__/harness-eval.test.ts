@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { anthropicCost } from "@hibana/shared/catalog";
-import { amount, blind, dryReply, earlierTurns, exclusion, replay, replayPrompt, reviewPage, select, summarize, totals, type ArmResult, type Case } from "../harness-eval";
+import { amount, blind, dryReply, earlierTurns, exclusion, replay, replayPrompt, reviewPage, select, summarize, totals, warmUp, type ArmResult, type Case } from "../harness-eval";
 import type { RequestRecord } from "../llm";
 
 // The comparison itself calls the real API and is run by hand (#69). These
@@ -161,6 +161,50 @@ describe("blinding and the summary", () => {
     expect(summarize(results).quality).toBeUndefined();
     expect(summarize(results, { key, verdicts: { a: "right", b: "same" } }).quality)
       .toEqual({ claude: 0, codex: 1, same: 1, skipped: 0, unjudged: 1 });
+  });
+});
+
+describe("measuring warm, and the owner's criteria", () => {
+  test("the warm-up is the same harness, model, effort and channel kind, with nothing of the case's text", () => {
+    const c = turn({ model: "claude-opus-5-5", effort: "medium", scope: "dm", history: [{ role: "user", content: "秘密の前置き" }], tools: ["shell_command"] });
+    const warm = warmUp(c);
+    expect(warm).toMatchObject({ model: "claude-opus-5-5", effort: "medium", scope: "dm", history: [], tools: [], reply: null });
+    expect(JSON.stringify(warm)).not.toContain("秘密");
+    expect(JSON.stringify(warm)).not.toContain("こんにちは");
+    expect(warm.id).not.toBe(c.id);
+  });
+
+  test("reports the size of the part every conversation shares, and what writing it cold costs", () => {
+    const warmups = [
+      result({ case: "warm-a", arm: "codex", model: "claude-sonnet-5-5", requests: 1, input: 37_000 }),
+      result({ case: "warm-a", arm: "claude", model: "claude-sonnet-5-5", requests: 1, input: 16_000 }),
+      // A warm-up that failed, or took more than one request, says nothing about the size.
+      result({ case: "warm-b", arm: "claude", model: "claude-opus-5-5", requests: 1, input: 99, error: "boom" }),
+      result({ case: "warm-c", arm: "claude", model: "claude-haiku-5-5", requests: 2, input: 30_000 }),
+    ];
+    const out = summarize([result({ case: "a", arm: "codex" }), result({ case: "a", arm: "claude" })], undefined, warmups);
+    // Sonnet 5.5 writes a 1-hour cache entry at $4 per million tokens.
+    expect(out.codex.shared_prefix).toEqual({ "claude-sonnet-5-5": { tokens: 37_000, cold_write_cost: 0.148 } });
+    expect(out.claude.shared_prefix).toEqual({ "claude-sonnet-5-5": { tokens: 16_000, cold_write_cost: 0.064 } });
+  });
+
+  test("checks the three criteria the owner set, and not before every pair is judged", () => {
+    const pair = (id: string, codex: Partial<ArmResult>, claude: Partial<ArmResult>) => [result({ case: id, arm: "codex", ...codex }), result({ case: id, arm: "claude", ...claude })];
+    const key = ["a", "b", "c"].map((id) => ({ id, left: "claude" as const }));
+    const results = [
+      ...pair("a", { ms: 10_000, cost: 0.010 }, { ms: 11_000, cost: 0.011 }),
+      ...pair("b", { ms: 10_000, cost: 0.010 }, { ms: 12_000, cost: 0.012 }),
+      ...pair("c", { ms: 10_000, cost: 0.010 }, { ms: 30_000, cost: 0.005 }),
+    ];
+    // Medians of new ÷ old: time 1.2, cost 1.1. One better, one same, one worse.
+    expect(summarize(results, { key, verdicts: { a: "left", b: "same", c: "right" } }).criteria)
+      .toEqual({ quality: true, cost: true, time: true, failures: true });
+    expect(summarize(results, { key, verdicts: { a: "right", b: "right", c: "left" } }).criteria!.quality).toBe(false);
+    expect(summarize(results, { key, verdicts: { a: "left", b: "same" } }).criteria!.quality).toBeNull();
+    const slower = [...pair("a", { ms: 10_000 }, { ms: 13_000 }), ...pair("b", { ms: 10_000 }, { ms: 12_500 }), ...pair("c", { ms: 10_000 }, { ms: 9_000 })];
+    expect(summarize(slower, { key, verdicts: { a: "same", b: "same", c: "same" } }).criteria).toMatchObject({ time: false, cost: true });
+    const failing = [...pair("a", {}, { error: "boom", reply: "" }), ...pair("b", {}, {})];
+    expect(summarize(failing, { key, verdicts: { a: "skip", b: "same", c: "same" } }).criteria!.failures).toBe(false);
   });
 });
 

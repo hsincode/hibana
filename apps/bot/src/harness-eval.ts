@@ -7,7 +7,11 @@
 // (`export-conversations.ts`). `run` replays each selected one twice, once per
 // harness, on Anthropic's API with the model and effort the production turn
 // used. The conversation before it is given to both as text: what was asked
-// and answered, without the tool calls in between. The LLM, the Docker sandbox and Anthropic's web tools are real, so
+// and answered, without the tool calls in between.
+// Before each measured turn a short turn on the same harness and model puts
+// the part every conversation shares (system prompt, tool definitions) into
+// Anthropic's cache, so every case is measured warm; what a cold start costs
+// is reported from those warm-ups (#69, the owner's decision). The LLM, the Docker sandbox and Anthropic's web tools are real, so
 // it is billed and is not part of `make ci`. Discord, settings, publishing and
 // every other integration answer with one fixed error in both arms, and a
 // question to the user is answered with "nobody is here".
@@ -191,11 +195,15 @@ const quantile = (values: number[], q: number) => {
 };
 const mean = (values: number[]) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : null);
 
+/** The owner's acceptance criteria (#69, 2026-10-11), decided before the run. */
+export const LIMIT = 1.2;
+
 /** Time and cost are compared over the cases both arms finished; a failure is
  *  counted and left out of them, so one arm failing fast does not look fast. */
 export function summarize(
   results: ArmResult[],
   review?: { key: { id: string; left: Arm }[]; verdicts: Record<string, Verdict> },
+  warmups: ArmResult[] = [],
 ) {
   const by = new Map<string, Partial<Record<Arm, ArmResult>>>();
   for (const r of results) by.set(r.case, { ...by.get(r.case), [r.arm]: r });
@@ -203,11 +211,19 @@ export function summarize(
   const both = pairs.filter((p) => !p.codex.error && !p.claude.error);
   const arm = (name: Arm) => {
     const done = both.map((p) => p[name]);
+    // A warm-up is one request made of the shared part and a few words, so its
+    // input is the size of that part; written cold, it is billed at the write price.
+    const shared: Record<string, { tokens: number; cold_write_cost: number | null }> = {};
+    for (const w of warmups.filter((w) => w.arm === name && !w.error && w.requests === 1)) {
+      const price = ANTHROPIC_PRICES[w.model];
+      shared[w.model] = { tokens: w.input, cold_write_cost: price ? (w.input * price.cache_write_1h) / 1_000_000 : null };
+    }
     return {
       failed: pairs.filter((p) => p[name].error).length,
       seconds: { median: quantile(done.map((r) => r.ms / 1000), 0.5), mean: mean(done.map((r) => r.ms / 1000)), p90: quantile(done.map((r) => r.ms / 1000), 0.9) },
       cost: { total: done.reduce((t, r) => t + r.cost, 0), mean: mean(done.map((r) => r.cost)), median: quantile(done.map((r) => r.cost), 0.5) },
       requests: mean(done.map((r) => r.requests)), searches: done.reduce((t, r) => t + r.searches, 0),
+      shared_prefix: shared,
     };
   };
   const quality = review && { claude: 0, codex: 0, same: 0, skipped: 0, unjudged: 0 };
@@ -218,17 +234,26 @@ export function summarize(
     else if (verdict === "same") quality!.same++;
     else quality![verdict === "left" ? left : left === "claude" ? "codex" : "claude"]++;
   }
+  const codex = arm("codex"), claude = arm("claude");
+  // Per case, claude ÷ codex: below 1 means the Claude harness was faster or cheaper.
+  const ratio = {
+    seconds_median: quantile(both.map((p) => p.claude.ms / p.codex.ms), 0.5),
+    cost_median: quantile(both.filter((p) => p.codex.cost > 0).map((p) => p.claude.cost / p.codex.cost), 0.5),
+    claude_faster: both.filter((p) => p.claude.ms < p.codex.ms).length,
+    claude_cheaper: both.filter((p) => p.claude.cost < p.codex.cost).length,
+  };
   return {
-    pairs: pairs.length, both_finished: both.length,
-    codex: arm("codex"), claude: arm("claude"),
-    // Per case, claude ÷ codex: below 1 means the Claude harness was faster or cheaper.
-    ratio: {
-      seconds_median: quantile(both.map((p) => p.claude.ms / p.codex.ms), 0.5),
-      cost_median: quantile(both.filter((p) => p.codex.cost > 0).map((p) => p.claude.cost / p.codex.cost), 0.5),
-      claude_faster: both.filter((p) => p.claude.ms < p.codex.ms).length,
-      claude_cheaper: both.filter((p) => p.claude.cost < p.codex.cost).length,
-    },
-    ...(quality && { quality }),
+    pairs: pairs.length, both_finished: both.length, codex, claude, ratio,
+    ...(quality && {
+      quality,
+      criteria: {
+        // Judged only once every pair has a verdict.
+        quality: quality.unjudged ? null : quality.claude + quality.same >= quality.codex,
+        cost: ratio.cost_median === null ? null : ratio.cost_median <= LIMIT,
+        time: ratio.seconds_median === null ? null : ratio.seconds_median <= LIMIT,
+        failures: claude.failed <= codex.failed,
+      },
+    }),
   };
 }
 
@@ -241,6 +266,13 @@ export function earlierTurns(history: Case["history"]): Message[][] {
   }
   return turns;
 }
+
+/** The turn sent before a measured one: same harness, model, effort and kind
+ *  of channel, so its request starts with the same bytes, and nothing else. */
+export const warmUp = (c: Case): Case => ({
+  ...c, id: `warm-${c.id}`, history: [], summarized: false, trimmed: false, earlier_tools: false,
+  prompt: "Reply with the single word: ok", extra_messages: 0, reply: null, tools: [], production: null,
+});
 
 export type ReplayOptions = {
   image?: string; perArm: number; minutes: number;
@@ -423,6 +455,7 @@ async function run() {
     seed: amount("seed", value("seed"), 1), limit: amount("limit", value("limit")),
     perModel: amount("per-model", value("per-model")), ids: value("ids")?.split(","), budget: amount("budget", value("budget"), 5),
     image: value("image"), perArm: amount("per-turn", value("per-turn"), 2), minutes: amount("minutes", value("minutes"), 15),
+    warm: !has("no-warm"),
     ...(dry && { fake: dryReply }),
   };
   if (!o.fake && !process.env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY is required");
@@ -467,6 +500,14 @@ async function run() {
       return;
     }
     for (const arm of todo) {
+      if (o.warm) {
+        const warmed = await replay(warmUp(c), arm, false, o);
+        // Measuring after a warm-up that did not happen would be a cold turn in disguise.
+        if (warmed.error) throw new Error(`The warm-up before case ${c.id} (${arm}) failed: ${warmed.error}`);
+        await appendFile(join(dir, "warmups.jsonl"), JSON.stringify({ ...warmed, reply: "", ...stamp }) + "\n", { mode: 0o600 });
+        spent += warmed.cost;
+        console.log(`  warm-up ${arm.padEnd(6)} ${warmed.model} ${usd(warmed.cost)} input ${warmed.input} (read ${warmed.cache_read}, written ${warmed.cache_write})`);
+      }
       const result = await replay(c, arm, arm === order[0], { ...o, files: join(dir, "files") });
       // Nothing was measured: stop instead of recording a failure of the harness.
       if (result.setup_failed) throw new Error(`Could not start the replay: ${result.error}`);
@@ -474,12 +515,13 @@ async function run() {
       spent += result.cost;
       const used = Object.entries(result.tools).map(([tool, count]) => `${tool}×${count}`).join(" ");
       console.log(`case ${c.id} (${c.history.length} earlier) ${arm.padEnd(6)} ${result.model} ${result.effort ?? "-"} ${(result.ms / 1000).toFixed(1)}s ${usd(result.cost)} ${result.requests} requests` +
+        ` input ${result.input} (read ${result.cache_read}, written ${result.cache_write}) output ${result.output}` +
         `${result.searches ? ` ${result.searches} searches` : ""}${used ? ` [${used}]` : ""}${result.blocked.length ? ` blocked:${result.blocked.length}` : ""}` +
         `${result.files.length ? ` files:${result.files.length}` : ""}${result.retries ? ` retries:${result.retries}` : ""}${result.rejected.length ? ` rejected:${result.rejected.join(",")}` : ""}` +
         `${result.asked ? " asked" : ""}${result.error ? ` FAILED (${result.error.slice(0, 80)})` : ""}`);
     }
   }
-  console.log(`Done: ${usd(spent)} in total for run "${name}" (web searches are billed separately)`);
+  console.log(`Done: ${usd(spent)} in total for run "${name}", warm-ups included (web searches are billed separately)`);
 }
 
 type Deal = { id: string; pairs: { id: string; left: Arm }[] };
@@ -630,7 +672,7 @@ async function summary(name: string, verdictFile?: string) {
   const deal = JSON.parse(await readFile(join(dir, "key.json"), "utf8").catch(() => "null")) as Deal | null;
   const judged = JSON.parse(await readFile(verdictFile ?? join(dir, "verdicts.json"), "utf8").catch(() => "null")) as { deal?: string; verdicts: Record<string, Verdict> } | null;
   if (deal && judged && judged.deal !== deal.id) throw new Error("These verdicts were given on a page dealt differently from key.json; their left and right cannot be mapped");
-  const out = summarize(results, deal && judged ? { key: deal.pairs, verdicts: judged.verdicts } : undefined);
+  const out = summarize(results, deal && judged ? { key: deal.pairs, verdicts: judged.verdicts } : undefined, await lines<ArmResult>(join(dir, "warmups.jsonl")));
   await writeFile(join(dir, "summary.json"), JSON.stringify(out, null, 1));
   console.log(JSON.stringify(out, null, 1));
 }

@@ -583,6 +583,9 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
             name: g.name,
             icon: g.icon,
             preset: row.selection?.model ?? null,
+            // The model alone no longer names the provider: Anthropic
+            // Workspace offers the models `anthropic` has (#76).
+            provider: row.selection?.provider ?? null,
             bot_disabled: row.bot_disabled,
             member: mineIds.has(g.id),
           };

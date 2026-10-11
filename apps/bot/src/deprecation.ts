@@ -9,6 +9,10 @@ import type { Runtime } from "./runtime";
  * docs/adr/0010). Those providers keep running as they do today. What this
  * file adds is the two things users see: a new choice of one is refused, and
  * whoever is on one by their own choice is told once.
+ *
+ * `anthropic_workspace` is Anthropic's own API as well and is not deprecated
+ * (#76). `deprecatedProvider` in the shared catalog draws that line; nothing
+ * in this file names a provider.
  */
 
 type Chosen = { provider: string; model: string };
@@ -18,7 +22,8 @@ const label = (selection: Chosen) =>
   `${selection.provider} / ${selection.model}`;
 
 /** The presets this user can move to, as Discord inline code. Empty for a
- *  user without the plan, or while the bot has no Anthropic key. */
+ *  user without the plan, or while the bot has no Anthropic key. Once the
+ *  Anthropic Workspace presets are published and keyed, they are listed too. */
 const offered = (runtime: Runtime, userId: string) =>
   runtime.selectablePresets(userId).map((p) => `\`${p.id}\``).join(", ");
 

@@ -11,6 +11,7 @@ import {
 import {
   applyPatch,
   applyUserOverridePatch,
+  effectiveSubagentMode,
   normalizeGuild,
   normalizeUserOverride,
   patchPresetIds,
@@ -24,7 +25,7 @@ import {
 } from "@hibana/shared/settings";
 import type { Config, Selection } from "./config";
 import { atomicJson, readJson, Serial } from "./io";
-import { ultracodeActive } from "./ultracode";
+import { ultracodeActive, workflowsEnabled } from "./ultracode";
 import { harnessFor } from "./claude/select";
 export type Snapshot = {
   chatgpt_available?: boolean;
@@ -176,7 +177,8 @@ export class Runtime {
     return this.canSelect(preset, userId) && !deprecatedPreset(preset);
   }
   /** What `selectable` leaves, in catalog order. Empty for a user without the
-   *  plan, or while the bot has no Anthropic key. */
+   *  plan, or while the bot has no Anthropic key. The Anthropic Workspace
+   *  presets (#76) are among them once they are published and keyed. */
   selectablePresets(userId: string) {
     return MODEL_PRESETS.filter((p) => this.selectable(p.id, userId));
   }
@@ -220,16 +222,32 @@ export class Runtime {
     // The Claude harness has one form of delegation, its Agent tool (#68). A
     // stored Ultra or Multi-Agent choice counts as "on" there; neither the
     // Workflow tool nor the collaboration tools are offered.
-    const claude = harnessFor(selection, this.config) === "claude";
-    const multiAgent = !claude && pick(user.multi_agent, guild.multi_agent!);
+    const harness = harnessFor(selection, this.config);
+    const claude = harness === "claude", workspace = harness === "workspace";
+    const storedMulti = pick(user.multi_agent, guild.multi_agent!);
+    const stored = {
+      subagent_enabled: pick(user.subagent_enabled, guild.subagent_enabled!),
+      ultra_mode: storedMulti || pick(user.ultra_mode, guild.ultra_mode!),
+      multi_agent: storedMulti,
+    };
+    const multiAgent = !claude && !workspace && storedMulti;
     const context = user.context ??
       (guildId ? guild.context : this.snapshot.user_contexts[userId || ""] ?? null);
     // The stored switches are kept; they apply again under another provider.
     // On the Codex-style harness an Anthropic turn still runs without
     // subagents (#35), which is what `ANTHROPIC_HARNESS=codex` goes back to.
-    const subagentEnabled = (claude || !subagentsUnsupported(selection.provider)) &&
-      pick(user.subagent_enabled, guild.subagent_enabled!);
-    const ultraMode = !claude && (multiAgent || pick(user.ultra_mode, guild.ultra_mode!));
+    // An Anthropic Workspace session (#76) has none of Hibana's own
+    // delegation, so all three resolve to off there, and `ultracode` with
+    // them: no Agent tool, no Workflow tool, no team, no forced xhigh.
+    const subagentEnabled = !workspace && (claude || !subagentsUnsupported(selection.provider)) &&
+      stored.subagent_enabled;
+    const ultraMode = !claude && !workspace && stored.ultra_mode;
+    // Haiku Ultra: the session is created with Managed Agents' dynamic
+    // workflows. It takes a stored Ultra on Haiku 5.5 and the same process
+    // switches as Hibana's own workflows, so WORKFLOWS_ENABLED=false (or
+    // tools or subagents off) stops it too.
+    const workspaceUltra = workspace && workflowsEnabled(this.config, stored) &&
+      effectiveSubagentMode(stored, selection) === "ultra";
     return {
       ...guild,
       selection: selection as Selection,
@@ -249,6 +267,9 @@ export class Runtime {
       suppress_embeds: guild.suppress_embeds!,
       temperature: guild.temperature!,
       exa_mode: guild.exa_mode!,
+      // Present for Workspace only, so what `/info` and `get_bot_settings`
+      // print for every other provider is what it was.
+      ...(workspace ? { workspace_ultra: workspaceUltra } : {}),
     };
   }
   async patch(guildId: string, raw: unknown, userId: string) {

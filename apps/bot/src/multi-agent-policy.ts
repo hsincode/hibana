@@ -1,6 +1,7 @@
 import {
   EFFORTS,
   MODEL_PRESETS,
+  WORKSPACE_PROVIDER,
   canonicalPresetId,
   isAutoRoute,
 } from "@hibana/shared/catalog";
@@ -109,6 +110,14 @@ export function collaborationValidationSchema(tool: ToolDef): Json {
   return parameters;
 }
 
+/** The presets a child may run on. Anthropic Workspace only runs as a session
+ *  (#76), so its presets are left out wherever a child's model is looked up
+ *  or listed. They carry model names `anthropic` already has: without this,
+ *  `claude-haiku-5-5` by name would stop resolving to one preset, and the
+ *  spawn_agent description and the workflow reference would change once the
+ *  Workspace presets are published. */
+export const childPresets = () => MODEL_PRESETS.filter((p) => p.provider !== WORKSPACE_PROVIDER);
+
 export function selectChild(
   runtime: Runtime,
   ctx: Context,
@@ -133,7 +142,7 @@ export function selectChild(
   let selection = { ...parent };
   if (requested) {
     const id = canonicalPresetId(requested);
-    const matches = MODEL_PRESETS.filter(
+    const matches = childPresets().filter(
       (p) => p.id === id || p.model === requested,
     );
     const preset =
@@ -212,7 +221,7 @@ export function teamTools(runtime: Runtime, ctx: Context): ToolDef[] {
       ? Object.fromEntries(Object.entries(settings.multi_agent_roles).filter(
         ([, p]) => p.model.mode !== "default" || p.effort.mode !== "default"))
       : {};
-    copy.function.description += ` Model policy: ${JSON.stringify(settings.subagent_model)}. Effort policy: ${JSON.stringify(settings.subagent_effort)}.${Object.keys(roleOverrides).length ? ` Per-role overrides (take precedence for that role): ${JSON.stringify(roleOverrides)}.` : ""} Available model presets: ${MODEL_PRESETS.filter(
+    copy.function.description += ` Model policy: ${JSON.stringify(settings.subagent_model)}. Effort policy: ${JSON.stringify(settings.subagent_effort)}.${Object.keys(roleOverrides).length ? ` Per-role overrides (take precedence for that role): ${JSON.stringify(roleOverrides)}.` : ""} Available model presets: ${childPresets().filter(
       (p) => runtime.canSelect(p.id, ctx.userId),
     )
       .map((p) => p.id)

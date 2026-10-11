@@ -6,10 +6,14 @@ import {
   MODEL_PRESETS,
   TRIGGER_EXTRA_MAX,
   TRIGGER_WORD_MAX_CHARS,
+  WORKSPACE_PROVIDER,
+  agentToolOnly,
   canonicalModel,
   canonicalPresetId,
   deprecatedPreset,
+  isChildPresetId,
   isPresetId,
+  ultraSupported,
 } from "./catalog";
 
 const USER_CONTEXT_MAX = 4000;
@@ -24,6 +28,13 @@ export type ServiceTier = z.infer<typeof serviceTierSchema>;
 export const effortSchema = z.enum(EFFORTS);
 export const exaSchema = z.enum(EXA_MODES);
 
+// A subagent or a Multi-Agent role is one of Hibana's own children, which is
+// a single model request. Anthropic Workspace only runs as a Managed Agents
+// session (#76), so its presets are refused here and a saved one is dropped
+// on read. An id the catalog does not know is the first check's to report.
+const childPreset = (raw: string) => !isPresetId(raw) || isChildPresetId(raw);
+const NOT_A_CHILD_PRESET = { message: "Anthropic Workspace presets cannot be a subagent model" };
+
 // Each policy is atomic so a personal "auto" choice can override a guild's
 // fixed value without accidentally retaining that guild's model or effort.
 export const subagentModelSchema = z.discriminatedUnion("mode", [
@@ -35,6 +46,7 @@ export const subagentModelSchema = z.discriminatedUnion("mode", [
       preset: z
         .string()
         .refine(isPresetId, { message: "unknown subagent preset" })
+        .refine(childPreset, NOT_A_CHILD_PRESET)
         .transform(canonicalPresetId),
     })
     .strict(),
@@ -63,6 +75,7 @@ export const roleModelSchema = z.discriminatedUnion("mode", [
       preset: z
         .string()
         .refine(isPresetId, { message: "unknown role preset" })
+        .refine(childPreset, NOT_A_CHILD_PRESET)
         .transform(canonicalPresetId),
     })
     .strict(),
@@ -173,6 +186,8 @@ export const guildPatchSchema = z
     service_tier: serviceTierSchema.nullable(),
     subagent_enabled: z.boolean().nullable(),
     // Ultra is Claude Code's Ultracode in the bot (xhigh + standing workflows).
+    // On Anthropic Workspace it is Managed Agents' dynamic workflows instead,
+    // and only on Haiku 5.5 (#76); see effectiveSubagentMode().
     ultra_mode: z.boolean().nullable(),
     // Multi-Agent (a fixed role team) stores ultra_mode=true too; see subagentMode().
     multi_agent: z.boolean().nullable(),
@@ -322,6 +337,30 @@ export function subagentMode(row: ModeFields): SubagentMode {
   if (row.subagent_enabled === false) return "off";
   if (row.multi_agent) return "multi";
   return row.ultra_mode ? "ultra" : "on";
+}
+
+/**
+ * What the stored mode comes to under the selected provider and model. The
+ * three switches are never rewritten for it, so the stored choice applies
+ * again once another model is selected.
+ * - Anthropic Workspace (#76): Ultra on Haiku 5.5 stays Ultra, which there is
+ *   Managed Agents' dynamic workflows. Every other mode, and every mode on
+ *   another model, runs without delegation.
+ * - An `agentToolOnly` provider (#68): Ultra and Multi-Agent count as on.
+ * - Any other provider, or no selection: the stored mode.
+ * The dashboard shows this; the bot uses it for Workspace only and still
+ * applies its process switches (`workflowsEnabled`) on top.
+ */
+export function effectiveSubagentMode(
+  row: ModeFields,
+  selection: { provider: string; model: string } | null | undefined,
+): SubagentMode {
+  const mode = subagentMode(row);
+  if (!selection) return mode;
+  if (selection.provider === WORKSPACE_PROVIDER)
+    return mode === "ultra" && ultraSupported(selection) ? "ultra" : "off";
+  if (agentToolOnly(selection.provider)) return mode === "off" ? "off" : "on";
+  return mode;
 }
 
 /** PATCH body for one dashboard choice; always writes all three switches. */

@@ -1,0 +1,2408 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`the harness assembles the same prompt and tool surface for every subagent mode 1`] = `
+{
+  "parts": {
+    "#30572ae1feb7": [
+      "shell_command",
+      "apply_patch",
+      "update_plan",
+      "view_image",
+      "web_search",
+      "tool_search",
+      "request_user_input",
+      "mcp__agent__run_jev",
+      "mcp__discord__mcp_list_tools",
+      "mcp__discord__mcp_call_tool",
+      "mcp__settings__set_thread_history",
+      "mcp__settings__get_bot_settings",
+      "mcp__settings__set_bot_model",
+      "mcp__settings__get_user_context",
+      "mcp__settings__set_user_context",
+      "mcp__settings__get_triggers",
+      "mcp__settings__set_triggers",
+      "mcp__settings__get_bot_profile",
+      "mcp__settings__set_bot_username",
+      "mcp__settings__set_bot_avatar",
+      "mcp__workspace__send_file",
+      "mcp__workspace__download_file",
+      "mcp__workspace__download_attachment",
+      "mcp__workspace__video_edit",
+      "mcp__workspace__playwright_cli",
+      "mcp__workspace__download_media",
+      "mcp__workspace__gh_status",
+      "mcp__workspace__gh_login",
+      "mcp__workspace__gh_logout",
+      "mcp__web__web_fetch_exa",
+      "mcp__web__web_search_advanced_exa",
+      "mcp__discord__read_messages",
+      "mcp__discord__get_message",
+      "mcp__discord__search_messages",
+      "mcp__discord__list_pins",
+      "mcp__discord__list_channels",
+      "mcp__discord__get_channel",
+      "mcp__discord__get_guild",
+      "mcp__discord__get_guild_preview",
+      "mcp__discord__list_members",
+      "mcp__discord__search_members",
+      "mcp__discord__get_user",
+      "mcp__discord__get_member",
+      "mcp__settings__get_bot_member",
+      "mcp__discord__list_roles",
+      "mcp__discord__get_role",
+      "mcp__discord__list_emojis",
+      "mcp__discord__list_stickers",
+      "mcp__discord__list_bans",
+      "mcp__discord__get_ban",
+      "mcp__discord__list_invites",
+      "mcp__discord__list_channel_invites",
+      "mcp__discord__list_active_threads",
+      "mcp__discord__list_public_archived_threads",
+      "mcp__discord__list_voice_regions",
+      "mcp__discord__list_webhooks",
+      "mcp__discord__list_guild_webhooks",
+      "mcp__discord__get_audit_log",
+      "mcp__discord__add_reaction",
+      "mcp__discord__remove_reaction",
+      "mcp__discord__send_message",
+      "mcp__discord__edit_message",
+      "mcp__discord__delete_message",
+      "mcp__discord__bulk_delete_messages",
+      "mcp__discord__pin_message",
+      "mcp__discord__unpin_message",
+      "mcp__discord__create_thread",
+      "mcp__discord__create_thread_without_message",
+      "mcp__discord__edit_guild",
+      "mcp__discord__create_emoji",
+      "mcp__discord__delete_emoji",
+      "mcp__discord__create_sticker",
+      "mcp__discord__delete_sticker",
+      "mcp__discord__edit_channel",
+      "mcp__discord__create_channel",
+      "mcp__discord__delete_channel",
+      "mcp__discord__create_role",
+      "mcp__discord__edit_role",
+      "mcp__discord__delete_role",
+      "mcp__discord__add_role",
+      "mcp__discord__remove_role",
+      "mcp__discord__set_nickname",
+      "mcp__discord__timeout_member",
+      "mcp__discord__remove_timeout",
+      "mcp__discord__kick_member",
+      "mcp__discord__ban_member",
+      "mcp__discord__unban_member",
+      "mcp__discord__create_invite",
+      "mcp__discord__delete_invite",
+    ],
+    "#319009d32376": [
+      "shell_command",
+      "apply_patch",
+      "update_plan",
+      "view_image",
+      "tool_search",
+      "request_user_input",
+      "mcp__agent__run_jev",
+      "mcp__discord__mcp_list_tools",
+      "mcp__discord__mcp_call_tool",
+      "mcp__settings__set_thread_history",
+      "mcp__settings__get_bot_settings",
+      "mcp__settings__set_bot_model",
+      "mcp__settings__get_user_context",
+      "mcp__settings__set_user_context",
+      "mcp__settings__get_triggers",
+      "mcp__settings__set_triggers",
+      "mcp__settings__get_bot_profile",
+      "mcp__settings__set_bot_username",
+      "mcp__settings__set_bot_avatar",
+      "mcp__workspace__send_file",
+      "mcp__workspace__download_file",
+      "mcp__workspace__download_attachment",
+      "mcp__workspace__video_edit",
+      "mcp__workspace__playwright_cli",
+      "mcp__workspace__download_media",
+      "mcp__workspace__gh_status",
+      "mcp__workspace__gh_login",
+      "mcp__workspace__gh_logout",
+      "mcp__discord__read_messages",
+      "mcp__discord__get_message",
+      "mcp__discord__search_messages",
+      "mcp__discord__list_pins",
+      "mcp__discord__list_channels",
+      "mcp__discord__get_channel",
+      "mcp__discord__get_guild",
+      "mcp__discord__get_guild_preview",
+      "mcp__discord__list_members",
+      "mcp__discord__search_members",
+      "mcp__discord__get_user",
+      "mcp__discord__get_member",
+      "mcp__settings__get_bot_member",
+      "mcp__discord__list_roles",
+      "mcp__discord__get_role",
+      "mcp__discord__list_emojis",
+      "mcp__discord__list_stickers",
+      "mcp__discord__list_bans",
+      "mcp__discord__get_ban",
+      "mcp__discord__list_invites",
+      "mcp__discord__list_channel_invites",
+      "mcp__discord__list_active_threads",
+      "mcp__discord__list_public_archived_threads",
+      "mcp__discord__list_voice_regions",
+      "mcp__discord__list_webhooks",
+      "mcp__discord__list_guild_webhooks",
+      "mcp__discord__get_audit_log",
+      "mcp__discord__add_reaction",
+      "mcp__discord__remove_reaction",
+      "mcp__discord__send_message",
+      "mcp__discord__edit_message",
+      "mcp__discord__delete_message",
+      "mcp__discord__bulk_delete_messages",
+      "mcp__discord__pin_message",
+      "mcp__discord__unpin_message",
+      "mcp__discord__create_thread",
+      "mcp__discord__create_thread_without_message",
+      "mcp__discord__edit_guild",
+      "mcp__discord__create_emoji",
+      "mcp__discord__delete_emoji",
+      "mcp__discord__create_sticker",
+      "mcp__discord__delete_sticker",
+      "mcp__discord__edit_channel",
+      "mcp__discord__create_channel",
+      "mcp__discord__delete_channel",
+      "mcp__discord__create_role",
+      "mcp__discord__edit_role",
+      "mcp__discord__delete_role",
+      "mcp__discord__add_role",
+      "mcp__discord__remove_role",
+      "mcp__discord__set_nickname",
+      "mcp__discord__timeout_member",
+      "mcp__discord__remove_timeout",
+      "mcp__discord__kick_member",
+      "mcp__discord__ban_member",
+      "mcp__discord__unban_member",
+      "mcp__discord__create_invite",
+      "mcp__discord__delete_invite",
+    ],
+    "#4a2112cc5503": [
+      {
+        "bytes": 20548,
+        "role": "system",
+        "sha256": "fde58be75905436944e421175d2e466d83dfe7168bcaf5549db2a0a1068e6944",
+      },
+      {
+        "bytes": 140,
+        "role": "developer",
+        "sha256": "dafc63e981361ae8357defd26358445e62ffdef98cf161eca2dcd1222e3f38c9",
+      },
+      {
+        "bytes": 996,
+        "role": "developer",
+        "sha256": "2a34addeafeb05e74c5c06960c377ea2948187ba9f79b5448c0416e3d2d7c7c9",
+      },
+      {
+        "bytes": 6563,
+        "role": "user",
+        "sha256": "3b1f963c8a5c70c7649a3a838fa468e832421830fc8e8b0aed39081ba99b9e1c",
+      },
+    ],
+    "#668f2be060b7": [
+      {
+        "bytes": 20548,
+        "role": "system",
+        "sha256": "fde58be75905436944e421175d2e466d83dfe7168bcaf5549db2a0a1068e6944",
+      },
+      {
+        "bytes": 520,
+        "role": "developer",
+        "sha256": "f7e90c3b4fe2212b77dd031adb8240c7e932abed003173f1e458cd2f66c395d8",
+      },
+      {
+        "bytes": 3784,
+        "role": "developer",
+        "sha256": "b878296d6f360544d7d349f37998921976c6134c7414aa98c5dc303034337fdc",
+      },
+      {
+        "bytes": 996,
+        "role": "developer",
+        "sha256": "2a34addeafeb05e74c5c06960c377ea2948187ba9f79b5448c0416e3d2d7c7c9",
+      },
+      {
+        "bytes": 6563,
+        "role": "user",
+        "sha256": "3b1f963c8a5c70c7649a3a838fa468e832421830fc8e8b0aed39081ba99b9e1c",
+      },
+    ],
+    "#80369dd4dc2f": [
+      "shell_command",
+      "apply_patch",
+      "update_plan",
+      "view_image",
+      "web_search",
+      "tool_search",
+      "request_user_input",
+      "mcp__agent__run_jev",
+      "mcp__discord__mcp_list_tools",
+      "mcp__discord__mcp_call_tool",
+      "mcp__settings__set_thread_history",
+      "mcp__settings__get_bot_settings",
+      "mcp__settings__set_bot_model",
+      "mcp__settings__get_user_context",
+      "mcp__settings__set_user_context",
+      "mcp__settings__get_triggers",
+      "mcp__settings__set_triggers",
+      "mcp__settings__get_bot_profile",
+      "mcp__settings__set_bot_username",
+      "mcp__settings__set_bot_avatar",
+      "mcp__workspace__send_file",
+      "mcp__workspace__download_file",
+      "mcp__workspace__download_attachment",
+      "mcp__workspace__video_edit",
+      "mcp__workspace__playwright_cli",
+      "mcp__workspace__download_media",
+      "mcp__workspace__gh_status",
+      "mcp__workspace__gh_login",
+      "mcp__workspace__gh_logout",
+      "mcp__web__web_fetch_exa",
+      "mcp__web__web_search_advanced_exa",
+      "mcp__discord__read_messages",
+      "mcp__discord__get_message",
+      "mcp__discord__search_messages",
+      "mcp__discord__list_pins",
+      "mcp__discord__list_channels",
+      "mcp__discord__get_channel",
+      "mcp__discord__get_guild",
+      "mcp__discord__get_guild_preview",
+      "mcp__discord__list_members",
+      "mcp__discord__search_members",
+      "mcp__discord__get_user",
+      "mcp__discord__get_member",
+      "mcp__settings__get_bot_member",
+      "mcp__discord__list_roles",
+      "mcp__discord__get_role",
+      "mcp__discord__list_emojis",
+      "mcp__discord__list_stickers",
+      "mcp__discord__list_bans",
+      "mcp__discord__get_ban",
+      "mcp__discord__list_invites",
+      "mcp__discord__list_channel_invites",
+      "mcp__discord__list_active_threads",
+      "mcp__discord__list_public_archived_threads",
+      "mcp__discord__list_voice_regions",
+      "mcp__discord__list_webhooks",
+      "mcp__discord__list_guild_webhooks",
+      "mcp__discord__get_audit_log",
+      "mcp__discord__add_reaction",
+      "mcp__discord__remove_reaction",
+      "mcp__discord__send_message",
+      "mcp__discord__edit_message",
+      "mcp__discord__delete_message",
+      "mcp__discord__bulk_delete_messages",
+      "mcp__discord__pin_message",
+      "mcp__discord__unpin_message",
+      "mcp__discord__create_thread",
+      "mcp__discord__create_thread_without_message",
+      "mcp__discord__edit_guild",
+      "mcp__discord__create_emoji",
+      "mcp__discord__delete_emoji",
+      "mcp__discord__create_sticker",
+      "mcp__discord__delete_sticker",
+      "mcp__discord__edit_channel",
+      "mcp__discord__create_channel",
+      "mcp__discord__delete_channel",
+      "mcp__discord__create_role",
+      "mcp__discord__edit_role",
+      "mcp__discord__delete_role",
+      "mcp__discord__add_role",
+      "mcp__discord__remove_role",
+      "mcp__discord__set_nickname",
+      "mcp__discord__timeout_member",
+      "mcp__discord__remove_timeout",
+      "mcp__discord__kick_member",
+      "mcp__discord__ban_member",
+      "mcp__discord__unban_member",
+      "mcp__discord__create_invite",
+      "mcp__discord__delete_invite",
+      "agents__spawn_agent",
+      "agents__send_message",
+      "agents__followup_task",
+      "agents__wait_agent",
+      "agents__interrupt_agent",
+      "agents__list_agents",
+      "Workflow",
+      "TaskStop",
+    ],
+    "#cf9cc1111b58": [
+      {
+        "bytes": 20548,
+        "role": "system",
+        "sha256": "fde58be75905436944e421175d2e466d83dfe7168bcaf5549db2a0a1068e6944",
+      },
+      {
+        "bytes": 271,
+        "role": "developer",
+        "sha256": "6ded806e3cdbb35599ecaf8742574bc5274908472b1729090010c404c2151e8e",
+      },
+      {
+        "bytes": 996,
+        "role": "developer",
+        "sha256": "2a34addeafeb05e74c5c06960c377ea2948187ba9f79b5448c0416e3d2d7c7c9",
+      },
+      {
+        "bytes": 6563,
+        "role": "user",
+        "sha256": "3b1f963c8a5c70c7649a3a838fa468e832421830fc8e8b0aed39081ba99b9e1c",
+      },
+    ],
+    "#d704debfdc37": [
+      "shell_command",
+      "apply_patch",
+      "update_plan",
+      "view_image",
+      "web_search",
+      "tool_search",
+      "request_user_input",
+      "mcp__agent__run_jev",
+      "mcp__discord__mcp_list_tools",
+      "mcp__discord__mcp_call_tool",
+      "mcp__settings__set_thread_history",
+      "mcp__settings__get_bot_settings",
+      "mcp__settings__set_bot_model",
+      "mcp__settings__get_user_context",
+      "mcp__settings__set_user_context",
+      "mcp__settings__get_triggers",
+      "mcp__settings__set_triggers",
+      "mcp__settings__get_bot_profile",
+      "mcp__settings__set_bot_username",
+      "mcp__settings__set_bot_avatar",
+      "mcp__workspace__send_file",
+      "mcp__workspace__download_file",
+      "mcp__workspace__download_attachment",
+      "mcp__workspace__video_edit",
+      "mcp__workspace__playwright_cli",
+      "mcp__workspace__download_media",
+      "mcp__workspace__gh_status",
+      "mcp__workspace__gh_login",
+      "mcp__workspace__gh_logout",
+      "mcp__web__web_fetch_exa",
+      "mcp__web__web_search_advanced_exa",
+      "mcp__discord__read_messages",
+      "mcp__discord__get_message",
+      "mcp__discord__search_messages",
+      "mcp__discord__list_pins",
+      "mcp__discord__list_channels",
+      "mcp__discord__get_channel",
+      "mcp__discord__get_guild",
+      "mcp__discord__get_guild_preview",
+      "mcp__discord__list_members",
+      "mcp__discord__search_members",
+      "mcp__discord__get_user",
+      "mcp__discord__get_member",
+      "mcp__settings__get_bot_member",
+      "mcp__discord__list_roles",
+      "mcp__discord__get_role",
+      "mcp__discord__list_emojis",
+      "mcp__discord__list_stickers",
+      "mcp__discord__list_bans",
+      "mcp__discord__get_ban",
+      "mcp__discord__list_invites",
+      "mcp__discord__list_channel_invites",
+      "mcp__discord__list_active_threads",
+      "mcp__discord__list_public_archived_threads",
+      "mcp__discord__list_voice_regions",
+      "mcp__discord__list_webhooks",
+      "mcp__discord__list_guild_webhooks",
+      "mcp__discord__get_audit_log",
+      "mcp__discord__add_reaction",
+      "mcp__discord__remove_reaction",
+      "mcp__discord__send_message",
+      "mcp__discord__edit_message",
+      "mcp__discord__delete_message",
+      "mcp__discord__bulk_delete_messages",
+      "mcp__discord__pin_message",
+      "mcp__discord__unpin_message",
+      "mcp__discord__create_thread",
+      "mcp__discord__create_thread_without_message",
+      "mcp__discord__edit_guild",
+      "mcp__discord__create_emoji",
+      "mcp__discord__delete_emoji",
+      "mcp__discord__create_sticker",
+      "mcp__discord__delete_sticker",
+      "mcp__discord__edit_channel",
+      "mcp__discord__create_channel",
+      "mcp__discord__delete_channel",
+      "mcp__discord__create_role",
+      "mcp__discord__edit_role",
+      "mcp__discord__delete_role",
+      "mcp__discord__add_role",
+      "mcp__discord__remove_role",
+      "mcp__discord__set_nickname",
+      "mcp__discord__timeout_member",
+      "mcp__discord__remove_timeout",
+      "mcp__discord__kick_member",
+      "mcp__discord__ban_member",
+      "mcp__discord__unban_member",
+      "mcp__discord__create_invite",
+      "mcp__discord__delete_invite",
+      "agents__spawn_agent",
+      "agents__send_message",
+      "agents__followup_task",
+      "agents__wait_agent",
+      "agents__interrupt_agent",
+      "agents__list_agents",
+    ],
+  },
+  "surfaces": {
+    "anthropic multi": {
+      "prompt": "#4a2112cc5503",
+      "tool_names": "#319009d32376",
+      "tools_sha256": "5157e4df1da75b14ef7547c8ba6fb375e6b5e67ce61185edda1f86d8adeff0c0",
+    },
+    "anthropic off": {
+      "prompt": "#4a2112cc5503",
+      "tool_names": "#319009d32376",
+      "tools_sha256": "5157e4df1da75b14ef7547c8ba6fb375e6b5e67ce61185edda1f86d8adeff0c0",
+    },
+    "anthropic on": {
+      "prompt": "#4a2112cc5503",
+      "tool_names": "#319009d32376",
+      "tools_sha256": "5157e4df1da75b14ef7547c8ba6fb375e6b5e67ce61185edda1f86d8adeff0c0",
+    },
+    "anthropic ultra": {
+      "prompt": "#4a2112cc5503",
+      "tool_names": "#319009d32376",
+      "tools_sha256": "5157e4df1da75b14ef7547c8ba6fb375e6b5e67ce61185edda1f86d8adeff0c0",
+    },
+    "claude_max multi": {
+      "prompt": "#668f2be060b7",
+      "tool_names": "#d704debfdc37",
+      "tools_sha256": "72c9d11187f75f5305ab41321deaf3c02b3f0f2c2a10daa5e894c83ecb96d77f",
+    },
+    "claude_max off": {
+      "prompt": "#4a2112cc5503",
+      "tool_names": "#30572ae1feb7",
+      "tools_sha256": "c90da41c04da78e123bdd26b05495bfd83c41fb27ed936208ea8955d08be24e2",
+    },
+    "claude_max on": {
+      "prompt": "#cf9cc1111b58",
+      "tool_names": "#80369dd4dc2f",
+      "tools_sha256": "7ada8bd69de5228630ec4b0a87e4198b90b49545d224db901b539b1b87fbb23a",
+    },
+    "claude_max ultra": {
+      "prompt": "#cf9cc1111b58",
+      "tool_names": "#80369dd4dc2f",
+      "tools_sha256": "7ada8bd69de5228630ec4b0a87e4198b90b49545d224db901b539b1b87fbb23a",
+    },
+    "codex_plus multi": {
+      "prompt": "#668f2be060b7",
+      "tool_names": "#d704debfdc37",
+      "tools_sha256": "72c9d11187f75f5305ab41321deaf3c02b3f0f2c2a10daa5e894c83ecb96d77f",
+    },
+    "codex_plus off": {
+      "prompt": "#4a2112cc5503",
+      "tool_names": "#30572ae1feb7",
+      "tools_sha256": "c90da41c04da78e123bdd26b05495bfd83c41fb27ed936208ea8955d08be24e2",
+    },
+    "codex_plus on": {
+      "prompt": "#cf9cc1111b58",
+      "tool_names": "#80369dd4dc2f",
+      "tools_sha256": "7ada8bd69de5228630ec4b0a87e4198b90b49545d224db901b539b1b87fbb23a",
+    },
+    "codex_plus ultra": {
+      "prompt": "#cf9cc1111b58",
+      "tool_names": "#80369dd4dc2f",
+      "tools_sha256": "7ada8bd69de5228630ec4b0a87e4198b90b49545d224db901b539b1b87fbb23a",
+    },
+  },
+}
+`;
+
+exports[`every deprecated provider receives the same request as before 1`] = `
+{
+  "parts": {
+    "#04084ff8fe0b": [
+      {
+        "description": "Find a record",
+        "input_schema": {
+          "properties": {
+            "key": {
+              "type": "string",
+            },
+          },
+          "required": [
+            "key",
+          ],
+          "type": "object",
+        },
+        "name": "lookup",
+      },
+    ],
+    "#0fa281db3c0b": [
+      {
+        "content": "<multi_agent_mode>Policy.</multi_agent_mode>",
+        "role": "developer",
+      },
+      {
+        "content": 
+"# AGENTS.md instructions
+<INSTRUCTIONS>
+Rules.
+</INSTRUCTIONS>"
+,
+        "role": "user",
+      },
+      {
+        "content": [
+          {
+            "text": "質問です",
+            "type": "input_text",
+          },
+          {
+            "image_url": "https://example.com/a.png",
+            "type": "input_image",
+          },
+        ],
+        "role": "user",
+      },
+      {
+        "content": "調べます",
+        "role": "assistant",
+      },
+      {
+        "arguments": "{"key":"x"}",
+        "call_id": "call_1",
+        "name": "lookup",
+        "type": "function_call",
+      },
+      {
+        "call_id": "call_1",
+        "output": "{"ok":true}",
+        "type": "function_call_output",
+      },
+      {
+        "content": "Late note.",
+        "role": "developer",
+      },
+      {
+        "content": "Continue.",
+        "role": "user",
+      },
+    ],
+    "#287c5f205f8e": "System text.",
+    "#500a053bcdec": [
+      {
+        "description": "Find a record",
+        "name": "lookup",
+        "parameters": {
+          "properties": {
+            "key": {
+              "type": "string",
+            },
+          },
+          "required": [
+            "key",
+          ],
+          "type": "object",
+        },
+        "strict": false,
+        "type": "function",
+      },
+    ],
+    "#564f2244fb22": [
+      {
+        "content": 
+"System text.
+
+<multi_agent_mode>Policy.</multi_agent_mode>
+
+Late note."
+,
+        "role": "system",
+      },
+      {
+        "content": 
+"# AGENTS.md instructions
+<INSTRUCTIONS>
+Rules.
+</INSTRUCTIONS>"
+,
+        "role": "user",
+      },
+      {
+        "content": [
+          {
+            "text": "質問です",
+            "type": "text",
+          },
+          {
+            "image_url": {
+              "url": "https://example.com/a.png",
+            },
+            "type": "image_url",
+          },
+        ],
+        "role": "user",
+      },
+      {
+        "content": "調べます",
+        "reasoning_content": "Thinking.",
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{"key":"x"}",
+              "name": "lookup",
+            },
+            "id": "call_1",
+            "type": "function",
+          },
+        ],
+      },
+      {
+        "content": "{"ok":true}",
+        "role": "tool",
+        "tool_call_id": "call_1",
+      },
+      {
+        "content": "Continue.",
+        "role": "user",
+      },
+    ],
+    "#7467cbb840d9": [
+      {
+        "content": "System text.",
+        "role": "system",
+      },
+      {
+        "content": "<multi_agent_mode>Policy.</multi_agent_mode>",
+        "role": "developer",
+      },
+      {
+        "content": 
+"# AGENTS.md instructions
+<INSTRUCTIONS>
+Rules.
+</INSTRUCTIONS>"
+,
+        "role": "user",
+      },
+      {
+        "content": [
+          {
+            "text": "質問です",
+            "type": "text",
+          },
+          {
+            "image_url": {
+              "url": "https://example.com/a.png",
+            },
+            "type": "image_url",
+          },
+        ],
+        "role": "user",
+      },
+      {
+        "content": "調べます",
+        "reasoning_content": "Thinking.",
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{"key":"x"}",
+              "name": "lookup",
+            },
+            "id": "call_1",
+            "type": "function",
+          },
+        ],
+      },
+      {
+        "content": "{"ok":true}",
+        "role": "tool",
+        "tool_call_id": "call_1",
+      },
+      {
+        "content": "Late note.",
+        "role": "developer",
+      },
+      {
+        "content": "Continue.",
+        "role": "user",
+      },
+    ],
+    "#79b15528ee85": [
+      {
+        "cache_control": {
+          "ttl": "1h",
+          "type": "ephemeral",
+        },
+        "text": 
+"System text.
+
+<multi_agent_mode>Policy.</multi_agent_mode>"
+,
+        "type": "text",
+      },
+    ],
+    "#c3b7747dca37": [
+      {
+        "content": [
+          {
+            "text": 
+"# AGENTS.md instructions
+<INSTRUCTIONS>
+Rules.
+</INSTRUCTIONS>"
+,
+            "type": "text",
+          },
+          {
+            "text": "質問です",
+            "type": "text",
+          },
+          {
+            "source": {
+              "type": "url",
+              "url": "https://example.com/a.png",
+            },
+            "type": "image",
+          },
+        ],
+        "role": "user",
+      },
+      {
+        "content": [
+          {
+            "text": "調べます",
+            "type": "text",
+          },
+          {
+            "id": "call_1",
+            "input": {
+              "key": "x",
+            },
+            "name": "lookup",
+            "type": "tool_use",
+          },
+        ],
+        "role": "assistant",
+      },
+      {
+        "content": [
+          {
+            "content": "{"ok":true}",
+            "tool_use_id": "call_1",
+            "type": "tool_result",
+          },
+          {
+            "text": "Late note.",
+            "type": "text",
+          },
+          {
+            "text": "Continue.",
+            "type": "text",
+          },
+        ],
+        "role": "user",
+      },
+    ],
+    "#cfaef92b4f20": [
+      {
+        "function": {
+          "description": "Find a record",
+          "name": "lookup",
+          "parameters": {
+            "properties": {
+              "key": {
+                "type": "string",
+              },
+            },
+            "required": [
+              "key",
+            ],
+            "type": "object",
+          },
+        },
+        "type": "function",
+      },
+    ],
+    "#dae1204e5209": [
+      {
+        "description": "Find a record",
+        "name": "lookup",
+        "parameters": {
+          "properties": {
+            "key": {
+              "type": "string",
+            },
+          },
+          "required": [
+            "key",
+          ],
+          "type": "object",
+        },
+        "strict": false,
+        "type": "function",
+      },
+      {
+        "type": "web_search",
+      },
+    ],
+  },
+  "requests": {
+    "chatgpt gpt-6-astra high": {
+      "body": {
+        "include": [
+          "reasoning.encrypted_content",
+        ],
+        "input": "#0fa281db3c0b",
+        "instructions": "#287c5f205f8e",
+        "model": "gpt-6-astra",
+        "parallel_tool_calls": true,
+        "prompt_cache_key": "d5e1a190360840c20baeea461a36812b",
+        "reasoning": {
+          "effort": "high",
+        },
+        "store": false,
+        "stream": true,
+        "tools": "#500a053bcdec",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "ChatGPT-Account-ID": "account",
+        "Content-Type": "application/json",
+        "originator": "codex_cli_rs",
+      },
+      "url": "https://chatgpt.com/backend-api/codex/responses",
+    },
+    "chatgpt gpt-6-astra none": {
+      "body": {
+        "include": [
+          "reasoning.encrypted_content",
+        ],
+        "input": "#0fa281db3c0b",
+        "instructions": "#287c5f205f8e",
+        "model": "gpt-6-astra",
+        "parallel_tool_calls": true,
+        "prompt_cache_key": "d5e1a190360840c20baeea461a36812b",
+        "reasoning": {
+          "effort": "none",
+        },
+        "store": false,
+        "stream": true,
+        "tools": "#500a053bcdec",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "ChatGPT-Account-ID": "account",
+        "Content-Type": "application/json",
+        "originator": "codex_cli_rs",
+      },
+      "url": "https://chatgpt.com/backend-api/codex/responses",
+    },
+    "chatgpt gpt-6-luna high": {
+      "body": {
+        "include": [
+          "reasoning.encrypted_content",
+        ],
+        "input": "#0fa281db3c0b",
+        "instructions": "#287c5f205f8e",
+        "model": "gpt-6-luna",
+        "parallel_tool_calls": true,
+        "prompt_cache_key": "d5e1a190360840c20baeea461a36812b",
+        "reasoning": {
+          "effort": "high",
+        },
+        "store": false,
+        "stream": true,
+        "tools": "#500a053bcdec",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "ChatGPT-Account-ID": "account",
+        "Content-Type": "application/json",
+        "originator": "codex_cli_rs",
+      },
+      "url": "https://chatgpt.com/backend-api/codex/responses",
+    },
+    "chatgpt gpt-6-luna none": {
+      "body": {
+        "include": [
+          "reasoning.encrypted_content",
+        ],
+        "input": "#0fa281db3c0b",
+        "instructions": "#287c5f205f8e",
+        "model": "gpt-6-luna",
+        "parallel_tool_calls": true,
+        "prompt_cache_key": "d5e1a190360840c20baeea461a36812b",
+        "reasoning": {
+          "effort": "none",
+        },
+        "store": false,
+        "stream": true,
+        "tools": "#500a053bcdec",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "ChatGPT-Account-ID": "account",
+        "Content-Type": "application/json",
+        "originator": "codex_cli_rs",
+      },
+      "url": "https://chatgpt.com/backend-api/codex/responses",
+    },
+    "chatgpt gpt-6.1-sol high": {
+      "body": {
+        "include": [
+          "reasoning.encrypted_content",
+        ],
+        "input": "#0fa281db3c0b",
+        "instructions": "#287c5f205f8e",
+        "model": "gpt-6.1-sol",
+        "parallel_tool_calls": true,
+        "prompt_cache_key": "d5e1a190360840c20baeea461a36812b",
+        "reasoning": {
+          "effort": "high",
+        },
+        "store": false,
+        "stream": true,
+        "tools": "#500a053bcdec",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "ChatGPT-Account-ID": "account",
+        "Content-Type": "application/json",
+        "originator": "codex_cli_rs",
+      },
+      "url": "https://chatgpt.com/backend-api/codex/responses",
+    },
+    "chatgpt gpt-6.1-sol none": {
+      "body": {
+        "include": [
+          "reasoning.encrypted_content",
+        ],
+        "input": "#0fa281db3c0b",
+        "instructions": "#287c5f205f8e",
+        "model": "gpt-6.1-sol",
+        "parallel_tool_calls": true,
+        "prompt_cache_key": "d5e1a190360840c20baeea461a36812b",
+        "reasoning": {
+          "effort": "none",
+        },
+        "store": false,
+        "stream": true,
+        "tools": "#500a053bcdec",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "ChatGPT-Account-ID": "account",
+        "Content-Type": "application/json",
+        "originator": "codex_cli_rs",
+      },
+      "url": "https://chatgpt.com/backend-api/codex/responses",
+    },
+    "chatgpt gpt-6.1-sol priority tier": {
+      "body": {
+        "include": [
+          "reasoning.encrypted_content",
+        ],
+        "input": "#0fa281db3c0b",
+        "instructions": "#287c5f205f8e",
+        "model": "gpt-6.1-sol",
+        "parallel_tool_calls": true,
+        "prompt_cache_key": "d5e1a190360840c20baeea461a36812b",
+        "reasoning": {
+          "effort": "high",
+        },
+        "service_tier": "priority",
+        "store": false,
+        "stream": true,
+        "tools": "#500a053bcdec",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "ChatGPT-Account-ID": "account",
+        "Content-Type": "application/json",
+        "originator": "codex_cli_rs",
+      },
+      "url": "https://chatgpt.com/backend-api/codex/responses",
+    },
+    "claude_kiro claude-opus-5 high": {
+      "body": {
+        "max_tokens": 16384,
+        "messages": "#564f2244fb22",
+        "model": "claude-opus-5",
+        "output_config": {
+          "effort": "high",
+        },
+        "parallel_tool_calls": true,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "thinking": {
+          "type": "adaptive",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "claude_kiro claude-opus-5 none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#564f2244fb22",
+        "model": "claude-opus-5",
+        "parallel_tool_calls": true,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "thinking": {
+          "type": "disabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "claude_kiro claude-opus-5-1 high": {
+      "body": {
+        "max_tokens": 16384,
+        "messages": "#564f2244fb22",
+        "model": "claude-opus-5-1",
+        "output_config": {
+          "effort": "high",
+        },
+        "parallel_tool_calls": true,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "thinking": {
+          "type": "adaptive",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "claude_kiro claude-opus-5-1 none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#564f2244fb22",
+        "model": "claude-opus-5-1",
+        "parallel_tool_calls": true,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "thinking": {
+          "type": "disabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "claude_kiro claude-opus-5-5 high": {
+      "body": {
+        "max_tokens": 65536,
+        "messages": "#564f2244fb22",
+        "model": "claude-opus-5-5",
+        "output_config": {
+          "effort": "high",
+        },
+        "parallel_tool_calls": true,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "thinking": {
+          "type": "adaptive",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "claude_kiro claude-opus-5-5 none": {
+      "body": {
+        "max_tokens": 65536,
+        "messages": "#564f2244fb22",
+        "model": "claude-opus-5-5",
+        "output_config": {
+          "effort": "low",
+        },
+        "parallel_tool_calls": true,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "thinking": {
+          "type": "adaptive",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "claude_kiro claude-sonnet-5 high": {
+      "body": {
+        "max_tokens": 16384,
+        "messages": "#564f2244fb22",
+        "model": "claude-sonnet-5",
+        "output_config": {
+          "effort": "high",
+        },
+        "parallel_tool_calls": true,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "thinking": {
+          "type": "adaptive",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "claude_kiro claude-sonnet-5 none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#564f2244fb22",
+        "model": "claude-sonnet-5",
+        "parallel_tool_calls": true,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "thinking": {
+          "type": "disabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "claude_kiro claude-sonnet-5-5 high": {
+      "body": {
+        "max_tokens": 65536,
+        "messages": "#564f2244fb22",
+        "model": "claude-sonnet-5-5",
+        "output_config": {
+          "effort": "high",
+        },
+        "parallel_tool_calls": true,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "thinking": {
+          "type": "adaptive",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "claude_kiro claude-sonnet-5-5 none": {
+      "body": {
+        "max_tokens": 65536,
+        "messages": "#564f2244fb22",
+        "model": "claude-sonnet-5-5",
+        "output_config": {
+          "effort": "low",
+        },
+        "parallel_tool_calls": true,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "thinking": {
+          "type": "adaptive",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "claude_max claude-fable-5-1 high": {
+      "body": {
+        "cache_control": {
+          "ttl": "1h",
+          "type": "ephemeral",
+        },
+        "max_tokens": 65536,
+        "messages": "#c3b7747dca37",
+        "model": "claude-fable-5-1",
+        "output_config": {
+          "effort": "high",
+        },
+        "stream": true,
+        "system": "#79b15528ee85",
+        "thinking": {
+          "type": "adaptive",
+        },
+        "tools": "#04084ff8fe0b",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01",
+        "x-api-key": "<key>",
+      },
+      "url": "https://codex-everywhere.com/v1/messages",
+    },
+    "claude_max claude-fable-5-1 none": {
+      "body": {
+        "cache_control": {
+          "ttl": "1h",
+          "type": "ephemeral",
+        },
+        "max_tokens": 65536,
+        "messages": "#c3b7747dca37",
+        "model": "claude-fable-5-1",
+        "output_config": {
+          "effort": "low",
+        },
+        "stream": true,
+        "system": "#79b15528ee85",
+        "thinking": {
+          "type": "adaptive",
+        },
+        "tools": "#04084ff8fe0b",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01",
+        "x-api-key": "<key>",
+      },
+      "url": "https://codex-everywhere.com/v1/messages",
+    },
+    "claude_max claude-fable-5-1 priority tier": {
+      "body": {
+        "cache_control": {
+          "ttl": "1h",
+          "type": "ephemeral",
+        },
+        "max_tokens": 65536,
+        "messages": "#c3b7747dca37",
+        "model": "claude-fable-5-1",
+        "output_config": {
+          "effort": "high",
+        },
+        "stream": true,
+        "system": "#79b15528ee85",
+        "thinking": {
+          "type": "adaptive",
+        },
+        "tools": "#04084ff8fe0b",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01",
+        "x-api-key": "<key>",
+      },
+      "url": "https://codex-everywhere.com/v1/messages",
+    },
+    "claude_max claude-opus-5-5 high": {
+      "body": {
+        "cache_control": {
+          "ttl": "1h",
+          "type": "ephemeral",
+        },
+        "max_tokens": 65536,
+        "messages": "#c3b7747dca37",
+        "model": "claude-opus-5-5",
+        "output_config": {
+          "effort": "high",
+        },
+        "stream": true,
+        "system": "#79b15528ee85",
+        "thinking": {
+          "type": "adaptive",
+        },
+        "tools": "#04084ff8fe0b",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01",
+        "x-api-key": "<key>",
+      },
+      "url": "https://codex-everywhere.com/v1/messages",
+    },
+    "claude_max claude-opus-5-5 none": {
+      "body": {
+        "cache_control": {
+          "ttl": "1h",
+          "type": "ephemeral",
+        },
+        "max_tokens": 65536,
+        "messages": "#c3b7747dca37",
+        "model": "claude-opus-5-5",
+        "output_config": {
+          "effort": "low",
+        },
+        "stream": true,
+        "system": "#79b15528ee85",
+        "thinking": {
+          "type": "adaptive",
+        },
+        "tools": "#04084ff8fe0b",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01",
+        "x-api-key": "<key>",
+      },
+      "url": "https://codex-everywhere.com/v1/messages",
+    },
+    "codex_gemini gemini-3.7-flash high": {
+      "body": {
+        "max_tokens": 32768,
+        "messages": "#564f2244fb22",
+        "model": "gemini-3.7-flash",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "codex_gemini gemini-3.7-flash none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#564f2244fb22",
+        "model": "gemini-3.7-flash",
+        "parallel_tool_calls": true,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "codex_gemini gemini-3.8-flash high": {
+      "body": {
+        "max_tokens": 32768,
+        "messages": "#564f2244fb22",
+        "model": "gemini-3.8-flash",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "codex_gemini gemini-3.8-flash none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#564f2244fb22",
+        "model": "gemini-3.8-flash",
+        "parallel_tool_calls": true,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "codex_gemini gemini-4-flash high": {
+      "body": {
+        "max_tokens": 32768,
+        "messages": "#564f2244fb22",
+        "model": "gemini-4-flash",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "codex_gemini gemini-4-flash none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#564f2244fb22",
+        "model": "gemini-4-flash",
+        "parallel_tool_calls": true,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "codex_gemini gemini-4-pro high": {
+      "body": {
+        "max_tokens": 32768,
+        "messages": "#564f2244fb22",
+        "model": "gemini-4-pro",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "codex_gemini gemini-4-pro none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#564f2244fb22",
+        "model": "gemini-4-pro",
+        "parallel_tool_calls": true,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "codex_plus gpt-6-astra high": {
+      "body": {
+        "max_tokens": 16384,
+        "messages": "#7467cbb840d9",
+        "model": "gpt-6-astra",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "enabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "codex_plus gpt-6-astra none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#7467cbb840d9",
+        "model": "gpt-6-astra",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "none",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "disabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "codex_plus gpt-6-luna high": {
+      "body": {
+        "max_tokens": 16384,
+        "messages": "#7467cbb840d9",
+        "model": "gpt-6-luna",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "enabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "codex_plus gpt-6-luna none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#7467cbb840d9",
+        "model": "gpt-6-luna",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "none",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "disabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "codex_plus gpt-6.1-sol high": {
+      "body": {
+        "max_tokens": 16384,
+        "messages": "#7467cbb840d9",
+        "model": "gpt-6.1-sol",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "enabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "codex_plus gpt-6.1-sol none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#7467cbb840d9",
+        "model": "gpt-6.1-sol",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "none",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "disabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "codex_plus gpt-6.1-sol priority tier": {
+      "body": {
+        "max_tokens": 16384,
+        "messages": "#7467cbb840d9",
+        "model": "gpt-6.1-sol",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "service_tier": "priority",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "enabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "codex_pro gpt-6-astra high": {
+      "body": {
+        "max_tokens": 16384,
+        "messages": "#7467cbb840d9",
+        "model": "gpt-6-astra",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "enabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "codex_pro gpt-6-astra none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#7467cbb840d9",
+        "model": "gpt-6-astra",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "none",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "disabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "codex_pro gpt-6-luna high": {
+      "body": {
+        "max_tokens": 16384,
+        "messages": "#7467cbb840d9",
+        "model": "gpt-6-luna",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "enabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "codex_pro gpt-6-luna none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#7467cbb840d9",
+        "model": "gpt-6-luna",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "none",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "disabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "codex_pro gpt-6.1-sol high": {
+      "body": {
+        "max_tokens": 16384,
+        "messages": "#7467cbb840d9",
+        "model": "gpt-6.1-sol",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "enabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "codex_pro gpt-6.1-sol none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#7467cbb840d9",
+        "model": "gpt-6.1-sol",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "none",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "disabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "custom test-model high": {
+      "body": {
+        "max_tokens": 16384,
+        "messages": "#564f2244fb22",
+        "model": "test-model",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "stream": true,
+        "temperature": 0.7,
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://custom.example/v1/chat/completions",
+    },
+    "custom test-model none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#564f2244fb22",
+        "model": "test-model",
+        "parallel_tool_calls": true,
+        "stream": true,
+        "temperature": 0.7,
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://custom.example/v1/chat/completions",
+    },
+    "deepseek deepseek-flash high": {
+      "body": {
+        "max_tokens": 16384,
+        "messages": "#564f2244fb22",
+        "model": "deepseek-flash",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "enabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://api.deepseek.com/chat/completions",
+    },
+    "deepseek deepseek-flash native search": {
+      "body": {
+        "input": "#0fa281db3c0b",
+        "instructions": "#287c5f205f8e",
+        "max_output_tokens": 16384,
+        "model": "deepseek-flash",
+        "parallel_tool_calls": true,
+        "reasoning": {
+          "effort": "high",
+        },
+        "store": false,
+        "stream": true,
+        "tools": "#dae1204e5209",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://api.deepseek.com/responses",
+    },
+    "deepseek deepseek-flash none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#564f2244fb22",
+        "model": "deepseek-flash",
+        "parallel_tool_calls": true,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "disabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://api.deepseek.com/chat/completions",
+    },
+    "deepseek deepseek-flash priority tier": {
+      "body": {
+        "max_tokens": 16384,
+        "messages": "#564f2244fb22",
+        "model": "deepseek-flash",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "enabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://api.deepseek.com/chat/completions",
+    },
+    "grok_free grok-4.5 high": {
+      "body": {
+        "max_tokens": 32768,
+        "messages": "#564f2244fb22",
+        "model": "grok-4.5",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "enabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "grok_free grok-4.5 none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#564f2244fb22",
+        "model": "grok-4.5",
+        "parallel_tool_calls": true,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "disabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "grok_free grok-4.6 high": {
+      "body": {
+        "max_tokens": 16384,
+        "messages": "#564f2244fb22",
+        "model": "grok-4.6",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "enabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "grok_free grok-4.6 none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#564f2244fb22",
+        "model": "grok-4.6",
+        "parallel_tool_calls": true,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "disabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "grok_heavy grok-4.5 high": {
+      "body": {
+        "max_tokens": 32768,
+        "messages": "#564f2244fb22",
+        "model": "grok-4.5",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "enabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "grok_heavy grok-4.5 none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#564f2244fb22",
+        "model": "grok-4.5",
+        "parallel_tool_calls": true,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "disabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "grok_heavy grok-4.6 high": {
+      "body": {
+        "max_tokens": 16384,
+        "messages": "#564f2244fb22",
+        "model": "grok-4.6",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "enabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "grok_heavy grok-4.6 none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#564f2244fb22",
+        "model": "grok-4.6",
+        "parallel_tool_calls": true,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "disabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "grok_heavy grok-4.7 high": {
+      "body": {
+        "max_tokens": 16384,
+        "messages": "#564f2244fb22",
+        "model": "grok-4.7",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "enabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "grok_heavy grok-4.7 none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#564f2244fb22",
+        "model": "grok-4.7",
+        "parallel_tool_calls": true,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "disabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://codex-everywhere.com/v1/chat/completions",
+    },
+    "openai gpt-4o-mini high": {
+      "body": {
+        "max_tokens": 16384,
+        "messages": "#7467cbb840d9",
+        "model": "gpt-4o-mini",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://api.openai.com/v1/chat/completions",
+    },
+    "openai gpt-4o-mini none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#7467cbb840d9",
+        "model": "gpt-4o-mini",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "none",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://api.openai.com/v1/chat/completions",
+    },
+    "openai gpt-6-luna high": {
+      "body": {
+        "include": [
+          "reasoning.encrypted_content",
+        ],
+        "input": "#0fa281db3c0b",
+        "instructions": "#287c5f205f8e",
+        "max_output_tokens": 16384,
+        "model": "gpt-6-luna",
+        "parallel_tool_calls": true,
+        "prompt_cache_key": "d5e1a190360840c20baeea461a36812b",
+        "reasoning": {
+          "effort": "high",
+        },
+        "store": false,
+        "stream": true,
+        "tools": "#500a053bcdec",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://api.openai.com/v1/responses",
+    },
+    "openai gpt-6-luna none": {
+      "body": {
+        "include": [
+          "reasoning.encrypted_content",
+        ],
+        "input": "#0fa281db3c0b",
+        "instructions": "#287c5f205f8e",
+        "max_output_tokens": 8192,
+        "model": "gpt-6-luna",
+        "parallel_tool_calls": true,
+        "prompt_cache_key": "d5e1a190360840c20baeea461a36812b",
+        "reasoning": {
+          "effort": "none",
+        },
+        "store": false,
+        "stream": true,
+        "tools": "#500a053bcdec",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://api.openai.com/v1/responses",
+    },
+    "openrouter vendor/model high": {
+      "body": {
+        "max_tokens": 16384,
+        "messages": "#564f2244fb22",
+        "model": "vendor/model",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://openrouter.ai/api/v1/chat/completions",
+    },
+    "openrouter vendor/model none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#564f2244fb22",
+        "model": "vendor/model",
+        "parallel_tool_calls": true,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://openrouter.ai/api/v1/chat/completions",
+    },
+    "orca_router obsidian/Qwen3.8-27B high": {
+      "body": {
+        "max_tokens": 16384,
+        "messages": "#564f2244fb22",
+        "model": "obsidian/Qwen3.8-27B",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://api.orcarouter.ai/v1/chat/completions",
+    },
+    "orca_router obsidian/Qwen3.8-27B none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#564f2244fb22",
+        "model": "obsidian/Qwen3.8-27B",
+        "parallel_tool_calls": true,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://api.orcarouter.ai/v1/chat/completions",
+    },
+    "xai grok-3-mini high": {
+      "body": {
+        "max_tokens": 16384,
+        "messages": "#564f2244fb22",
+        "model": "grok-3-mini",
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "enabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://api.x.ai/v1/chat/completions",
+    },
+    "xai grok-3-mini none": {
+      "body": {
+        "max_tokens": 8192,
+        "messages": "#564f2244fb22",
+        "model": "grok-3-mini",
+        "parallel_tool_calls": true,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true,
+        },
+        "temperature": 0.7,
+        "thinking": {
+          "type": "disabled",
+        },
+        "tools": "#cfaef92b4f20",
+      },
+      "headers": {
+        "Authorization": "Bearer <key>",
+        "Content-Type": "application/json",
+      },
+      "url": "https://api.x.ai/v1/chat/completions",
+    },
+  },
+}
+`;

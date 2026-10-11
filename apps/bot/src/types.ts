@@ -52,6 +52,9 @@ export type Context = {
   botId: string;
   thread: boolean;
   messageId?: string;
+  /** Names one user turn in the logs, so its model requests (children's
+   *  included) can be grouped. Never sent to a provider. */
+  turnId?: string;
   images?: string[];
   pendingImages?: string[];
   depth: number;

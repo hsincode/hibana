@@ -70,6 +70,7 @@ type FailureReport = {
   failure_phase: FailurePhase;
   http_status: number | null;
   has_checkpoint: boolean;
+  turn_id?: string;
 };
 /** The sanitized provider diagnostics the dashboard log keeps (#42): where
  *  the request failed and how often it reconnected, never provider text. */
@@ -488,6 +489,8 @@ export class Hibana {
       ...original,
       signal: this.shutdown.signal,
       pendingImages: [] as string[],
+      // A retry is a new turn in the logs: it sends its own requests.
+      turnId: crypto.randomUUID().slice(0, 8),
     };
     if (
       this.runtime.snapshot.blocked_users.includes(ctx.userId) ||
@@ -563,7 +566,7 @@ export class Hibana {
     // An auto preset is replaced below, once the history is known.
     let selection = turnSelection(settings.selection, ultracode);
     const started = Date.now();
-    this.log.info({ channel: ctx.channelId, message_id: ctx.messageId,
+    this.log.info({ channel: ctx.channelId, turn_id: ctx.turnId, message_id: ctx.messageId,
       settings_version: this.runtime.snapshot.version, provider: selection.provider,
       model: selection.model, effort: selection.effort ?? null, subagent_enabled: settings.subagent_enabled,
       ultra_mode: settings.ultra_mode, multi_agent: settings.multi_agent, ultracode,
@@ -707,9 +710,11 @@ export class Hibana {
       this.log.info(
         {
           channel: ctx.channelId,
+          turn_id: ctx.turnId,
           provider: selection.provider,
           model: selection.model,
           usage: result.usage,
+          rounds: result.rounds,
           latency_ms: Date.now() - started,
         },
         "Turn completed",
@@ -751,6 +756,7 @@ export class Hibana {
           failure_phase: failurePhase,
           http_status: httpStatus,
           has_checkpoint: checkpointPersisted,
+          turn_id: ctx.turnId,
         };
         this.report(error, failureReport);
         if (this.config.webApiUrl) {

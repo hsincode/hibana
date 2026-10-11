@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { anthropicCost } from "@hibana/shared/catalog";
-import { amount, blind, dryReply, earlierTurns, exclusion, replay, replayPrompt, reviewPage, select, summarize, totals, warmUp, type ArmResult, type Case } from "../harness-eval";
+import { amount, blind, dryReply, earlierTurns, exclusion, pickPage, replay, replayPrompt, reviewPage, select, selection, similar, summarize, totals, warmUp, type ArmResult, type Case } from "../harness-eval";
 import type { RequestRecord } from "../llm";
 
 // The comparison itself calls the real API and is run by hand (#69). These
@@ -33,6 +33,10 @@ describe("which production turns are replayed", () => {
     expect(exclusion(turn({ model: "auto" }))).toBe("model is unknown or not on Anthropic's API");
     expect(exclusion(turn({ model: null }))).toBe("model is unknown or not on Anthropic's API");
     expect(exclusion(turn({ extra_messages: 1 }))).toBe("more than one message in the turn");
+    // Read back from Discord: what the export could not establish.
+    expect(exclusion(turn({ after_unknown: true }))).toBe("follows a turn that cannot be rebuilt");
+    expect(exclusion(turn({ attachments_unknown: true }))).toBe("replies to a message that cannot be read any more");
+    expect(exclusion(turn({ source: "discord", edited: true, requests: null }))).toBeNull();
     expect(exclusion(turn({ earlier_tools: true, history: [{ role: "user", content: "動画を作って" }, { role: "assistant", content: "送りました" }] })))
       .toBe("an earlier turn used tools");
     // A follow-up of a plain conversation is replayed: the conversation comes with it.
@@ -279,9 +283,90 @@ describe("the spending limits on the command line", () => {
   });
 });
 
+describe("choosing the questions", () => {
+  test("puts questions that say nearly the same thing in one group", () => {
+    const prompts = [
+      `<@99> Opusで答えて。日本の首都は？${meta}`,
+      `1から200までの素数の個数を数えるPythonを書いて、実行して確かめて${meta}`,
+      `<@99> opusで答えて。日本の首都はどこ？${meta}`,
+      `明日の東京の天気を調べて${meta}`,
+      `1から300までの素数の個数を数えるPythonを書いて、実行して確かめて${meta}`,
+    ];
+    const groups = similar(prompts.map((prompt) => ({ prompt })));
+    expect(groups[2]).toBe(groups[0]!);
+    expect(groups[4]).toBe(groups[1]!);
+    expect(new Set(groups).size).toBe(3);
+    // The author line and the mention are not what makes two questions alike.
+    expect(new Set(similar([{ prompt: `<@1> 猫${meta}` }, { prompt: `<@2> 相対性理論を説明して${meta}` }])).size).toBe(2);
+    // The same question in a DM and, called by name, in a server.
+    expect(new Set(similar([{ prompt: "今日の天気" }, { prompt: `hibana 今日の天気${meta}` }, { prompt: `ひばな、今日の天気${meta}` }])).size).toBe(1);
+    // Only as the word that calls the bot: not inside another word.
+    expect(new Set(similar([{ prompt: "hibanas は何語？" }, { prompt: "s は何語？" }])).size).toBe(2);
+    expect(similar([])).toEqual([]);
+  });
+
+  const candidate = (id: string, group: number, of: number, prompt: string) =>
+    ({ id, group, of, day: "2026-10-10", model: "claude-haiku-5-5", effort: "xhigh", seconds: 12, requests: 3 as number | null, edited: false, rebuilt: true,
+      history: [{ role: "user" as const, content: "前の質問" }], prompt });
+  const page = pickPage({ file: "candidates.jsonl", left_out: { "has attachments": 2 }, candidates: [
+    candidate("a", 0, 2, "質問 </script><b>太字</b>"), { ...candidate("b", 0, 2, "似た質問"), requests: null, edited: true }, candidate("c", 1, 1, "別の質問"),
+  ] });
+  const script = /<script>([\s\S]*)<\/script>/.exec(page)![1]!;
+
+  test("a selection must be one, made from the same file of cases", () => {
+    expect(selection({ cases: "candidates.jsonl", ids: ["a", "c"] }, "candidates.jsonl")).toEqual(["a", "c"]);
+    // Made from another export: its ids would match nothing, or the wrong questions.
+    expect(() => selection({ cases: "candidates.jsonl", ids: ["a"] }, "cases.jsonl")).toThrow("--cases candidates.jsonl");
+    // The verdicts of a review, passed by mistake: no ids must not mean "every case".
+    expect(() => selection({ run: "main", deal: "d", verdicts: { a: "left" } }, "cases.jsonl")).toThrow("no list of ids");
+    expect(() => selection({ cases: "cases.jsonl", ids: [] }, "cases.jsonl")).toThrow("no list of ids");
+    expect(() => selection(null, "cases.jsonl")).toThrow("no list of ids");
+  });
+
+  test("the page's script is valid and a question cannot add markup", () => {
+    expect(() => new Function(script)).not.toThrow();
+    expect(page.match(/<\/script>/g)).toHaveLength(1);
+    expect(script).not.toContain("<b>太字</b>");
+  });
+
+  test("picking one of each group and exporting gives the chosen ids", () => {
+    const nodes: Record<string, Record<string, unknown>> = {};
+    const listeners: Record<string, () => void> = {};
+    const made: Record<string, unknown>[] = [];
+    const element = (name?: string): Record<string, unknown> => {
+      const box = { checked: false, parentElement: { classList: { toggle() {} } }, addEventListener() {} };
+      const node: Record<string, unknown> = {
+        textContent: "", innerHTML: "", append() {}, click() {}, querySelector: () => box,
+        addEventListener: (_: string, fn: () => void) => { if (name) listeners[name] = fn; },
+      };
+      made.push(node);
+      return node;
+    };
+    const document = { getElementById: (name: string) => (nodes[name] ??= element(name)), createElement: () => element() };
+    let saved = "";
+    const blobs: string[] = [];
+    class Blob { constructor(parts: string[]) { blobs.push(parts.join("")); } }
+    // A choice kept from an earlier export names a question that is no longer a candidate.
+    new Function("document", "localStorage", "Blob", "URL", script)(document, { getItem: () => '["gone", "b"]', setItem: (_: string, v: string) => { saved = v; } }, Blob, { createObjectURL: () => "blob:x" });
+    expect(String(nodes.count!.textContent)).toStartWith("1 / 3 件を選択");
+    expect(JSON.parse(saved)).toEqual(["b"]);
+    listeners.one!();
+    expect(JSON.parse(saved).sort()).toEqual(["a", "c"]);
+    expect(String(nodes.count!.textContent)).toContain("2 / 3 件を選択");
+    listeners.export!();
+    expect(JSON.parse(blobs[0]!)).toEqual({ cases: "candidates.jsonl", ids: ["a", "c"] });
+    const rows = made.map((n) => String(n.innerHTML)).filter((html) => html.includes("checkbox"));
+    expect(rows[0]).toContain("&lt;b&gt;太字&lt;/b&gt;");
+    expect(rows[0]).toContain("本番ではツールを使用（3 リクエスト）");
+    expect(rows[0]).toContain("本番の bot が覚えていた会話と同じとは限りません");
+    expect(rows[1]).toContain("本番でツールを使ったかは不明");
+    expect(rows[1]).toContain("送信後に編集されています");
+  });
+});
+
 describe("the judging page", () => {
   const pair = {
-    id: "a-0", history: [{ role: "user" as const, content: "前の質問" }], incomplete: false, prompt: "質問", unavailable: ["publish_site"], production: "本番の返答",
+    id: "a-0", history: [{ role: "user" as const, content: "前の質問" }], incomplete: false, rebuilt: true, prompt: "質問", unavailable: ["publish_site"], production: "本番の返答",
     left: "左の返答 </script><img src=x onerror=alert(1)>", right: null, leftEnded: null, rightEnded: "stopped" as const,
     leftFiles: [{ href: "review-files/a-0/left/1.png", name: "図 'x'.png", text: "要点は **3 つ** です" }], rightFiles: [],
   };
@@ -321,6 +406,7 @@ describe("the judging page", () => {
     expect(section).toContain("publish_site");
     expect(section).toContain("要点は <strong>3 つ</strong> です");
     expect(section).toContain("上限で止めました");
+    expect(section).toContain("Discord から並べ直したもので、本番の bot が覚えていた会話と同じとは限りません");
     // The record of the run names each case's harness and sizes, so the page must not name the case.
     expect(section).not.toContain("a-0</");
     expect(section).not.toContain("#a-0");

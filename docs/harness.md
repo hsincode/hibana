@@ -147,14 +147,20 @@ Claude Code から再現しているのは設計です。文面は写してい�
 計測記録は #69 です。指標は、持ち主が決めた「最終回答までの時間」「回答の品質」「コスト」。2026-10-11 に、本番でツールを使わなかった 6 件で時間と費用を計りました（AI が実行。持ち主による再実行と、品質の判定はまだです）。数値は #69 にあります。
 
 ```sh
-# bot のデータがある機械で、保存されている会話から質問を取り出す（読み取りのみ。件数だけを表示する）
+# bot のデータがある機械で質問を取り出す（どちらも読み取りのみ。件数だけを表示する）
+#   a. 保存されている会話から（今続いている会話だけ。件数は少ない）
 (umask 077; ssh "$TARGET" 'PATH="$PATH:$HOME/.bun/bin" bun run -' < apps/bot/src/export-conversations.ts > .local/harness-eval/cases.jsonl)
-cd apps/bot && bun run harness-eval run --limit 3       # 新旧に 1 件ずつ流す（課金される）
+#   b. ログにあるターンの本文を Discord から読み直す（ログの保存期間ぶん）
+(umask 077; ssh "$TARGET" 'PATH="$PATH:$HOME/.bun/bin" bun run -' < apps/bot/src/export-discord-turns.ts > .local/harness-eval/candidates.jsonl.new \
+  && mv .local/harness-eval/candidates.jsonl.new .local/harness-eval/candidates.jsonl)
+cd apps/bot && bun run harness-eval pick --cases candidates.jsonl   # 候補から使う質問を選ぶページを手元に作る
+cd apps/bot && bun run harness-eval run --cases candidates.jsonl --selection <selection.json>   # 新旧に 1 件ずつ流す（課金される）
 cd apps/bot && bun run harness-eval review <run>        # 新旧を伏せた見比べ用のページを手元に作る
 cd apps/bot && bun run harness-eval summary <run>       # 時間・費用・判定の集計
 ```
 
-- 入力は、bot が保存している会話（`conversations.db`）のうち、Anthropic の API か Claude のモデルを使ったターンです。API の `logs` 表は本番で有効にしていないので使えません。保存されているのは今続いている会話だけなので、件数は多くありません（2026-10-11 の時点で 11 ターン）
+- 入力は、Anthropic の API か Claude のモデルを使ったターンです。出どころは 2 つあります。(a) bot が保存している会話（`conversations.db`）。今続いている会話だけなので件数は少なく（2026-10-11 の時点で 11 ターン）、同じ人の似た質問に偏りました。(b) bot のログにあるターン（保存は 14 日）の本文を、bot のトークンで Discord から読み直したもの。Discord には GET だけを送り、トークンはその機械の外に出しません。それまでの会話として付けるのは、同じチャンネルの直前のやり取り（同じプロバイダー・同じモデルで、30 分以内の間隔で続いているターン）です。再現に渡す文脈であって、本番の bot が覚えていた会話の記録ではありません（ログからは、会話がいつ消されたかが分からず、会話を保つ規則もログの 14 日の間に変わっています）。再現できないターン（失敗した、発言が消えた、`/retry` など）の直後 30 分以内のターン、見えなくなった発言への返信、ターンの途中で同じ人が発言を足したターンは除きます。発言の本文はそのまま保存します（本文に含まれるメンションやリンクも残ります）。API の `logs` 表は本番で有効にしていないので使えません
+- (b) の候補は、持ち主が手元のページで選びます。似た質問は同じまとまりに並べます（2 文字ずつに切った文字の重なりが半分以上のもの）
 - そのターンのモデルと effort は、bot のログ（本文は入っていません）の `Turn started`・`Auto route selected`・`Turn completed` を、質問の `message_id` で突き合わせて決めます。本番での所要時間もそこから取ります
 - 質問と返答は人の発言なので、`.local/harness-eval/`（gitignore 済み）にだけ置き、Issue・PR・commit には件数と集計だけを書きます。チャンネルの ID は短いハッシュにして保存します
 - 計るターンの直前に、同じハーネス・モデル・effort で短い質問を 1 回送り、どの会話にも共通の部分（システムプロンプトとツール定義）を Anthropic のキャッシュに載せます。どの件も温まった状態で計るためです（持ち主の判断）。キャッシュが空のときの費用は、この共通部分の大きさ × 書き込みの単価として別に出します

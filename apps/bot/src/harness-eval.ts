@@ -1,10 +1,13 @@
 // Manual comparison of the two harnesses on questions people asked in
 // production (#69):
+//   cd apps/bot && bun run harness-eval pick [--cases candidates.jsonl]
 //   cd apps/bot && bun run harness-eval run --limit 3 [--budget 5] [--run trial]
 //   cd apps/bot && bun run harness-eval review <run>
 //   cd apps/bot && bun run harness-eval summary <run> [verdicts.json]
 // The questions come from the bot's stored conversations
-// (`export-conversations.ts`). `run` replays each selected one twice, once per
+// (`export-conversations.ts`) or, read back from Discord, from every turn in
+// its log (`export-discord-turns.ts`); `pick` writes a local page on which
+// the owner chooses which of them to replay. `run` replays each selected one twice, once per
 // harness, on Anthropic's API with the model and effort the production turn
 // used. The conversation before it is given to both as text: what was asked
 // and answered, without the tool calls in between.
@@ -46,8 +49,18 @@ export type Case = {
   /** Messages the person added while the turn was running. */
   extra_messages: number;
   reply: string | null;
-  /** Tools the production turn called. */
+  /** Tools the production turn called, where the export knows their names. */
   tools: string[];
+  /** Model requests the production turn made, where the log has them: more
+   *  than one means it called tools. Null where the log is older than that. */
+  requests?: number | null;
+  /** "discord": text read back from Discord, with the exchanges right before
+   *  it in the channel as its earlier conversation. */
+  source?: string;
+  /** Read back from Discord only. The turn came right after one that could
+   *  not be rebuilt; it replies to a message that cannot be seen any more;
+   *  the message was edited after it was sent. */
+  after_unknown?: boolean; attachments_unknown?: boolean; edited?: boolean;
   production: { latency_ms: number | null } | null;
 };
 export type ArmResult = {
@@ -111,6 +124,10 @@ export function exclusion(c: Case): string | null {
   // The files are on Discord under the real message, out of the replay's reach.
   if (/\nAttachments: \{/.test(c.prompt)) return "has attachments";
   if (c.history.some((h) => /\nAttachments: \{/.test(h.content))) return "an earlier message had attachments";
+  if (c.attachments_unknown) return "replies to a message that cannot be read any more";
+  // It may continue something the export does not have: a turn that failed
+  // and was resumed, a /retry, a deleted message.
+  if (c.after_unknown) return "follows a turn that cannot be rebuilt";
   if (!c.model || !ANTHROPIC_PRICES[c.model]) return "model is unknown or not on Anthropic's API";
   // A message sent into a running turn steered it; one question cannot stand for both.
   if (c.extra_messages > 0) return "more than one message in the turn";
@@ -159,6 +176,31 @@ export function select(cases: Case[], options: { seed: number; limit?: number; p
     });
   }
   return { chosen: options.limit ? ordered.slice(0, options.limit) : ordered, eligible: eligible.length, excluded };
+}
+
+/** The question itself, for comparing: no author line, no mentions, no case or spacing. */
+const plain = (prompt: string) => prompt.replace(META, "").replace(/<@!?\d+>/g, "").toLowerCase().replace(/\s+/g, " ").trim()
+  // The bot's name at the start of a message in a server calls it; in a DM the same question has none.
+  .replace(/^(?:hibana(?![a-z0-9_])|ひばな|ヒバナ|火花)[\s、,:：]*/, "");
+const pieces = (text: string) => new Set(Array.from({ length: Math.max(0, text.length - 1) }, (_, i) => text.slice(i, i + 2)));
+
+/** Questions that say nearly the same thing, put together so that the owner
+ *  can keep one of each kind: the share of two-character pieces two questions
+ *  have in common, against the first question of each group. Returns a group
+ *  number per case, in the order given. */
+export function similar(cases: Pick<Case, "prompt">[], share = 0.5): number[] {
+  const firsts: Set<string>[] = [];
+  return cases.map((c) => {
+    const mine = pieces(plain(c.prompt));
+    const found = firsts.findIndex((other) => {
+      const common = [...mine].filter((piece) => other.has(piece)).length;
+      const all = mine.size + other.size - common;
+      return all > 0 && common / all >= share;
+    });
+    if (found >= 0) return found;
+    firsts.push(mine);
+    return firsts.length - 1;
+  });
 }
 
 /** The message as the replay sends it: the same text, with the ids of the
@@ -485,6 +527,16 @@ export function amount(name: string, value: string | undefined, fallback?: numbe
   return n;
 }
 const has = (name: string) => process.argv.includes(`--${name}`);
+/** The ids in a file the pick page wrote. Any other JSON (the verdicts of a
+ *  review, say) has no list of ids, and no list would mean "every case". */
+export function selection(file: unknown, cases: string): string[] {
+  const { ids, cases: from } = (file ?? {}) as { ids?: unknown; cases?: unknown };
+  if (!Array.isArray(ids) || !ids.length || !ids.every((id) => typeof id === "string")) throw new Error("--selection is not a selection written by the pick page: it has no list of ids");
+  if (from !== cases) throw new Error(`The selection was made from ${String(from)}, not from ${cases}: pass --cases ${String(from)}`);
+  return ids as string[];
+}
+/** A file of cases under .local/harness-eval, by name: never a path elsewhere. */
+const casesFile = () => join(ROOT, basename(flag("cases") ?? "cases.jsonl"));
 const usd = (value: number | null) => (value === null ? "-" : `$${value.toFixed(4)}`);
 
 async function run() {
@@ -494,15 +546,20 @@ async function run() {
   const value = (flagName: string) => { if (has(flagName) && flag(flagName) === undefined) throw new Error(`--${flagName} needs a value`); return flag(flagName); };
   const o = {
     seed: amount("seed", value("seed"), 1), limit: amount("limit", value("limit")),
-    perModel: amount("per-model", value("per-model")), ids: value("ids")?.split(","), budget: amount("budget", value("budget"), 5),
+    perModel: amount("per-model", value("per-model")), budget: amount("budget", value("budget"), 5),
+    // Ids given on the command line, or the file the pick page wrote.
+    ids: value("ids")?.split(",") ?? (value("selection") ? selection(JSON.parse(await readFile(value("selection")!, "utf8")), basename(casesFile())) : undefined),
     image: value("image"), perArm: amount("per-turn", value("per-turn"), 2), minutes: amount("minutes", value("minutes"), 15),
     warm: !has("no-warm"),
     ...(dry && { fake: dryReply }),
   };
   if (!o.fake && !process.env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY is required");
-  const cases = await lines<Case>(join(ROOT, "cases.jsonl"));
-  if (!cases.length) throw new Error("No cases: export them first (see export-conversations.ts)");
+  const cases = await lines<Case>(casesFile());
+  if (!cases.length) throw new Error(`No cases in ${casesFile()}: export them first (see export-conversations.ts, export-discord-turns.ts)`);
   const { chosen, eligible, excluded } = select(cases, o);
+  // Asked for by id and not there, or not replayable: stop, instead of running fewer than was chosen.
+  const absent = (o.ids ?? []).filter((id) => !chosen.some((c) => c.id === id));
+  if (absent.length) throw new Error(`${absent.length} of the ${o.ids!.length} chosen cases are not replayable cases of ${basename(casesFile())} (was --cases given?)`);
   console.log(`${cases.length} production turns, ${eligible} replayable, ${chosen.length} selected`);
   const models = new Map<string, number>();
   for (const c of chosen) models.set(`${c.model} ${c.effort ?? "-"}`, (models.get(`${c.model} ${c.effort ?? "-"}`) ?? 0) + 1);
@@ -521,7 +578,7 @@ async function run() {
   const done = await lines<ArmResult & { dry?: boolean }>(file);
   if (done.some((r) => Boolean(r.dry) !== dry)) throw new Error(`Run "${name}" holds ${dry ? "real" : "dry"} rows; give this one another --run name`);
   // The cases are people's messages, whatever the shell's umask made the file.
-  await chmod(join(ROOT, "cases.jsonl"), 0o600);
+  await chmod(casesFile(), 0o600);
   const stamp = { commit: (await Bun.$`git rev-parse --short HEAD`.text()).trim(), invoked: new Date().toISOString(), warm: o.warm, ...(dry && { dry }) };
   // The cases as they were when replayed. An id is a channel and a turn
   // number, and a conversation that starts over uses the same numbers again:
@@ -584,7 +641,7 @@ type Deal = { id: string; pairs: { id: string; left: Arm }[] };
 type Shown = { href: string; name: string; text: string };
 /** `left` / `right` are null for a turn without a reply; `...Ended` says why. */
 type Pair = {
-  id: string; history: Case["history"]; incomplete: boolean; prompt: string; unavailable: string[]; production: string | null;
+  id: string; history: Case["history"]; incomplete: boolean; rebuilt: boolean; prompt: string; unavailable: string[]; production: string | null;
   left: string | null; right: string | null; leftEnded: "failed" | "stopped" | null; rightEnded: "failed" | "stopped" | null;
   leftFiles: Shown[]; rightFiles: Shown[];
 };
@@ -648,7 +705,7 @@ const list = document.getElementById("list");
 DATA.pairs.forEach((p, i) => {
   const el = document.createElement("section");
   const earlier = (p.history.length
-    ? "<details><summary>それまでの会話（" + p.history.length + " 件。新旧どちらにも同じ文章を渡しています）</summary>" +
+    ? "<details><summary>それまでの会話（" + p.history.length + " 件。新旧どちらにも同じ文章を渡しています" + (p.rebuilt ? "。同じチャンネルの直前の発言を Discord から並べ直したもので、本番の bot が覚えていた会話と同じとは限りません" : "") + "）</summary>" +
       p.history.map((h) => "<div class='q'><small>" + (h.role === "user" ? "利用者" : "bot") + "</small><br>" + esc(h.content) + "</div>").join("") + "</details>"
     : "") + (p.incomplete ? "<small>保存されていた会話は途中からでした。本番の bot が見ていた前の部分は、新旧どちらにも渡っていません。</small>" : "");
   const ended = { failed: "（返答なし。このターンは失敗しました）", stopped: "（返答なし。比較の道具が、費用か時間の上限で止めました）" };
@@ -686,11 +743,122 @@ progress();
 </script></html>
 `;
 
+type Candidate = {
+  id: string; group: number; of: number; day: string; model: string; effort: string | null; seconds: number | null;
+  /** Null: the log does not say. */
+  requests: number | null; edited: boolean; rebuilt: boolean; history: Case["history"]; prompt: string;
+};
+
+/** The page on which the owner chooses the questions to replay: one local
+ *  file, no network, text escaped before it is shown. */
+export function pickPage(data: { file: string; left_out: Record<string, number>; candidates: Candidate[] }) {
+  return PICK.replace("__DATA__", () => JSON.stringify(data).replace(/</g, "\\u003c"));
+}
+
+const PICK = `<!doctype html>
+<html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>比べる質問を選ぶ</title>
+<style>
+:root{color-scheme:light dark;--bg:#fafafa;--card:#fff;--line:#d5d5d5;--text:#1b1b1b;--dim:#666;--pick:#1a6dd6}
+@media (prefers-color-scheme:dark){:root{--bg:#161616;--card:#202020;--line:#3a3a3a;--text:#e8e8e8;--dim:#a0a0a0;--pick:#6aa9ff}}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.6 system-ui,sans-serif}
+header{position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+main{max-width:1000px;margin:0 auto;padding:16px}
+h2{font-size:14px;margin:22px 0 6px;color:var(--dim)}
+label{display:flex;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer}
+label.on{border-color:var(--pick)}
+input{margin-top:5px;flex:none}
+.q{white-space:pre-wrap;overflow-wrap:anywhere}
+small{color:var(--dim)}
+button{font:inherit;padding:6px 14px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--text);cursor:pointer}
+details{margin-top:6px;color:var(--dim)}details .q{border-left:3px solid var(--line);padding-left:10px;margin:6px 0}
+</style>
+<header><strong>比べる質問を選ぶ</strong><span id="count"></span>
+<button id="one">まとまりごとに 1 件ずつ選ぶ</button><button id="none">すべて外す</button><button id="export">選んだ質問を書き出す</button>
+<small>このページは手元のファイルで、質問は外に送りません。</small></header>
+<main><p id="about"></p><div id="list"></div></main>
+<script>
+const DATA = __DATA__;
+const key = "harness-eval-pick:" + DATA.file;
+// A choice remembered from an earlier export may name a question that is no longer a candidate.
+const known = new Set(DATA.candidates.map((c) => c.id));
+const chosen = new Set(JSON.parse(localStorage.getItem(key) || "[]").filter((id) => known.has(id)));
+const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const list = document.getElementById("list");
+const boxes = [];
+const update = () => {
+  localStorage.setItem(key, JSON.stringify([...chosen]));
+  const models = {};
+  for (const c of DATA.candidates) if (chosen.has(c.id)) models[c.model] = (models[c.model] || 0) + 1;
+  document.getElementById("count").textContent = chosen.size + " / " + DATA.candidates.length + " 件を選択" +
+    (chosen.size ? "（" + Object.entries(models).map(([m, n]) => m.replace("claude-", "") + " " + n).join("、") + "）" : "");
+  for (const [box, c] of boxes) { box.checked = chosen.has(c.id); box.parentElement.classList.toggle("on", box.checked); }
+};
+document.getElementById("about").innerHTML = "<small>" + DATA.candidates.length + " 件の候補があります。似た質問は同じまとまりに並べてあります。" +
+  Object.entries(DATA.left_out).map(([reason, n]) => "再現できないので除いたもの: " + esc(reason) + " " + n + " 件").join("。") + "</small>";
+let group = -1;
+for (const c of DATA.candidates) {
+  if (c.group !== group) {
+    group = c.group;
+    const h = document.createElement("h2");
+    h.textContent = c.of > 1 ? "似た質問のまとまり（" + c.of + " 件）" : "ほかに似た質問のないもの";
+    list.append(h);
+  }
+  const row = document.createElement("label");
+  const tools = c.requests === null ? "、本番でツールを使ったかは不明" : c.requests > 1 ? "、本番ではツールを使用（" + c.requests + " リクエスト）" : "、本番ではツールなし";
+  row.innerHTML = "<input type='checkbox'><div><div class='q'>" + esc(c.prompt) + "</div><small>" + esc(c.day) + "、" + esc(c.model.replace("claude-", "")) + " / " + esc(c.effort || "-") +
+    (c.seconds === null ? "" : "、本番 " + c.seconds + " 秒") + tools + (c.edited ? "、発言は送信後に編集されています（本番が答えた文面と違うかもしれません）" : "") + "</small>" +
+    (c.history.length ? "<details><summary>直前のやり取り（" + c.history.length + " 件。選ぶと、これも一緒に渡します" + (c.rebuilt ? "。同じチャンネルの 30 分以内の発言を並べたもので、本番の bot が覚えていた会話と同じとは限りません" : "") + "）</summary>" +
+      c.history.map((h) => "<div class='q'><small>" + (h.role === "user" ? "利用者" : "bot") + "</small><br>" + esc(h.content) + "</div>").join("") + "</details>" : "") + "</div>";
+  const box = row.querySelector("input");
+  box.addEventListener("change", () => { box.checked ? chosen.add(c.id) : chosen.delete(c.id); update(); });
+  boxes.push([box, c]);
+  list.append(row);
+}
+document.getElementById("one").addEventListener("click", () => {
+  chosen.clear();
+  const seen = new Set();
+  for (const c of DATA.candidates) if (!seen.has(c.group)) { seen.add(c.group); chosen.add(c.id); }
+  update();
+});
+document.getElementById("none").addEventListener("click", () => { chosen.clear(); update(); });
+document.getElementById("export").addEventListener("click", () => {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify({ cases: DATA.file, ids: DATA.candidates.filter((c) => chosen.has(c.id)).map((c) => c.id) }, null, 1)], { type: "application/json" }));
+  a.download = "selection.json";
+  a.click();
+});
+update();
+</script></html>
+`;
+
+async function pick() {
+  const file = casesFile();
+  const { chosen, excluded } = select(await lines<Case>(file), { seed: 1, ids: undefined });
+  // In time order, so that a group's first question is its earliest.
+  const ordered = [...chosen].sort((a, b) => a.at - b.at || a.id.localeCompare(b.id));
+  const groups = similar(ordered);
+  const size = new Map<number, number>();
+  for (const g of groups) size.set(g, (size.get(g) ?? 0) + 1);
+  const candidates: Candidate[] = ordered.map((c, i) => ({
+    id: c.id, group: groups[i]!, of: size.get(groups[i]!)!, day: new Date(c.at).toISOString().slice(0, 10), model: c.model ?? "", effort: c.effort,
+    seconds: c.production?.latency_ms ? Math.round(c.production.latency_ms / 1000) : null, requests: c.requests ?? null,
+    edited: Boolean(c.edited), rebuilt: c.source === "discord", history: c.history, prompt: c.prompt.replace(META, ""),
+  }))
+    // The biggest groups first: that is where there is most to leave out.
+    .sort((a, b) => b.of - a.of || a.group - b.group);
+  const out = join(ROOT, "pick.html");
+  await writeFile(out, pickPage({ file: basename(file), left_out: excluded, candidates }), { mode: 0o600 });
+  await chmod(out, 0o600);
+  console.log(`${candidates.length} candidates in ${size.size} groups -> ${out}`);
+  for (const [reason, n] of Object.entries(excluded)) console.log(`  left out ${n}: ${reason}`);
+}
+
 async function review(name: string) {
   const dir = join(ROOT, "runs", name);
   const results = await lines<ArmResult>(join(dir, "results.jsonl"));
   // The run's own copy of its cases first: the export may have been redone since.
-  const cases = new Map([...await lines<Case>(join(ROOT, "cases.jsonl")), ...await lines<Case>(join(dir, "cases.jsonl"))].map((c) => [c.id, c]));
+  const cases = new Map([...await lines<Case>(casesFile()), ...await lines<Case>(join(dir, "cases.jsonl"))].map((c) => [c.id, c]));
   // Sides once dealt are kept: the page and an exported file say "left" and "right".
   const saved = JSON.parse(await readFile(join(dir, "key.json"), "utf8").catch(() => "null")) as Deal | null;
   const deal: Deal = { id: saved?.id ?? crypto.randomUUID().slice(0, 8), pairs: blind(results, Number(flag("seed") ?? Date.now() % 2 ** 31), saved?.pairs) };
@@ -714,7 +882,7 @@ async function review(name: string) {
     };
     const [l, r] = [await side(left, "left"), await side(left === "claude" ? "codex" : "claude", "right")];
     pairs.push({
-      id, history: c?.history ?? [], incomplete: Boolean(c?.summarized || c?.trimmed), prompt: c?.prompt ?? "", production: c?.reply ?? null,
+      id, history: c?.history ?? [], incomplete: Boolean(c?.summarized || c?.trimmed), rebuilt: c?.source === "discord", prompt: c?.prompt ?? "", production: c?.reply ?? null,
       unavailable: [...new Set((c?.tools ?? []).map((tool) => tool.replace(/^mcp__[^_]+__/, "")).filter((tool) => !REAL.has(tool) && !ASKS.has(tool) && tool !== "send_file"))],
       left: l.text, right: r.text, leftEnded: l.ended, rightEnded: r.ended, leftFiles: l.files, rightFiles: r.files,
     });
@@ -740,7 +908,8 @@ async function summary(name: string, verdictFile?: string) {
 if (import.meta.main) {
   const [command, name, extra] = process.argv.slice(2);
   if (command === "run") await run();
+  else if (command === "pick") await pick();
   else if (command === "review" && name) await review(name);
   else if (command === "summary" && name) await summary(name, extra);
-  else { console.error("usage: harness-eval run [--limit N] [--budget USD] [--run NAME] | review NAME | summary NAME [verdicts.json]"); process.exitCode = 2; }
+  else { console.error("usage: harness-eval pick [--cases FILE] | run [--cases FILE] [--selection selection.json] [--limit N] [--budget USD] [--run NAME] | review NAME | summary NAME [verdicts.json]"); process.exitCode = 2; }
 }

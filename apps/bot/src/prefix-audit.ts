@@ -9,6 +9,9 @@ export type RequestTrace = {
   /** A child starts from its root's conversation, so its first request is
    *  compared with the root's latest one. */
   child?: boolean;
+  /** The user turn this request belongs to. Log grouping only: it is not part
+   *  of the lineage, which continues across turns. */
+  turn?: string;
 };
 
 type Segment = { kind: string; hash: number | bigint; bytes: number };

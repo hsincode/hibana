@@ -285,6 +285,28 @@ export function normalizeUsage(raw: Json = {}): Usage {
     cache_write_tokens: cacheWrite,
   };
 }
+/** What `Usage` folds away but a cost comparison needs: Anthropic bills a
+ *  cache write by its TTL and a web search per request, not per token. */
+export type UsageDetail = {
+  cache_write_5m_tokens?: number;
+  cache_write_1h_tokens?: number;
+  web_search_requests?: number;
+  web_fetch_requests?: number;
+};
+/** Undefined when the provider reported none of these, so other providers'
+ *  log lines stay as they were. */
+export function usageDetail(raw: Json = {}): UsageDetail | undefined {
+  const written = (raw.cache_creation ?? {}) as Json, server = (raw.server_tool_use ?? {}) as Json;
+  const detail: UsageDetail = {};
+  const set = (key: keyof UsageDetail, value: unknown) => {
+    if (typeof value === "number") detail[key] = value;
+  };
+  set("cache_write_5m_tokens", written.ephemeral_5m_input_tokens);
+  set("cache_write_1h_tokens", written.ephemeral_1h_input_tokens);
+  set("web_search_requests", server.web_search_requests);
+  set("web_fetch_requests", server.web_fetch_requests);
+  return Object.keys(detail).length ? detail : undefined;
+}
 const normalizeCall = (call: Json): ToolCall => {
   const f = (call.function ?? call) as Json;
   return {
@@ -390,7 +412,10 @@ export type RequestRecord = {
   channel?: string;
   agent?: string;
   round?: number;
+  /** The user turn the request belongs to (`Context.turnId`). */
+  turn?: string;
   usage: Usage;
+  usage_detail?: UsageDetail;
   /** False when the provider sent no usage: the zeros are then unknown, not free. */
   usage_reported: boolean;
   /** Whole call, including reconnect backoff and credential lookup. */
@@ -564,6 +589,7 @@ export class LlmClient {
     const started = Date.now();
     const audit = this.hooks.onCompletion && options.trace ? this.audit.observe(options.trace, body) : undefined;
     let usageReported = false;
+    let detail: UsageDetail | undefined;
     let completion: Completion;
     try {
       completion = await requestCompletion({
@@ -599,6 +625,7 @@ export class LlmClient {
         read: async (response, signal, activity) => {
           const data = await readCompletion(response, protocol, signal, activity);
           usageReported = Object.keys((data.usage ?? {}) as Json).length > 0;
+          detail = usageDetail(data.usage as Json);
           return parseCompletion(data, protocol);
         },
         signal: options.signal,
@@ -614,7 +641,11 @@ export class LlmClient {
         this.hooks.onCompletion?.({
           provider: selection.provider, model: selection.model, protocol,
           channel: options.trace?.channel, agent: options.trace?.agent, round: options.trace?.round,
-          usage: completion.usage, usage_reported: usageReported, latency_ms: Date.now() - started,
+          // Absent rather than empty when unknown, like the detail below: a
+          // record lists only what was measured.
+          ...(options.trace?.turn && { turn: options.trace.turn }),
+          usage: completion.usage, ...(detail && { usage_detail: detail }),
+          usage_reported: usageReported, latency_ms: Date.now() - started,
           prefix: audit?.report,
         });
       } catch {

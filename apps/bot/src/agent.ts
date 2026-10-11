@@ -88,7 +88,7 @@ export class Agent {
           temperature: o.temperature,
           nativeSearch: !taskMode && o.nativeSearch,
           signal: o.requestSignal?.() ?? o.context.signal,
-          trace: { channel: o.context.channelId, agent: lineage, round, child: o.context.depth > 0 },
+          trace: { channel: o.context.channelId, agent: lineage, round, child: o.context.depth > 0, turn: o.context.turnId },
           onRetry: async ({ attempt, maxRetries, status, diagnostics }) => {
             const detail = failureDetail(diagnostics, status);
             await o.context.progress?.(

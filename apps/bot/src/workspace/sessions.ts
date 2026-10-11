@@ -58,8 +58,9 @@ const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
  *
  * A session id leaves this table only through `disposed`. Whatever ends a
  * channel's use of a session moves it to the queue first, because a session
- * nobody remembers can neither be removed nor have its budget lowered.
- * Nothing here calls the API.
+ * nobody remembers can neither be removed nor have its budget lowered. A
+ * session the table never held, or lost with its process, comes back into
+ * the queue through `abandon`. Nothing here calls the API.
  */
 export class SessionTable {
   private rows = new Map<string, SessionRow>();
@@ -144,12 +145,38 @@ export class SessionTable {
       mode,
     );
   }
+  /** Queues a session that no row names any more: a mark in a checkpoint is
+   *  all that remembers it, as after a process without a store died in its
+   *  turn. It is archived, like every session that was not cleared. What the
+   *  ledger counted of it is not known, so it is queued without totals and
+   *  its removal counts all it has used. False, and nothing changes, when
+   *  the channel uses that session or it is queued already. */
+  abandon(session: Pick<Disposal, "sessionId" | "channelId" | "guildId" | "key" | "variant">): boolean {
+    if (this.holds(session.channelId, session.sessionId)) return false;
+    const disposal: Disposal = plain({
+      sessionId: session.sessionId, mode: "archive", channelId: session.channelId, guildId: session.guildId,
+      key: session.key, variant: session.variant, queuedAt: this.now(), attempts: 0,
+    });
+    this.queue.set(disposal.sessionId, disposal);
+    // No row is deleted with it: the insert is all this does on disk.
+    this.store?.retireSessions([disposal]);
+    return true;
+  }
+  /** Whether the table still answers for a session: the channel uses it, or
+   *  it waits to be removed. */
+  holds(channelId: string, sessionId: string): boolean {
+    return this.row(channelId)?.sessionId === sessionId || this.pending().has(sessionId);
+  }
+  /** The queue, with what an earlier process left in the store. */
+  private pending(): Map<string, Disposal> {
+    for (const saved of this.store?.loadDisposals() ?? [])
+      if (!this.queue.has(saved.sessionId)) this.queue.set(saved.sessionId, saved);
+    return this.queue;
+  }
   /** Everything waiting to be removed, oldest first, including what an
    *  earlier process queued and could not finish. */
   disposals(): Disposal[] {
-    for (const saved of this.store?.loadDisposals() ?? [])
-      if (!this.queue.has(saved.sessionId)) this.queue.set(saved.sessionId, saved);
-    return [...this.queue.values()]
+    return [...this.pending().values()]
       .sort((a, b) => a.queuedAt - b.queuedAt || a.sessionId.localeCompare(b.sessionId))
       .map((disposal) => structuredClone(disposal));
   }

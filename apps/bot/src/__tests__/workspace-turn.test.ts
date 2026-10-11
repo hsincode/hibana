@@ -217,22 +217,27 @@ class Cloud {
         return Response.json({ data: request.query.get("order") === "desc" ? [...data].reverse() : data, next_page: null });
       }
       case "POST events": {
-        const event = body.events[0] as Json;
-        if (event.type === "user.message") {
-          const message = session.receive(event.content);
-          this.onMessage(session, session.text(-1));
-          return Response.json({ data: [message] });
+        // One request may carry several events; they take effect in order.
+        const data: Json[] = [];
+        for (const event of body.events as Json[]) {
+          if (event.type === "user.message") {
+            const message = session.receive(event.content);
+            this.onMessage(session, session.text(-1));
+            data.push(message);
+            continue;
+          }
+          if (event.type === "user.interrupt") {
+            session.interrupts++;
+            this.onInterrupt(session);
+          }
+          if (event.type === "user.custom_tool_result") {
+            session.results.push(event);
+            session.history.push({ id: `sevt_${session.id}_r${session.results.length}`, processed_at: at, ...event } as RawEvent);
+            this.onResult(session, event);
+          }
+          data.push({ id: `sevt_${session.id}_u${this.n++}`, ...event });
         }
-        if (event.type === "user.interrupt") {
-          session.interrupts++;
-          this.onInterrupt(session);
-        }
-        if (event.type === "user.custom_tool_result") {
-          session.results.push(event);
-          session.history.push({ id: `sevt_${session.id}_r${session.results.length}`, processed_at: at, ...event } as RawEvent);
-          this.onResult(session, event);
-        }
-        return Response.json({ data: [{ id: `sevt_${session.id}_u${this.n++}`, ...event }] });
+        return Response.json({ data });
       }
     }
     return rejected(404);
@@ -248,7 +253,12 @@ const env = (extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
 const GUILD = "1", CHANNELS = ["11", "12"];
 const dm: Context = { channelId: "10", userId: "20", botId: "30", thread: false, depth: 0, delivered: false };
 const inGuild = (channelId = "11", userId = "20"): Context => ({ ...dm, guildId: GUILD, channelId, userId });
-const today = new Date().toISOString().slice(0, 10);
+// The Workspace reads this clock for the date it writes on a message, for the
+// ledger's day and for a turn's time. It runs, as the real one does, but from
+// a fixed day: nothing here depends on the UTC date the tests happen to run on.
+const OFFSET = Date.UTC(2026, 9, 12, 3) - Date.now();
+const now = () => Date.now() + OFFSET;
+const today = "2026-10-12";
 
 /** A bot whose Workspace client talks to `cloud` and whose Discord client
  *  answers from memory. `open` uses the SQLite store, as a started bot does. */
@@ -256,7 +266,7 @@ async function bot(extra: NodeJS.ProcessEnv = {}, options: { data?: string; clou
   const data = options.data ?? await mkdtemp(join(dir, "bot-"));
   const cloud = options.cloud ?? new Cloud();
   const hibana = new Hibana(loadConfig(env({ HIBANA_DATA_DIR: data, ...extra })), pino({ enabled: false }), {
-    workspace: { fetch: cloud.fetch, sleep: async () => {}, limits: { graceMs: 30, interruptWaitMs: 100, settleMs: 100 } },
+    workspace: { fetch: cloud.fetch, now, sleep: async () => {}, limits: { graceMs: 30, interruptWaitMs: 100, settleMs: 100 } },
   });
   (hibana.client as { user: { id: string } | null }).user = { id: "30" };
   // Every message as it was first posted, and every text a message ever showed.
@@ -321,6 +331,27 @@ async function slash(hibana: Hibana, commandName: string, options: Record<string
 }
 const FAILED = "プロバイダとの通信を再試行しましたが、応答を完了できませんでした。";
 const KEPT = " 進捗を保存しました。`/retry` または次のメッセージで再開できます。";
+const DAY_LIMIT = "Anthropic Workspace の 1 日の利用額の上限に達しているため、実行しませんでした。上限は UTC の 0 時に戻ります。";
+const NO_REPLY = "返信の本文がないまま、このターンが終わりました。必要であれば、もう一度メッセージを送ってください。";
+const LEDGER_UNREAD = "Anthropic Workspace の利用額の記録を読み込めていないため、実行しませんでした。管理者に連絡してください。";
+/** The session takes the message, uses `cost` cents and then fails. */
+const fails = (cost = 30) => (session: Session) => {
+  session.process();
+  session.use(session.spent + cost);
+  session.emit(running(), reported(session.spent), idle("retries_exhausted"));
+};
+/** What `/usage` shows of the Workspace: the day's line, and a model's. */
+const usageToday = (hibana: Hibana) => hibana.workspace.usageLine()?.split("\n")[1];
+const modelLine = (hibana: Hibana, model = "claude-haiku-5-5") =>
+  hibana.workspace.usageLine()?.split("\n").find((line) => line.startsWith(`  ${model}: `));
+/** What `start()` reads from retry_checkpoints.json, and what `ready()` needs of Discord. */
+function restarted(hibana: Hibana, checkpoints: Record<string, Checkpoint>) {
+  (hibana as unknown as { checkpoints: unknown }).checkpoints = checkpoints;
+  const client = hibana.client as unknown as { application: unknown; rest: { put: unknown } };
+  client.application = { id: "1" };
+  client.rest.put = async () => ({});
+  return () => (hibana as unknown as { ready(): Promise<void> }).ready();
+}
 
 describe("a Workspace turn", () => {
   test("Haiku with Ultra creates an ultra session with the Workspace prompt, both kinds of tools and a 300-cent budget, and never asks the Messages API", async () => {
@@ -528,7 +559,46 @@ describe("a Workspace turn", () => {
       // Paused at its budget: any change to it would let the session go on.
       expect(cloud.log.filter((line) => line.includes("budget="))).toEqual(["POST /sessions budget=100"]);
       expect(hibana.workspace.sessions.get("10")!.lease).toBeUndefined();
-      expect(hibana.workspace.usage.summary().today).toEqual({ cost_usd: 1.01, turns: 1 });
+      expect(usageToday(hibana)).toBe("今日: $1.01 / 1 ターン");
+    } finally { await hibana.close(); }
+  });
+
+  test("a turn that ends without a word and without having posted anything says so, and is not sent again", async () => {
+    const { hibana, cloud, sent, checkpoints } = await bot();
+    try {
+      // The session takes the message, works, and goes idle with nothing said.
+      cloud.onMessage = (session) => {
+        session.process();
+        session.use(12);
+        session.emit(running(), reported(12), idle());
+      };
+      expect(await hibana.respond("お願い", { ...dm })).toBe(NO_REPLY);
+      expect(sent).toEqual([NO_REPLY]);
+      // The turn is over: nothing is kept to pick up, its cost is counted,
+      // and the message is not sent a second time, which would cost again.
+      expect(checkpoints()).toEqual({});
+      expect(hibana.workspace.usage.spentCents("day")).toBe(12);
+      expect(cloud.sessions[0]!.messages).toHaveLength(1);
+      expect(hibana.history.info("10").turns).toBe(1);
+    } finally { await hibana.close(); }
+  });
+
+  test("a turn that posted a file and then ends without a word adds nothing", async () => {
+    const { hibana, cloud, sent } = await bot();
+    // As `send_file` does once the file is in the channel.
+    hibana.tools.execute = (async (_name: string, _args: unknown, ctx: Context) => {
+      ctx.delivered = true;
+      return { ok: true };
+    }) as typeof hibana.tools.execute;
+    try {
+      cloud.onMessage = (session) => {
+        session.process();
+        session.emit(running(), calls("send_file", "call_a", { path: "/mnt/session/outputs/report.pdf" }), idle("requires_action", { event_ids: ["call_a"] }));
+      };
+      cloud.onResult = (session) => session.emit(running(), idle());
+      expect(await hibana.respond("レポートを送って", { ...dm })).toBe("");
+      // The status line of the call, and no reply after it.
+      expect(sent).toEqual(["送信: report.pdf"]);
     } finally { await hibana.close(); }
   });
 
@@ -697,12 +767,413 @@ describe("a Workspace turn", () => {
     } finally { await hibana.close(); }
   });
 
+  test("a message whose answer was lost is looked up, not sent again, with the client's retries as they are in production", async () => {
+    const { hibana, cloud, sent } = await bot();
+    try {
+      // The message arrives; only the answer to the request is an error. The
+      // client retries such a request twice by default, and each retry would
+      // be another copy of the message in the session.
+      let posts = 0, found = false;
+      cloud.onCreate = (session) => {
+        cloud.on(`POST /v1/sessions/${session.id}/events`, (request) => {
+          const [event] = request.body!.events as Json[];
+          if (event!.type !== "user.message") return undefined;
+          posts++;
+          session.receive(event!.content);
+          return rejected(500, "api_error");
+        });
+        // The session takes the message up once the bot has found it queued.
+        cloud.on(`GET /v1/sessions/${session.id}/events`, () => {
+          if (posts && !found) setTimeout(() => session.answer("届いていました。"), 0);
+          found ||= posts > 0;
+          return undefined;
+        });
+      };
+      await hibana.respond("こんにちは", { ...dm });
+      expect(posts).toBe(1);
+      expect(cloud.sessions[0]!.messages).toHaveLength(1);
+      expect(sent).toEqual(["届いていました。"]);
+    } finally { await hibana.close(); }
+  }, 20_000);
+
+  test("the network setting reaches the environment the sessions run in", async () => {
+    const limited = await bot({ ANTHROPIC_WORKSPACE_NETWORKING: "limited", ANTHROPIC_WORKSPACE_ALLOWED_HOSTS: "cdn.discordapp.com, example.com" });
+    const open = await bot();
+    try {
+      await limited.hibana.respond("こんにちは", { ...dm });
+      // With the host list alone, pip and npm could not reach their registries.
+      expect(limited.cloud.of("POST", "/v1/environments")[0]!.body!.config.networking).toEqual({
+        type: "limited", allowed_hosts: ["cdn.discordapp.com", "example.com"], allow_package_managers: true,
+      });
+      await open.hibana.respond("こんにちは", { ...dm });
+      expect(open.cloud.of("POST", "/v1/environments")[0]!.body!.config.networking).toEqual({ type: "unrestricted" });
+    } finally {
+      await limited.hibana.close();
+      await open.hibana.close();
+    }
+  });
+
+  test("a server that switches the bot off during a turn stops it, and nothing is posted", async () => {
+    const { hibana, cloud, sent } = await bot();
+    try {
+      cloud.onMessage = (session) => {
+        session.process();
+        session.emit(running(), said("途中まで"));
+        hibana.runtime.snapshot.guilds[GUILD] = { ...hibana.runtime.guild(GUILD), bot_disabled: true };
+        session.emit(said("最後まで"), idle());
+      };
+      expect(await hibana.respond("依頼", inGuild("11"))).toBe("");
+      expect(sent).toEqual([]);
+      expect(cloud.sessions[0]!.interrupts).toBe(1);
+    } finally { await hibana.close(); }
+  });
+
+  test("a Haiku Ultra turn is stopped at its own time limit, not the plain one", async () => {
+    const { hibana, cloud, sent } = await bot({
+      ULTRA_MODE: "true", ANTHROPIC_WORKSPACE_ULTRA_TURN_TIMEOUT_MS: "80", ANTHROPIC_WORKSPACE_TURN_TIMEOUT_MS: "60000",
+    });
+    try {
+      cloud.onMessage = (session) => session.work();
+      await hibana.respond("長い作業", { ...dm });
+      expect(cloud.agents[0]!.multiagent).not.toBeNull();
+      expect(sent).toEqual(["このターンの時間の上限（1 分）に達したため、中断しました。続けるには、もう一度メッセージを送ってください。"]);
+    } finally { await hibana.close(); }
+  }, 3_000);
+
+  test("the message after a budget stop goes out behind an interrupt, in one request, and is answered", async () => {
+    const { hibana, cloud, sent } = await bot();
+    try {
+      cloud.onMessage = (session) => {
+        session.process();
+        session.use(100);
+        session.emit(running(), said("ここまで調べました。"), reported(100), idle("budget_reached"));
+      };
+      await hibana.respond("調べて", { ...dm });
+      const [session] = cloud.sessions;
+      // Paused at its budget: raising it sets the old work going again, and
+      // the interrupt that comes with the message ends it.
+      cloud.onMessage = (s) => s.answer("別の話ですね。", 5);
+      const before = cloud.log.length;
+      await hibana.respond("やっぱり別の話", { ...dm });
+      expect(sent.at(-1)).toBe("別の話ですね。");
+      expect(cloud.log.slice(before)).toContain(`POST /sessions/${session!.id}/events user.interrupt+user.message`);
+      expect(session!.messages).toHaveLength(2);
+      expect(session!.text(1)).toContain("やっぱり別の話");
+    } finally { await hibana.close(); }
+  });
+
+  test("a message after a budget stop that the old work uses up again ends at the budget, not at the time limit", async () => {
+    const { hibana, cloud, sent } = await bot({ ANTHROPIC_WORKSPACE_TURN_TIMEOUT_MS: "1500" });
+    try {
+      cloud.onMessage = (session) => {
+        session.process();
+        session.use(100);
+        session.emit(running(), reported(100), idle("budget_reached"));
+      };
+      await hibana.respond("重い依頼", { ...dm });
+      // The raise sets the paused work going again; here it is not stopped by
+      // the interrupt, reaches the new budget, and the message is never
+      // taken up. Nothing more will happen until the budget changes.
+      cloud.onInterrupt = () => {};
+      cloud.onMessage = (session) => {
+        session.use(session.spent + 100);
+        session.emit(running(), reported(session.spent), idle("budget_reached"));
+      };
+      const started = Date.now();
+      await hibana.respond("やめて", { ...dm });
+      expect(sent.at(-1)).toBe("このターンの費用の上限（$1.00）に達したため、ここで止めました。続けるには、もう一度メッセージを送ってください。");
+      expect(Date.now() - started).toBeLessThan(1000);
+      expect(hibana.workspace.usage.spentCents("day")).toBe(200);
+      expect(hibana.workspace.sessions.get("10")!.lease).toBeUndefined();
+    } finally { await hibana.close(); }
+  });
+
   test("without the key the turn fails as an authentication error and nothing is requested", async () => {
     const { hibana, cloud, sent } = await bot({ ANTHROPIC_WORKSPACE_API_KEY: "" });
     try {
       await hibana.respond("こんにちは", { ...dm });
       expect(sent).toEqual([`プロバイダの認証・権限エラーです。APIキーと利用権限を確認してください。${KEPT}`]);
       expect(cloud.sent).toEqual([]);
+    } finally { await hibana.close(); }
+  });
+});
+
+describe("picking a turn up again", () => {
+  test("/retry is refused like a new message once the day's limit is used up, and nothing is requested", async () => {
+    const { hibana, cloud, sent, checkpoints } = await bot({ ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD: "1.3" });
+    try {
+      cloud.onMessage = fails(30);
+      await hibana.respond("長い依頼", { ...dm });
+      expect(checkpoints()["10/20"]!.ctx.workspaceMark).toMatchObject({ ceilingCents: 100 });
+      // The sweep takes the allowance back and counts the 30 cents. Another
+      // channel then uses the rest of the day's 130 (a cent of which goes to
+      // each of the two sessions that were created).
+      await hibana.workspace.sweep();
+      cloud.onMessage = (session) => session.answer("ok", 98);
+      await hibana.respond("別の依頼", inGuild("11"));
+      expect(cloud.of("POST", "/v1/sessions").at(-1)!.body!.budget.max_list_cost.amount).toBe("99");
+      expect(hibana.workspace.usage.limitCents("day")).toBe(130);
+      // The mark still says 100, of which 70 were never used.
+      const before = cloud.sent.length;
+      await hibana.retry({ ...dm });
+      expect(sent.at(-1)).toBe(DAY_LIMIT);
+      expect(cloud.sent).toHaveLength(before);
+      expect(hibana.workspace.usage.spentCents("day")).toBe(128);
+      // Answered, so there is nothing left to pick up.
+      expect(checkpoints()).toEqual({});
+    } finally { await hibana.close(); }
+  });
+
+  test("/retry goes on under its first ceiling only as far as the day's limit still allows", async () => {
+    const { hibana, cloud, sent } = await bot({ ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD: "1.3" });
+    try {
+      cloud.onMessage = fails(30);
+      await hibana.respond("長い依頼", { ...dm });
+      await hibana.workspace.sweep();
+      const [session] = cloud.sessions;
+      cloud.onMessage = (s) => s.answer("ok", 50);
+      await hibana.respond("別の依頼", inGuild("11"));
+      // 80 of the day's 130 are spent, and two sessions were created. The
+      // turn's ceiling was 100 and it has used 30: of the 70 it had left, the
+      // day has room for 48.
+      const before = cloud.log.length;
+      cloud.onMessage = (s) => s.answer("続きです。", 20);
+      await hibana.retry({ ...dm });
+      expect(sent.at(-1)).toBe("続きです。");
+      expect(cloud.log.slice(before).filter((line) => line.includes("budget="))).toEqual([
+        `POST /sessions/${session!.id} budget=78`, `POST /sessions/${session!.id} budget=51`,
+      ]);
+      expect(session!.text(1).startsWith("[The bot restarted")).toBe(true);
+    } finally { await hibana.close(); }
+  });
+
+  test("/retry right after the failure has what its own turn was given, although that is still held", async () => {
+    const { hibana, cloud, sent } = await bot({ ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD: "1.3" });
+    try {
+      cloud.onMessage = fails(30);
+      await hibana.respond("長い依頼", { ...dm });
+      const [session] = cloud.sessions;
+      // No sweep yet: the turn's lease is on the row and holds 100 of the
+      // day's 130. It is this turn's own, not something to make room beside.
+      expect(hibana.workspace.sessions.get("10")!.lease).toMatchObject({ ceilingCents: 100 });
+      cloud.onMessage = (s) => s.answer("続きです。", 20);
+      await hibana.retry({ ...dm });
+      expect(sent.at(-1)).toBe("続きです。");
+      // The failed turn had lowered the budget on its way out; it goes back
+      // up to the ceiling of the first start, and no further.
+      expect(cloud.log.filter((line) => line.includes("budget="))).toEqual([
+        "POST /sessions budget=100", `POST /sessions/${session!.id} budget=31`,
+        `POST /sessions/${session!.id} budget=100`, `POST /sessions/${session!.id} budget=51`,
+      ]);
+    } finally { await hibana.close(); }
+  });
+
+  test("a turn is not picked up while the ledger is unread", async () => {
+    const data = await mkdtemp(join(dir, "unread-"));
+    const cloud = new Cloud();
+    const first = await bot({}, { data, cloud, open: true });
+    cloud.onMessage = fails(30);
+    await first.hibana.respond("長い依頼", { ...dm });
+    const saved = structuredClone(first.checkpoints());
+    await first.hibana.close();
+
+    const second = await bot({}, { data, cloud, open: true, load: false });
+    try {
+      (second.hibana as unknown as { checkpoints: unknown }).checkpoints = saved;
+      const before = cloud.sent.length;
+      await second.hibana.retry({ ...saved["10/20"]!.ctx, botId: "30" });
+      expect(second.sent).toEqual([LEDGER_UNREAD]);
+      expect(cloud.sent).toHaveLength(before);
+    } finally { await second.hibana.close(); }
+  });
+
+  test("/retry after someone else's turn on the session sends the person's own message again, not a note about the one above", async () => {
+    const { hibana, cloud, sent } = await bot();
+    const ran: { name: string; userId: string }[] = [];
+    const execute = hibana.tools.execute.bind(hibana.tools);
+    hibana.tools.execute = (name, args, ctx) => {
+      ran.push({ name, userId: ctx.userId });
+      return execute(name, args, ctx);
+    };
+    try {
+      // Person 20's turn is accepted and then fails; person 21 is answered.
+      cloud.onMessage = fails(30);
+      await hibana.respond("A の依頼", inGuild("11", "20"));
+      expect(sent.at(-1)).toBe(`${FAILED}（受信中）${KEPT}`);
+      cloud.onMessage = (session) => session.answer("B への返事");
+      await hibana.respond("B の依頼: 設定を全部見せて", inGuild("11", "21"));
+      const [session] = cloud.sessions;
+      // "The message above" would now be person 21's, and the turn's tools
+      // run as person 20.
+      cloud.onMessage = (s) => {
+        s.process();
+        s.emit(running(), calls("get_bot_settings", "call_a"), idle("requires_action", { event_ids: ["call_a"] }));
+      };
+      cloud.onResult = (s) => s.emit(running(), said("A への返事"), idle());
+      const before = cloud.sent.length;
+      await hibana.retry(inGuild("11", "20"));
+      expect(sent.at(-1)).toBe("A への返事");
+      expect(session!.messages).toHaveLength(3);
+      expect(session!.text(2).startsWith("[The bot restarted")).toBe(false);
+      expect(session!.text(2)).toContain("A の依頼");
+      expect(session!.text(2)).not.toContain("B の依頼");
+      expect(ran).toEqual([{ name: "get_bot_settings", userId: "20" }]);
+      // Asked of the session before anything else was sent to it.
+      const [asked] = cloud.sent.slice(before);
+      expect(asked).toMatchObject({ method: "GET", path: `/v1/sessions/${session!.id}/events` });
+      expect([asked!.query.getAll("types[]"), asked!.query.get("order")]).toEqual([["user.message"], "desc"]);
+      // A message of its own: what the session has used (47) plus a turn's allowance.
+      expect(cloud.log.slice(before)).toContain(`POST /sessions/${session!.id} budget=147`);
+    } finally { await hibana.close(); }
+  });
+
+  test("with nobody in between, the turn continues from the message the session has, after asking which one is last", async () => {
+    const { hibana, cloud } = await bot();
+    try {
+      cloud.onMessage = fails(30);
+      await hibana.respond("A の依頼", inGuild("11", "20"));
+      const [session] = cloud.sessions;
+      cloud.onMessage = (s) => s.answer("続きです。");
+      const before = cloud.sent.length;
+      await hibana.retry(inGuild("11", "20"));
+      expect(session!.messages).toHaveLength(2);
+      expect(session!.text(1).startsWith("[The bot restarted while you were working on the message above")).toBe(true);
+      expect(cloud.sent[before]).toMatchObject({ method: "GET", path: `/v1/sessions/${session!.id}/events` });
+      expect(cloud.log).not.toContain(`POST /sessions/${session!.id} budget=130`);
+    } finally { await hibana.close(); }
+  });
+
+  test("when the session cannot say which message is last, the turn fails and sends nothing", async () => {
+    const { hibana, cloud, sent, checkpoints } = await bot();
+    try {
+      cloud.onMessage = fails(30);
+      await hibana.respond("A の依頼", inGuild("11", "20"));
+      const [session] = cloud.sessions;
+      cloud.on(`GET /v1/sessions/${session!.id}/events`, () => rejected(400, "invalid_request_error"));
+      await hibana.retry(inGuild("11", "20")).catch(() => {});
+      expect(session!.messages).toHaveLength(1);
+      expect(sent.at(-1)!.endsWith(KEPT)).toBe(true);
+      expect(checkpoints()["11/20"]!.ctx.workspaceMark).toBeDefined();
+    } finally { await hibana.close(); }
+  });
+
+  test("at the start, a turn left behind another person's is sent again as that person's message", async () => {
+    const data = await mkdtemp(join(dir, "moved-"));
+    const cloud = new Cloud();
+    const first = await bot({}, { data, cloud, open: true });
+    cloud.onMessage = fails(30);
+    await first.hibana.respond("A の依頼", inGuild("11", "20"));
+    cloud.onMessage = (session) => session.answer("B への返事");
+    await first.hibana.respond("B の依頼", inGuild("11", "21"));
+    const saved = structuredClone(first.checkpoints());
+    await first.hibana.close();
+    expect(Object.keys(saved)).toEqual(["11/20"]);
+
+    const second = await bot({}, { data, cloud, open: true });
+    try {
+      const ready = restarted(second.hibana, saved);
+      cloud.onMessage = (session) => session.work();
+      await ready();
+      const [session] = cloud.sessions;
+      await until(() => session!.messages.length === 3);
+      expect(session!.text(2).startsWith("[The bot restarted")).toBe(false);
+      expect(session!.text(2)).toContain("A の依頼");
+      // Still counted as picked up once: the next start leaves it to `/retry`.
+      await until(() => second.checkpoints()["11/20"]?.ctx.workspaceMark?.eventId === `sevt_${session!.id}_msg3`);
+      expect(second.checkpoints()["11/20"]!.ctx.workspaceMark!.resumes).toBe(1);
+      expect(resumesAtStart(second.checkpoints()["11/20"]!)).toBe(false);
+    } finally { await second.hibana.close(); }
+  });
+
+  test("a bot without a store that died in a turn resumes it once, on a new session, and stops the one it can no longer find", async () => {
+    const data = await mkdtemp(join(dir, "storeless-"));
+    const cloud = new Cloud();
+    // What the dead process left: a session still running under the turn's
+    // budget, and a checkpoint that names it. Its rows were in memory only.
+    const left = cloud.adopt("sesn_left", { status: "running", budget: 100, used: 40 });
+    const key = conversationKey({ provider: "anthropic_workspace", model: "claude-haiku-5-5", effort: "high" }, "workspace", "plain");
+    const saved: Record<string, Checkpoint> = {
+      "10/20": {
+        ctx: { ...dm, harness: "workspace", workspaceMark: { sessionId: left.id, eventId: "sevt_left_msg1", ceilingCents: 100, startedAt: now(), resumes: 0 } },
+        messages: [{ role: "user", content: "長い依頼", turnStart: true }], at: Date.now(), historyStart: 0, selectionKey: key,
+      },
+    };
+    expect(resumesAtStart(saved["10/20"]!)).toBe(true);
+    const { hibana, checkpoints } = await bot({ CONVERSATION_DB_PATH: "" }, { data, cloud });
+    try {
+      const ready = restarted(hibana, saved);
+      cloud.onMessage = (session) => session.work();
+      await ready();
+      await until(() => cloud.sessions.length === 2 && cloud.sessions[1]!.messages.length === 1);
+      const [, fresh] = cloud.sessions;
+      // The message goes to a new session, with an allowance of its own.
+      expect(fresh!.text(0)).toContain("長い依頼");
+      expect(fresh!.state.budget.max_list_cost.amount).toBe("100");
+      // It was picked up once all the same: a bot that dies again leaves it to `/retry`.
+      await until(() => checkpoints()["10/20"]?.ctx.workspaceMark?.sessionId === fresh!.id);
+      expect(checkpoints()["10/20"]!.ctx.workspaceMark!.resumes).toBe(1);
+      expect(resumesAtStart(checkpoints()["10/20"]!)).toBe(false);
+      // The session nothing else remembers is stopped, lowered and put away.
+      await until(() => !!left.state.archived_at);
+      expect(left.interrupts).toBe(1);
+      expect(cloud.log).toContain("POST /sessions/sesn_left budget=41");
+      expect(hibana.workspace.sessions.disposals()).toEqual([]);
+      // All it has used is counted: what the dead process had already
+      // recorded of it is not known here.
+      expect(hibana.workspace.usage.spentCents("day")).toBe(40);
+      fresh!.emit(said("やり直しました。"), idle());
+      await until(() => !checkpoints()["10/20"]);
+    } finally { await hibana.close(); }
+  });
+
+  test("a session that was already put away is not stopped or counted a second time", async () => {
+    const { hibana, cloud, sent, checkpoints } = await bot();
+    try {
+      cloud.onMessage = fails(30);
+      await hibana.respond("長い依頼", { ...dm });
+      const [first] = cloud.sessions;
+      // Another model: the row is retired, the session archived and counted.
+      hibana.history.clearGuild();
+      await until(() => !!first!.state.archived_at && hibana.workspace.sessions.disposals().length === 0);
+      expect(hibana.workspace.usage.spentCents("day")).toBe(30);
+      expect(checkpoints()["10/20"]!.ctx.workspaceMark!.sessionId).toBe(first!.id);
+      const archives = () => cloud.of("POST", `/v1/sessions/${first!.id}/archive`).length;
+      expect(archives()).toBe(1);
+      cloud.onMessage = (session) => session.answer("やり直しました。", 5);
+      await hibana.retry({ ...dm });
+      expect(sent.at(-1)).toBe("やり直しました。");
+      await hibana.workspace.sweep();
+      expect(archives()).toBe(1);
+      expect(hibana.workspace.sessions.disposals()).toEqual([]);
+      expect(hibana.workspace.usage.spentCents("day")).toBe(35);
+    } finally { await hibana.close(); }
+  });
+
+  test("a session that terminated under its turn was counted when it left the table, and /retry does not count it again", async () => {
+    const { hibana, cloud, sent, checkpoints } = await bot();
+    try {
+      cloud.onMessage = (session) => {
+        session.process();
+        session.use(30);
+        session.emit(running(), reported(30), { type: "session.status_terminated" });
+      };
+      await hibana.respond("長い依頼", { ...dm });
+      const [first] = cloud.sessions;
+      await until(() => hibana.workspace.sessions.disposals().length === 0);
+      expect(hibana.workspace.usage.spentCents("day")).toBe(30);
+      expect(checkpoints()["10/20"]!.ctx.workspaceMark!.sessionId).toBe(first!.id);
+      // Nothing archives a terminated session: it cannot be told from one
+      // nobody put away by `archived_at`, only by its status.
+      expect(first!.state.archived_at).toBeNull();
+      cloud.onMessage = (session) => session.answer("やり直しました。", 5);
+      const before = cloud.sent.length;
+      await hibana.retry({ ...dm });
+      expect(sent.at(-1)).toBe("やり直しました。");
+      await hibana.workspace.sweep();
+      expect(hibana.workspace.sessions.disposals()).toEqual([]);
+      expect(hibana.workspace.usage.spentCents("day")).toBe(35);
+      // Looked at once, and left alone.
+      expect(cloud.log.slice(before).filter((line) => line.includes(first!.id))).toEqual([`GET /sessions/${first!.id}`]);
     } finally { await hibana.close(); }
   });
 });
@@ -737,6 +1208,90 @@ describe("steering", () => {
       expect(second).toContain("追加その二");
       expect(second.indexOf("追加その一")).toBeLessThan(second.indexOf("追加その二"));
       expect(sent).toEqual(["まとめて答えます。"]);
+    } finally { await hibana.close(); }
+  });
+});
+
+describe("one channel, one turn at a time", () => {
+  test("two people who write in one channel at once are answered one after the other, each call run as its own speaker", async () => {
+    const { hibana, cloud, sent } = await bot();
+    const ran: { name: string; userId: string }[] = [];
+    const execute = hibana.tools.execute.bind(hibana.tools);
+    hibana.tools.execute = (name, args, ctx) => {
+      ran.push({ name, userId: ctx.userId });
+      return execute(name, args, ctx);
+    };
+    try {
+      // Each turn calls one tool and then answers by name.
+      cloud.onMessage = (session) => {
+        session.process();
+        const id = `call_${session.messages.length}`;
+        session.emit(running(), calls("get_bot_settings", id), idle("requires_action", { event_ids: [id] }));
+      };
+      let hold = true;
+      const answers = (session: Session) => session.emit(running(), said(`${session.results.length} 人目への返事`), idle());
+      cloud.onResult = (session) => { if (!hold) answers(session); };
+      const first = hibana.respond("A の依頼", inGuild("11", "20"));
+      await until(() => cloud.sessions[0]?.results.length === 1);
+      const [session] = cloud.sessions;
+      const second = hibana.respond("B の依頼", inGuild("11", "21"));
+      // Another channel does not wait for this one.
+      const other = hibana.respond("別のチャンネル", inGuild("12", "21"));
+      await until(() => cloud.sessions[1]?.results.length === 1);
+      await Bun.sleep(30);
+      // The second person's message is not sent, and nothing of theirs has
+      // run, while the first person's turn is still on the session.
+      expect(session!.messages).toHaveLength(1);
+      expect(cloud.of("POST", `/v1/sessions/${session!.id}/events`).map((r) => r.body!.events[0].type))
+        .toEqual(["user.message", "user.custom_tool_result"]);
+      expect(ran).toEqual([{ name: "get_bot_settings", userId: "20" }, { name: "get_bot_settings", userId: "21" }]);
+      hold = false;
+      for (const waiting of cloud.sessions) answers(waiting);
+      expect(await first).toBe("1 人目への返事");
+      expect(await second).toBe("2 人目への返事");
+      await other;
+      expect(session!.messages).toHaveLength(2);
+      expect(session!.text(1)).toContain("B の依頼");
+      // One call per turn, one result per call, each as the person it answers.
+      expect(session!.results.map((r) => r.custom_tool_use_id)).toEqual(["call_1", "call_2"]);
+      expect(ran).toEqual([
+        { name: "get_bot_settings", userId: "20" }, { name: "get_bot_settings", userId: "21" },
+        { name: "get_bot_settings", userId: "21" },
+      ]);
+      expect(sent).toContain("2 人目への返事");
+      expect(session!.interrupts).toBe(0);
+    } finally { await hibana.close(); }
+  });
+
+  test("a second turn handed over while the channel's turn is still running is refused before anything is sent", async () => {
+    const { hibana, cloud } = await bot();
+    // What bot.ts passes, without its queue in front.
+    const turn = (userId: string, text: string) => {
+      const ctx: Context = { ...inGuild("11", userId), harness: "workspace", signal: new AbortController().signal };
+      const settings = hibana.runtime.resolve(ctx.guildId, ctx.userId);
+      return hibana.workspace.turn({
+        ctx, settings, key: conversationKey(settings.selection, "workspace", "plain"), text,
+        messages: [{ role: "user", content: text, turnStart: true }],
+        steering: new AbortController().signal, onSent: async () => {},
+      });
+    };
+    try {
+      cloud.onMessage = (session) => session.work();
+      const first = turn("20", "A の依頼");
+      await until(() => cloud.sessions[0]?.messages.length === 1);
+      const [session] = cloud.sessions;
+      const before = cloud.sent.length;
+      const second = await Promise.race([
+        turn("21", "B の依頼").then(() => "ran", (error: Error) => error.message),
+        Bun.sleep(300).then(() => "still going"),
+      ]);
+      expect(second).toBe("A Workspace turn is already running in this channel");
+      expect(cloud.sent).toHaveLength(before);
+      // The turn that was there is not disturbed, and is still the one a clear stops.
+      session!.emit(said("A への返事"), idle());
+      expect((await first).text).toBe("A への返事");
+      expect(session!.messages).toHaveLength(1);
+      expect(session!.interrupts).toBe(0);
     } finally { await hibana.close(); }
   });
 });
@@ -1038,23 +1593,27 @@ describe("limits", () => {
   test("the day's limit bounds a turn's allowance, counts what running turns may still spend, and then refuses", async () => {
     const { hibana, cloud, sent } = await bot({ ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD: "1.3" });
     try {
-      // The first turn may take its whole 100 cents; while it runs, only 30
-      // of the day's 130 are left for a second one.
+      // The first turn may take its whole 100 cents; while it runs, only 29
+      // of the day's 130 are left for a second one: each new session counts
+      // as a cent, whatever it goes on to report.
       cloud.onMessage = (session) => session.work();
       const first = hibana.respond("一つ目", inGuild("11"));
       await until(() => cloud.sessions[0]?.messages.length === 1);
       cloud.onMessage = (session) => session.answer("二つ目の返事", 20);
       await hibana.respond("二つ目", inGuild("12"));
-      expect(cloud.of("POST", "/v1/sessions").map((r) => r.body!.budget.max_list_cost.amount)).toEqual(["100", "30"]);
+      expect(cloud.of("POST", "/v1/sessions").map((r) => r.body!.budget.max_list_cost.amount)).toEqual(["100", "29"]);
       const [a] = cloud.sessions;
       a!.use(90);
       a!.emit(said("一つ目の返事"), reported(90), idle());
       await first;
-      // 110 of 130 cents are spent: the next turn gets the 20 that are left.
+      // 110 cents are spent and two sessions were created: the next turn
+      // gets the 18 that are left of 130.
       cloud.onMessage = (session) => session.answer("三つ目の返事", 17);
       await hibana.respond("三つ目", inGuild("12"));
-      expect(cloud.log.filter((line) => line.includes("budget=")).at(-2)).toBe(`POST /sessions/${cloud.sessions[1]!.id} budget=40`);
-      // 127 are spent, and the 3 left are less than a turn is started for.
+      // Raised to the 20 it has used plus 18. It uses 17 of them, which
+      // leaves nothing to take back.
+      expect(cloud.log.filter((line) => line.includes("budget=")).at(-1)).toBe(`POST /sessions/${cloud.sessions[1]!.id} budget=38`);
+      // 127 are spent, and the 1 left is less than a turn is started for.
       cloud.onMessage = () => { throw new Error("nothing may be sent"); };
       const before = cloud.sent.length;
       await hibana.respond("四つ目", inGuild("11"));
@@ -1077,6 +1636,166 @@ describe("limits", () => {
       release();
       await first;
       expect(cloud.of("POST", "/v1/sessions").map((r) => r.body!.budget.max_list_cost.amount)).toEqual(["100", "30"]);
+    } finally { await hibana.close(); }
+  });
+
+  describe("an allowance that was not taken back", () => {
+    /** The first session refuses every change of its budget, so its turn
+     *  cannot lower it again. Returns what lets the changes through. */
+    const stuck = (cloud: Cloud) => {
+      let path = "";
+      cloud.onCreate = (session) => {
+        if (path) return;
+        path = `POST /v1/sessions/${session.id}`;
+        cloud.on(path, () => rejected(400, "invalid_request_error"));
+      };
+      return () => cloud.off(path);
+    };
+
+    test("stays leased on the row after the turn, until the sweep takes it back", async () => {
+      const { hibana, cloud, sent } = await bot();
+      try {
+        const free = stuck(cloud);
+        await hibana.respond("一つ目", { ...dm });
+        const [session] = cloud.sessions;
+        // The turn itself went well and is counted; its budget is still up.
+        expect(sent).toEqual(["ok"]);
+        expect(hibana.workspace.usage.spentCents("day")).toBe(17);
+        expect(session!.state.budget.max_list_cost.amount).toBe("100");
+        expect(hibana.workspace.sessions.get("10")).toMatchObject({ lease: { ceilingCents: 100 }, totals: { list_cost_cents: 17 } });
+        free();
+        await hibana.workspace.sweep();
+        expect(session!.state.budget.max_list_cost.amount).toBe("18");
+        expect(hibana.workspace.sessions.get("10")!.lease).toBeUndefined();
+        expect(hibana.workspace.usage.spentCents("day")).toBe(17);
+      } finally { await hibana.close(); }
+    });
+
+    test("is held against the day's limit for the turns of other channels", async () => {
+      const { hibana, cloud } = await bot({ ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD: "1.3" });
+      try {
+        stuck(cloud);
+        await hibana.respond("一つ目", { ...dm });
+        // 17 cents are counted, and a cent for the session. The session may
+        // still go up to its 100: 83 more. That leaves 29 of the day's 130.
+        await hibana.respond("二つ目", inGuild("11"));
+        expect(cloud.of("POST", "/v1/sessions").map((r) => r.body!.budget.max_list_cost.amount)).toEqual(["100", "29"]);
+      } finally { await hibana.close(); }
+    });
+
+    test("is held together with the allowance of the next turn on the same session", async () => {
+      const { hibana, cloud } = await bot({ ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD: "2.5" });
+      try {
+        const free = stuck(cloud);
+        await hibana.respond("一つ目", { ...dm });
+        const [session] = cloud.sessions;
+        // The channel's next turn is granted 100 and has not raised anything
+        // yet: the session's first read is slow to answer.
+        let release = () => {};
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        let reading = false;
+        cloud.on(`GET /v1/sessions/${session!.id}`, () => {
+          if (reading) return undefined;
+          reading = true;
+          return held.then(() => undefined) as never;
+        });
+        const second = hibana.respond("二つ目", { ...dm });
+        await until(() => reading);
+        // 18 counted, and this session may add the 83 of before and the 100
+        // of now: 49 of the day's 250 are left for anyone else.
+        await hibana.respond("別のチャンネル", inGuild("11"));
+        expect(cloud.of("POST", "/v1/sessions")[1]!.body!.budget.max_list_cost.amount).toBe("49");
+        free();
+        release();
+        expect(await second).toBe("ok");
+      } finally { await hibana.close(); }
+    });
+
+    test("and a running turn's allowance is held against the month's limit too", async () => {
+      const { hibana, cloud } = await bot({ ANTHROPIC_WORKSPACE_MONTHLY_BUDGET_USD: "1.3" });
+      try {
+        cloud.onMessage = (session) => session.work();
+        const first = hibana.respond("一つ目", inGuild("11"));
+        await until(() => cloud.sessions[0]?.messages.length === 1);
+        cloud.onMessage = (session) => session.answer("二つ目の返事");
+        await hibana.respond("二つ目", inGuild("12"));
+        // The day has room for 100; the month has 130, less the 100 that the
+        // first turn may still use and the cent of its session.
+        expect(cloud.of("POST", "/v1/sessions").map((r) => r.body!.budget.max_list_cost.amount)).toEqual(["100", "29"]);
+        cloud.sessions[0]!.emit(said("一つ目の返事"), idle());
+        await first;
+      } finally { await hibana.close(); }
+    });
+  });
+
+  test("sessions that each cost less than a cent still use up the day's limit, one cent each", async () => {
+    const { hibana, cloud, sent } = await bot({ ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD: "0.1" });
+    try {
+      // A short answer on Haiku: the session reports whole cents, rounded, so "0".
+      cloud.onMessage = (session) => session.answer("ok", 0);
+      for (let n = 0; n < 30; n++) {
+        await hibana.respond("短い質問", { ...dm });
+        // A new conversation, and so a new session, every time.
+        hibana.history.clear("10");
+        await hibana.workspace.sweep();
+      }
+      // Ten cents a day: the allowances were 10, 9, 8, 7, 6 and 5, and 4 is
+      // less than a turn is started for.
+      expect(cloud.of("POST", "/v1/sessions").map((r) => r.body!.budget.max_list_cost.amount)).toEqual(["10", "9", "8", "7", "6", "5"]);
+      expect(sent.filter((text) => text === "ok")).toHaveLength(6);
+      expect(sent.filter((text) => text === DAY_LIMIT)).toHaveLength(24);
+      // The owner still reads what the sessions reported, which is nothing.
+      expect(hibana.workspace.usage.spentCents("day")).toBe(0);
+      expect(hibana.workspace.usageLine()).toContain("今日: $0.00 / 6 ターン");
+    } finally { await hibana.close(); }
+  });
+
+  test("a turn whose session reports no cost counts as its whole allowance against the limits", async () => {
+    const { hibana, cloud, sent } = await bot({ ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD: "2.5" });
+    try {
+      // The session works and reports its tokens, but never a list cost.
+      cloud.onMessage = (session) => {
+        session.process();
+        session.state.usage = { input_tokens: 5000, output_tokens: 100 };
+        session.emit(running(), said("ok"), { type: "session.usage", usage: session.state.usage }, idle());
+      };
+      for (let n = 0; n < 4; n++) {
+        await hibana.respond("質問", { ...dm });
+        hibana.history.clear("10");
+        await hibana.workspace.sweep();
+      }
+      // 250 cents: 100 and a cent for the session, the same again, and the 48 that are left.
+      expect(cloud.of("POST", "/v1/sessions").map((r) => r.body!.budget.max_list_cost.amount)).toEqual(["100", "100", "48"]);
+      expect(sent).toEqual(["ok", "ok", "ok", DAY_LIMIT]);
+      expect(hibana.workspace.usage.spentCents("day")).toBe(0);
+      expect(hibana.workspace.usageLine()).toContain("額の報告が無かったターン: 3（合計に入っていません）");
+    } finally { await hibana.close(); }
+  });
+
+  test("a turn that was cleared before its message went out is not counted as its allowance", async () => {
+    const { hibana, cloud } = await bot({ ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD: "2.5" });
+    try {
+      // The session exists, and has not reported anything yet, when the clear arrives.
+      let release = () => {};
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      let reading = false;
+      cloud.onCreate = (session) => cloud.on(`GET /v1/sessions/${session.id}`, () => {
+        if (reading) return undefined;
+        reading = true;
+        return held.then(() => undefined) as never;
+      });
+      const turn = hibana.respond("依頼", { ...dm });
+      await until(() => reading);
+      hibana.history.clear("10");
+      release();
+      expect(await turn).toBe("");
+      expect(cloud.sessions[0]!.messages).toHaveLength(0);
+      // Only the cent of the session it created.
+      cloud.onCreate = () => {};
+      cloud.onMessage = (session) => session.answer("ok");
+      await hibana.respond("次の依頼", inGuild("11"));
+      expect(cloud.of("POST", "/v1/sessions").at(-1)!.body!.budget.max_list_cost.amount).toBe("100");
+      expect(hibana.workspace.usage.limitCents("day")).toBe(19);
     } finally { await hibana.close(); }
   });
 
@@ -1106,10 +1825,12 @@ describe("the usage ledger and the sweep", () => {
       cloud.onMessage = (session) => session.answer("二つ目の返事", 23);
       await hibana.respond("二つ目", { ...dm });
       await hibana.respond("別のチャンネル", inGuild("11"));
-      const summary = hibana.workspace.usage.summary();
       // 17 + 23 on one session, 23 on the other: cumulative figures are not added up.
-      expect(summary.today).toEqual({ cost_usd: 0.63, turns: 3 });
-      expect(summary.month_by_model["claude-haiku-5-5"]).toMatchObject({ cost_usd: 0.63, turns: 3, sessions: 2, ultra_turns: 0 });
+      expect(usageToday(hibana)).toBe("今日: $0.63 / 3 ターン");
+      expect(modelLine(hibana)).toBe("  claude-haiku-5-5: $0.63 / 3 ターン");
+      expect(hibana.workspace.usage.spentCents("day")).toBe(63);
+      // Two sessions were created: a cent each, for the limits only.
+      expect(hibana.workspace.usage.limitCents("day")).toBe(65);
       expect(hibana.workspace.sessions.get("10")!.totals!.list_cost_cents).toBe(40);
 
       hibana.runtime.snapshot.user_roles["20"] = "administrator";
@@ -1145,17 +1866,39 @@ describe("the usage ledger and the sweep", () => {
       // Written when the budget was raised: the 17 cents used plus this turn's 100.
       expect(hibana.workspace.sessions.get("10")!.lease).toMatchObject({ ceilingCents: 117 });
       // The failed turn is not counted yet, and is still held against the day's limit.
-      expect(hibana.workspace.usage.summary().today).toEqual({ cost_usd: 0.17, turns: 1 });
+      expect(usageToday(hibana)).toBe("今日: $0.17 / 1 ターン");
       const before = cloud.sent.length;
       await hibana.workspace.sweep();
       expect(cloud.log.slice(before)).toEqual([`GET /sessions/${session!.id}`, `POST /sessions/${session!.id}/events user.interrupt`]);
       expect(hibana.workspace.sessions.get("10")!.lease).toBeUndefined();
       expect(hibana.workspace.sessions.get("10")!.totals!.list_cost_cents).toBe(47);
       // Its cost, but not a turn.
-      expect(hibana.workspace.usage.summary().today).toEqual({ cost_usd: 0.47, turns: 1 });
+      expect(usageToday(hibana)).toBe("今日: $0.47 / 1 ターン");
       // A second pass finds nothing to do.
       await hibana.workspace.sweep();
       expect(cloud.sent).toHaveLength(before + 2);
+    } finally { await hibana.close(); }
+  });
+
+  test("a failed turn's session that reports no cost is counted by the sweep as the allowance it still held", async () => {
+    const { hibana, cloud } = await bot();
+    try {
+      // The session works, reports its tokens but never a list cost, and fails.
+      cloud.onMessage = (session) => {
+        session.process();
+        session.state.usage = { input_tokens: 5000, output_tokens: 100 };
+        session.emit(running(), { type: "session.usage", usage: session.state.usage }, idle("retries_exhausted"));
+      };
+      await hibana.respond("依頼", { ...dm });
+      expect(hibana.workspace.sessions.get("10")!.lease).toMatchObject({ ceilingCents: 100 });
+      // So far only the cent of the session it created.
+      expect(hibana.workspace.usage.limitCents("day")).toBe(1);
+      await hibana.workspace.sweep();
+      expect(hibana.workspace.sessions.get("10")!.lease).toBeUndefined();
+      // What it cost is not known; for the limits it may have been all of the 100.
+      expect(hibana.workspace.usage.spentCents("day")).toBe(0);
+      expect(hibana.workspace.usage.limitCents("day")).toBe(101);
+      expect(hibana.workspace.usageLine()).toContain("額の報告が無かったターン: 1（合計に入っていません）");
     } finally { await hibana.close(); }
   });
 
@@ -1235,8 +1978,101 @@ describe("the usage ledger and the sweep", () => {
       await sweep;
       await until(() => cloud.deleted.includes(session!.id));
       await until(() => hibana.workspace.sessions.disposals().length === 0);
-      expect(hibana.workspace.usage.summary().today).toEqual({ cost_usd: 0.3, turns: 0 });
+      expect(usageToday(hibana)).toBe("今日: $0.30 / 0 ターン");
     } finally { await hibana.close(); }
+  });
+
+  test("a turn that ends while the sweep is busy with another session is not counted a second time", async () => {
+    const { hibana, cloud } = await bot();
+    try {
+      const key = conversationKey(hibana.config.selection, "workspace", "plain");
+      // Channel 10: a session an earlier turn left with its ceiling up.
+      cloud.adopt("sesn_left", { status: "running", budget: 300, used: 120 });
+      hibana.workspace.sessions.save({
+        channelId: "10", key, sessionId: "sesn_left", variant: "plain",
+        totals: sessionTotals({ list_cost: usd(100) }).totals, lease: { ceilingCents: 300, at: now() },
+      });
+      // Channel 11: an ordinary turn, under way when the sweep lists its rows.
+      cloud.onMessage = (session) => session.work();
+      const turn = hibana.respond("こんにちは", inGuild("11"));
+      await until(() => cloud.sessions[1]?.messages.length === 1);
+      const [, other] = cloud.sessions;
+      let release = () => {};
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      let reading = false;
+      cloud.on("GET /v1/sessions/sesn_left", () => {
+        if (reading) return undefined;
+        reading = true;
+        return held.then(() => undefined) as never;
+      });
+      const sweep = hibana.workspace.sweep();
+      await until(() => reading);
+      // The turn ends by itself while the sweep still waits on the first session.
+      other!.use(17);
+      other!.emit(said("ok"), reported(17), idle());
+      expect(await turn).toBe("ok");
+      expect(hibana.workspace.usage.spentCents("day")).toBe(17);
+      const before = cloud.sent.length;
+      release();
+      await sweep;
+      // The 20 the first session added, and the turn's 17 once.
+      expect(hibana.workspace.usage.spentCents("day")).toBe(37);
+      expect(cloud.sent.slice(before).some((r) => r.path.includes(other!.id))).toBe(false);
+      expect(other!.interrupts).toBe(0);
+      expect(hibana.workspace.sessions.get("11")!.totals!.list_cost_cents).toBe(17);
+    } finally { await hibana.close(); }
+  });
+
+  test("while the ledger is unread the sweep only stops the spending; what the sessions used is counted once the ledger is read", async () => {
+    const data = await mkdtemp(join(dir, "damaged-"));
+    const ledger = join(data, "anthropic_workspace_usage.json");
+    const cloud = new Cloud();
+    // A ledger that does not parse: `load` rejects, and `start()` goes on.
+    await Bun.write(ledger, "{ not json");
+    const first = await bot({}, { data, cloud, open: true, load: false });
+    await first.hibana.workspace.load().catch(() => {});
+    expect(first.hibana.workspace.usage.loaded).toBe(false);
+    const key = conversationKey(first.hibana.config.selection, "workspace", "plain");
+    const cents = (amount: number) => sessionTotals({ list_cost: usd(amount) }).totals;
+    // A session a turn left with its ceiling up, and one waiting to be archived.
+    const left = cloud.adopt("sesn_left", { status: "running", budget: 300, used: 250 });
+    const done = cloud.adopt("sesn_done", { budget: 200, used: 60 });
+    const table = first.hibana.workspace.sessions;
+    table.save({ channelId: "10", key, sessionId: left.id, variant: "plain", totals: cents(100), lease: { ceilingCents: 300, at: now() } });
+    table.save({ channelId: "11", guildId: GUILD, key, sessionId: done.id, variant: "plain", totals: cents(50) });
+    table.retire("11", "archive");
+
+    await first.hibana.workspace.sweep();
+    expect(cloud.log).toEqual([
+      "GET /sessions/sesn_left", "POST /sessions/sesn_left/events user.interrupt", "POST /sessions/sesn_left budget=251",
+      "GET /sessions/sesn_done", "POST /sessions/sesn_done budget=61",
+    ]);
+    // Nothing is counted, and nothing that says "counted" is written: the
+    // cost would be in this process's memory alone.
+    expect(first.hibana.workspace.usage.spentCents("day")).toBe(0);
+    expect(table.get("10")).toMatchObject({ totals: { list_cost_cents: 100 }, lease: { ceilingCents: 300 } });
+    expect(table.disposals()).toMatchObject([{ sessionId: done.id, attempts: 0, totals: { list_cost_cents: 50 } }]);
+    expect(done.state.archived_at).toBeNull();
+    // Stopped once: later passes of this process have nothing to ask of them.
+    await first.hibana.workspace.sweep();
+    await first.hibana.workspace.sweep();
+    expect(cloud.sent).toHaveLength(5);
+    expect(left.interrupts).toBe(1);
+    await first.hibana.close();
+    expect(await readFile(ledger, "utf8")).toBe("{ not json");
+
+    // The owner removes the damaged file and starts the bot again.
+    await rm(ledger);
+    const second = await bot({}, { data, cloud, open: true });
+    try {
+      await second.hibana.workspace.sweep();
+      // 150 from the one, 10 from the other.
+      expect(second.hibana.workspace.usage.spentCents("day")).toBe(160);
+      expect(second.hibana.workspace.sessions.get("10")!.totals!.list_cost_cents).toBe(250);
+      expect(second.hibana.workspace.sessions.get("10")!.lease).toBeUndefined();
+      expect(done.state.archived_at).toBeTruthy();
+      expect(second.hibana.workspace.sessions.disposals()).toEqual([]);
+    } finally { await second.hibana.close(); }
   });
 
   test("a session that a dead process left running under a raised budget is stopped at the next start", async () => {
@@ -1258,7 +2094,7 @@ describe("the usage ledger and the sweep", () => {
       ]);
       expect(hibana.workspace.sessions.get("10")!.lease).toBeUndefined();
       // The 20 cents it used since the row was last counted, as Haiku Ultra.
-      expect(hibana.workspace.usage.summary().month_by_model["claude-haiku-5-5"]).toMatchObject({ cost_usd: 0.2, ultra_cost_usd: 0.2, turns: 0 });
+      expect(modelLine(hibana)).toBe("  claude-haiku-5-5: $0.20 / 0 ターン（うち Ultra $0.20 / 0 ターン）");
     } finally { await hibana.close(); }
   });
 
@@ -1315,6 +2151,29 @@ describe("the usage ledger and the sweep", () => {
       expect(direct!.messages).toHaveLength(1);
       expect(second.checkpoints()["10/20"]!.ctx.workspaceMark!.resumes).toBe(1);
     } finally { await second.hibana.close(); }
+  });
+
+  test("at the start the sessions are stopped even when the rest of the start fails", async () => {
+    const data = await mkdtemp(join(dir, "start-"));
+    const cloud = new Cloud();
+    cloud.adopt("sesn_dead", { status: "running", budget: 300, used: 120 });
+    const store = new ConversationStore(join(data, "conversations.db"));
+    store.open();
+    new SessionTable(store).save({
+      channelId: "10", key: conversationKey({ provider: "anthropic_workspace", model: "claude-haiku-5-5", effort: "high" }, "workspace", "plain"),
+      sessionId: "sesn_dead", variant: "plain", totals: sessionTotals({ list_cost: usd(100) }).totals, lease: { ceilingCents: 300, at: Date.now() },
+    });
+    store.close();
+    const { hibana } = await bot({}, { data, cloud, open: true });
+    try {
+      const ready = restarted(hibana, {});
+      // Discord refuses the command registration.
+      (hibana.client as unknown as { rest: { put: unknown } }).rest.put = async () => { throw new Error("Discord is unavailable"); };
+      await expect(ready()).rejects.toThrow("Discord is unavailable");
+      // The sweep asks nothing of Discord, and does not wait for it.
+      await until(() => cloud.log.includes("POST /sessions/sesn_dead budget=121"), 500);
+      await until(() => !hibana.workspace.sessions.get("10")!.lease, 500);
+    } finally { await hibana.close(); }
   });
 
   test("the bot resumes a Workspace turn by itself once, then leaves it to /retry", () => {
@@ -1383,6 +2242,64 @@ describe("workflow runs", () => {
       ]);
       expect(sent.at(-1)).toBe("終わりました。");
       expect(hibana.workspace.sessions.get("11")!.state).toMatchObject({ openRuns: [], runOwners: {}, turns: 3 });
+    } finally { await hibana.close(); }
+  });
+
+  test("a thread that an earlier turn saw created reads for the person who started its run, and for nobody else", async () => {
+    const { hibana, cloud, sent } = await bot({ ULTRA_MODE: "true" });
+    const ran: { name: string; userId: string; depth: number; role?: string }[] = [];
+    const execute = hibana.tools.execute.bind(hibana.tools);
+    hibana.tools.execute = (name, args, ctx) => {
+      ran.push({ name, userId: ctx.userId, depth: ctx.depth, role: ctx.agentRole });
+      return execute(name, args, ctx);
+    };
+    try {
+      // Person 20 starts a run. The session says once, here, which run the
+      // thread belongs to; the thread reads a setting and the run pauses.
+      cloud.onMessage = (session) => {
+        session.process();
+        session.emit(running(),
+          { type: "workflow_run.created", workflow_run_id: "wrun_1", name: "survey", description: null, phases: [] },
+          { type: "session.thread_created", session_thread_id: "sthr_1", agent_name: "reader", workflow_run_id: "wrun_1" },
+          calls("get_bot_settings", "call_1", {}, "sthr_1"));
+      };
+      const pauses = (text: string) => (s: Session) => s.emit({ type: "workflow_run.status_idle", workflow_run_id: "wrun_1" }, said(text), idle());
+      cloud.onResult = pauses("調査を始めました。");
+      await hibana.respond("調べて", inGuild("11", "20"));
+      const [session] = cloud.sessions;
+      expect(ran).toEqual([{ name: "get_bot_settings", userId: "20", depth: 1, role: "worker" }]);
+
+      // In every later turn the same thread calls again, and nothing on the
+      // stream names its run a second time.
+      const again = (call: string) => (s: Session) => {
+        s.process();
+        s.emit(running(), calls("get_bot_settings", call, {}, "sthr_1"));
+      };
+      // Person 21 writes next: the run is not theirs, and reads nothing for them.
+      cloud.onMessage = again("call_2");
+      cloud.onResult = pauses("別の人への返事");
+      await hibana.respond("こんにちは", inGuild("11", "21"));
+      expect(ran).toHaveLength(1);
+      expect(session!.results[1]).toMatchObject({ custom_tool_use_id: "call_2", is_error: true });
+      expect(session!.results[1]!.content[0].text).toContain("the person now being answered did not start");
+      expect(hibana.workspace.sessions.get("11")!.state).toMatchObject({ openRuns: [{ id: "wrun_1", name: "survey" }], runOwners: { wrun_1: "20" } });
+
+      // Person 20 asks to go on: the thread is theirs again, as a worker.
+      cloud.onMessage = again("call_3");
+      cloud.onResult = (s) => s.emit({ type: "workflow_run.status_ended", workflow_run_id: "wrun_1", result: { type: "completed" } }, running(), said("終わりました。"), idle());
+      await hibana.respond("続けて", inGuild("11", "20"));
+      expect(ran).toEqual([
+        { name: "get_bot_settings", userId: "20", depth: 1, role: "worker" },
+        { name: "get_bot_settings", userId: "20", depth: 1, role: "worker" },
+      ]);
+      expect(session!.results[2]).toMatchObject({ custom_tool_use_id: "call_3", is_error: false });
+      expect(sent.at(-1)).toBe("終わりました。");
+      // Which run the thread belongs to came from the session's own list,
+      // read at the start of each of the two later turns.
+      expect(session!.history.filter((event) => event.type === "session.thread_created")).toHaveLength(1);
+      const asked = cloud.of("GET", `/v1/sessions/${session!.id}/events`)
+        .filter((request) => request.query.getAll("types[]").includes("session.thread_created"));
+      expect(asked).toHaveLength(2);
     } finally { await hibana.close(); }
   });
 });

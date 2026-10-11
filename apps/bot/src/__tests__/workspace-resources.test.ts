@@ -8,7 +8,8 @@ import { promptCacheKey } from "../llm";
 import { ProviderError } from "../llm-errors";
 import { createWorkspaceClient } from "../workspace/client";
 import {
-  budgetLimit, cents, workspaceEffort, WorkspaceResources, type SessionTools, type WorkspaceNetworking,
+  budgetLimit, cents, multiagentMismatch, ULTRA_MULTIAGENT, workspaceEffort, WorkspaceResources,
+  type SessionTools, type WorkspaceIdentity, type WorkspaceNetworking,
 } from "../workspace/resources";
 
 // Decision record: #76. The agents and the environment Anthropic Workspace
@@ -118,10 +119,14 @@ function fakeApi() {
 }
 type Api = ReturnType<typeof fakeApi>;
 const unrestricted: WorkspaceNetworking = { type: "unrestricted" };
-function resources(api: Api, over: { networking?: WorkspaceNetworking; baseUrl?: string; log?: Logger; path?: string } = {}) {
+function resources(
+  api: Api,
+  over: { networking?: WorkspaceNetworking; baseUrl?: string; log?: Logger; path?: string; identity?: WorkspaceIdentity } = {},
+) {
   return new WorkspaceResources(api.client, {
     path: over.path ?? join(dir, "anthropic_workspace_resources.json"),
     baseUrl: over.baseUrl ?? BASE, networking: over.networking ?? unrestricted, log: over.log,
+    ...(over.identity && { identity: over.identity }),
   });
 }
 const spec = (over: Partial<Parameters<WorkspaceResources["createSession"]>[0]> = {}) => ({
@@ -204,6 +209,12 @@ describe("the resources", () => {
       type: "multiagent_20261001",
       workflows: { type: "enabled" }, subagents: { type: "disabled" }, advisor: { type: "disabled" },
     });
+    // The one definition, which the smoke script reads instead of a copy.
+    expect(second!.multiagent).toEqual(ULTRA_MULTIAGENT);
+    expect(multiagentMismatch(api.agents[1]!.multiagent, "ultra")).toBeUndefined();
+    expect(multiagentMismatch(api.agents[0]!.multiagent, "plain")).toBeUndefined();
+    expect(multiagentMismatch(api.agents[1]!.multiagent, "plain")).toBe("workflows_enabled");
+    expect(multiagentMismatch(api.agents[0]!.multiagent, "ultra")).toBe("no_multiagent");
     // Neither carries a prompt or tools: each session brings its own.
     for (const body of [first!, second!]) {
       expect(body.model).toBe("claude-haiku-5-5");
@@ -303,6 +314,96 @@ describe("the resources", () => {
     const reason = new Error("Shutdown");
     api.on("GET /v1/environments", () => { stop.abort(reason); return undefined; });
     await expect(resources(api).ensure("plain", stop.signal)).rejects.toBe(reason);
+  });
+});
+
+// The smoke script creates its resources through this class as well, so that
+// what it checks against the real API is the bot's own lookup, create and
+// verify. They must stay apart from the bot's: the script removes what it made.
+describe("under another identity, as the smoke script's", () => {
+  const SMOKE: WorkspaceIdentity = { prefix: "hibana-smoke-run1", app: "hibana-smoke" };
+  const channel = promptCacheKey("123456789012345678");
+
+  test("everything is named and labelled as its own, with the bot's definitions", async () => {
+    const api = fakeApi(), bot = fakeApi();
+    await resources(api, { identity: SMOKE }).createSession(spec({ variant: "ultra" }));
+    await resources(bot, { path: join(dir, "bot.json") }).createSession(spec({ variant: "ultra" }));
+    const [environment, agent, session] = ["/v1/environments", "/v1/agents", "/v1/sessions"].map((path) => api.of("POST", path)[0]!.body!);
+    const [botEnvironment, botAgent, botSession] = ["/v1/environments", "/v1/agents", "/v1/sessions"].map((path) => bot.of("POST", path)[0]!.body!);
+    expect(environment!.name).toMatch(/^hibana-smoke-run1-env-[0-9a-f]{8}$/);
+    expect(environment!.metadata).toEqual({ app: "hibana-smoke", spec: environment!.name.slice(-8) });
+    expect(agent!.name).toMatch(/^hibana-smoke-run1-ultra-[0-9a-f]{8}$/);
+    expect(agent!.metadata).toEqual({ app: "hibana-smoke", variant: "ultra", spec: agent!.name.slice(-8) });
+    expect(session!.metadata).toEqual({ app: "hibana-smoke", variant: "ultra", channel });
+    expect(session!.title).toBe(`hibana-smoke ultra ${channel.slice(0, 8)}`);
+    // Apart from the name and the label, each request is the one the bot sends.
+    const definition = ({ name, metadata, title, ...rest }: Json) => rest;
+    expect(definition(environment!)).toEqual(definition(botEnvironment!));
+    expect(definition(agent!)).toEqual(definition(botAgent!));
+    expect(definition(session!)).toEqual(definition(botSession!));
+    expect([environment!.name.slice(-8), agent!.name.slice(-8)]).toEqual([botEnvironment!.name.slice(-8), botAgent!.name.slice(-8)]);
+    expect(botEnvironment!.name).toMatch(/^hibana-workspace-env-/);
+    expect(botSession!.metadata.app).toBe("hibana");
+    expect(JSON.stringify(bot.sent)).not.toContain("smoke");
+    // The bot's file is what it always was; the other one says whose it is.
+    expect(Object.keys(JSON.parse(await readFile(join(dir, "bot.json"), "utf8"))).sort()).toEqual(["agents", "base_url", "environment", "version"]);
+    expect(JSON.parse(await readFile(join(dir, "anthropic_workspace_resources.json"), "utf8")).app).toBe("hibana-smoke");
+  });
+
+  test("neither adopts the bot's resources nor has its own adopted, on one account", async () => {
+    const api = fakeApi();
+    const botFile = join(dir, "bot.json"), smokeFile = join(dir, "smoke.json");
+    const bot = await resources(api, { path: botFile }).ensure("ultra");
+    const smoke = await resources(api, { path: smokeFile, identity: SMOKE }).ensure("ultra");
+    expect(smoke.environmentId).not.toBe(bot.environmentId);
+    expect(smoke.agent.id).not.toBe(bot.agent.id);
+    expect(api.environments.map((e) => e.metadata.app)).toEqual(["hibana", "hibana-smoke"]);
+    expect(api.agents.map((a) => a.metadata.app)).toEqual(["hibana", "hibana-smoke"]);
+    // With both files lost, each finds its own again and nothing is created.
+    await rm(botFile);
+    await rm(smokeFile);
+    expect(await resources(api, { path: smokeFile, identity: SMOKE }).ensure("ultra")).toEqual(smoke);
+    expect(await resources(api, { path: botFile }).ensure("ultra")).toEqual(bot);
+    expect(api.of("POST", "/v1/environments")).toHaveLength(2);
+    expect(api.of("POST", "/v1/agents")).toHaveLength(2);
+    // The script removing its own leaves the bot's in place and in use.
+    api.environments.splice(1, 1);
+    api.agents[1]!.archived_at = "2026-10-12T01:00:00Z";
+    await rm(botFile);
+    expect(await resources(api, { path: botFile }).ensure("ultra")).toEqual(bot);
+    expect(api.of("POST", "/v1/environments")).toHaveLength(2);
+  });
+
+  test("a resource with the right name but another label is not adopted, in either direction", async () => {
+    const api = fakeApi();
+    const botFile = join(dir, "bot.json"), otherFile = join(dir, "other.json");
+    // The bot's own names under another label: only the label tells them apart.
+    const other: WorkspaceIdentity = { prefix: "hibana-workspace", app: "hibana-smoke" };
+    const labelled = await resources(api, { path: otherFile, identity: other }).ensure("plain");
+    const bot = await resources(api, { path: botFile }).ensure("plain");
+    expect(api.environments.map((e) => e.name)).toEqual([api.environments[0]!.name, api.environments[0]!.name]);
+    expect(bot.environmentId).not.toBe(labelled.environmentId);
+    expect(bot.agent.id).not.toBe(labelled.agent.id);
+    await rm(botFile);
+    await rm(otherFile);
+    expect(await resources(api, { path: otherFile, identity: other }).ensure("plain")).toEqual(labelled);
+    expect(await resources(api, { path: botFile }).ensure("plain")).toEqual(bot);
+    expect(api.of("POST", "/v1/environments")).toHaveLength(2);
+    expect(api.of("POST", "/v1/agents")).toHaveLength(2);
+  });
+
+  test("ids stored by one identity are not used by the other, even from the same file", async () => {
+    const api = fakeApi();
+    const path = join(dir, "shared.json");
+    const bot = await resources(api, { path }).ensure("plain");
+    const smoke = await resources(api, { path, identity: SMOKE }).ensure("plain");
+    expect(smoke.environmentId).not.toBe(bot.environmentId);
+    expect(smoke.agent.id).not.toBe(bot.agent.id);
+    // The file now holds the script's ids. The bot does not take them: it
+    // finds its own again by name, and creates nothing.
+    expect(await resources(api, { path }).ensure("plain")).toEqual(bot);
+    expect(api.of("POST", "/v1/environments")).toHaveLength(2);
+    expect(api.of("POST", "/v1/agents")).toHaveLength(2);
   });
 });
 

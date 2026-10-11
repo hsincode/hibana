@@ -7,6 +7,7 @@ import {
   subagentsUnsupported,
   unpublishedPresetIds,
   premiumPresetIds,
+  WORKSPACE_PROVIDER,
 } from "@hibana/shared/catalog";
 import {
   applyPatch,
@@ -70,7 +71,25 @@ export class Runtime {
       // these settings, and reporting every guild here would clear them all
       // on each start (#59).
       this.replace(await readJson(this.config.statePath, this.snapshot), false);
+      if (!this.config.webApiUrl) this.withholdWorkspacePresets();
       await this.persist();
+    }
+  }
+  /** Without the settings API the two preset lists are only ever what the
+   *  state file holds: nothing on the bot publishes a preset or lifts its
+   *  plan floor. A file written before the Anthropic Workspace presets existed
+   *  (#76) names none of them, and would offer them to every member as soon as
+   *  the key is set. They are put back as the catalog ships them; the stored
+   *  state of every other preset is left as it is. */
+  private withholdWorkspacePresets() {
+    const workspace = new Set(MODEL_PRESETS.filter((p) => p.provider === WORKSPACE_PROVIDER).map((p): string => p.id));
+    for (const [list, shipped] of [
+      ["unpublished_presets", unpublishedPresetIds({})],
+      ["premium_presets", premiumPresetIds({})],
+    ] as const) {
+      const stored = this.snapshot[list];
+      const missing = shipped.filter((id) => workspace.has(id) && !stored.includes(id));
+      if (missing.length) this.snapshot[list] = [...stored, ...missing];
     }
   }
   /** `notify: false` adopts a snapshot as the baseline that later ones are

@@ -49,6 +49,8 @@ export type TurnInput = {
   knownRuns?: { id: string; name: string }[];
   limits: {
     idleMs: number; reconnects: number; graceMs?: number; interruptWaitMs?: number; settleMs?: number;
+    /** How long a tool result that could not be delivered waits to be sent again. */
+    resendMs?: number;
     /** The configured length of a turn, for the wording of the timeout notice. */
     timeoutMs?: number;
   };
@@ -105,6 +107,7 @@ const CLEANUP_MS = 20_000;
 const NOTE_WAIT_MS = 5_000;
 const READER_WAIT_MS = 3_000;
 const STOP_CHECK_MS = 30_000;
+const RESEND_MS = 30_000;
 const STREAM_OPEN_TIMEOUT_MS = 30_000;
 const SEND_TIMEOUT_MS = 15_000;
 const UNKNOWN_SEND_WAIT_MS = 2_000;
@@ -118,6 +121,10 @@ const LIST_PAST_EVENTS = 2_000;
 
 const STILL_RUNNING = "This call was still running when the turn was stopped and may have taken effect. Check before repeating it.";
 const LEFTOVER_CALL = "This call belongs to an earlier turn that was stopped, so it was not run.";
+// For a call from before this turn began. The turn it was made in may have
+// run it and then failed to deliver the result, or been shut down over it.
+const OPEN_CALL = "This call was left open by an earlier turn. Whether it was carried out is not known here, so check before repeating it.";
+const REFUSED_RESULT = "This call was carried out, but the session did not accept its result. It may have taken effect. Check before repeating it.";
 const STOPPED_CALL = "The turn was stopped before this call started, so it was not run.";
 const DENIED = "Permission requests are not answered in this session.";
 const failed = (text: string): WorkspaceResult => ({ content: [{ type: "text", text }], is_error: true });
@@ -136,7 +143,7 @@ const contentShape = (content: unknown) => {
 // The update's rejection for a budget at or below what the session has used.
 // Where the reason is carried is not verified against the API: the type
 // definitions name it, the documentation only gives the sentence.
-const budgetNotRaised = (info: ApiErrorInfo) =>
+export const budgetNotRaised = (info: ApiErrorInfo) =>
   info.code === "budget_not_raised" || /budget_not_raised|greater than the session's consumed/i.test(info.message);
 
 async function interrupt(client: Anthropic, sessionId: string, signal?: AbortSignal, log?: Logger): Promise<boolean> {
@@ -288,6 +295,9 @@ type CallState = {
    *  not run again. */
   unsent?: WorkspaceResult;
 };
+/** `refused`: a 400. `gone`: the session is. `failed`: nothing came back, or
+ *  the server failed, after the client's own retries. */
+type Delivery = "sent" | "refused" | "gone" | "failed";
 
 /**
  * One turn of an Anthropic Workspace session (#76): raise the session's
@@ -319,7 +329,15 @@ class Turn {
   private sent = false;
   private anchorId = "";
   private anchored = false;
+  // Seen as processed, on the stream or in the list. A turn that began on a
+  // session at rest is anchored without it.
+  private taken = false;
+  // Set while the list is all that placed the message: see `precedes`.
   private anchorAt?: number;
+  // The connection in use has yet to deliver the message as processed. What
+  // it carries until then is older than the turn, whatever the list says in
+  // the meantime: the list can be ahead of what has been read from the stream.
+  private echoDue = false;
   private streamOpenedAt?: number;
 
   private conn?: AbortController;
@@ -329,6 +347,8 @@ class Turn {
   private closed = false;
   private pumping: Promise<void> = Promise.resolve();
   private reconciling = false;
+  private resending?: Promise<void>;
+  private resendTimer?: ReturnType<typeof setTimeout>;
 
   private outcome?: Outcome;
   private readonly decision: Promise<Outcome>;
@@ -351,6 +371,8 @@ class Turn {
   private readonly runsStarted: { id: string; name: string }[] = [];
   private readonly ignored = new Set<string>();
   private tail: string[] = [];
+  // What of the tail was passed on as status while a run was open.
+  private shown?: string;
   private rounds = 0;
   private context = 0;
   private compacted = false;
@@ -400,10 +422,15 @@ class Turn {
       : Math.max(1, this.ceiling - (input.baseline?.list_cost_cents ?? consumed));
     if (consumed >= this.ceiling) return this.unstarted("budget");
     if (this.now() >= input.deadlineAt) return this.unstarted("timeout");
-    // Raising the budget resumes whatever it had paused, and a session that
-    // is not at rest is still working on something older. That is stopped
-    // first, on its own, so the allowance goes to this turn's message.
-    const dirty = session.status !== "idle" || max <= consumed || this.openRuns.size > 0;
+    // A session that is not at rest is still working on something older.
+    // That is stopped first, on its own, so the allowance goes to this turn's
+    // message. A session paused at its budget is the exception: there the
+    // interrupt stops no thread, since all of them are paused already, and
+    // the raise resumes them. It is still sent, for the runs: one that an
+    // interrupt paused stays paused when the budget goes up. What the raise
+    // resumed is stopped with the message itself (`post`).
+    const capped = max <= consumed;
+    const dirty = session.status !== "idle" || capped || this.openRuns.size > 0;
     if (dirty) {
       try {
         await this.client.beta.sessions.events.send(this.sid, { events: [{ type: "user.interrupt" }] }, { signal: input.signal });
@@ -421,7 +448,7 @@ class Turn {
     } catch (error) {
       throw this.requestError(error);
     }
-    await this.post(dirty);
+    await this.post(dirty, capped);
   }
 
   private async retrieve(): Promise<BetaManagedAgentsSession> {
@@ -456,23 +483,37 @@ class Turn {
   }
 
   /** The runs still open, from the session's own events. The row can be
-   *  behind: a run may have ended after the last turn stopped listening. */
+   *  behind: a run may have ended after the last turn stopped listening.
+   *  Their threads are read along with them: a thread is announced once, when
+   *  it is created, and a run that goes on in this turn calls tools from
+   *  threads an earlier turn saw created. Without the run those calls would
+   *  all be refused as somebody else's. Read newest first and only back to
+   *  where the oldest run the row lists was started, so the threads of every
+   *  run the session ever had are not read again on each turn. */
   private async rebuildRuns() {
     for (const run of this.input.knownRuns ?? []) this.openRuns.set(run.id, run.name);
     if (!this.openRuns.size) return;
     try {
-      const open = new Map<string, string>();
+      const pending = new Set(this.openRuns.keys()), ended = new Set<string>();
+      const open: [string, string][] = [];
       let read = 0;
       const events = this.client.beta.sessions.events.list(
-        this.sid, { types: ["workflow_run.created", "workflow_run.status_ended"] }, { signal: this.input.signal });
+        this.sid, { types: ["workflow_run.created", "workflow_run.status_ended", "session.thread_created"], order: "desc" },
+        { signal: this.input.signal });
       for await (const item of events) {
         const event = item as unknown as RawEvent;
         const id = text(event.workflow_run_id);
-        if (id && event.type === "workflow_run.created") open.set(id, text(event.name) ?? id);
-        else if (id && event.type === "workflow_run.status_ended") open.delete(id);
+        const thread = event.type === "session.thread_created" ? text(event.session_thread_id) : undefined;
+        if (id && thread) this.threadRuns.set(thread, id);
+        else if (id && event.type === "workflow_run.status_ended") ended.add(id);
+        else if (id && event.type === "workflow_run.created") {
+          if (!ended.has(id)) open.unshift([id, text(event.name) ?? id]);
+          pending.delete(id);
+          if (!pending.size) break;
+        }
         if (++read >= LIST_MAX_EVENTS) return;
       }
-      this.openRuns = open;
+      this.openRuns = new Map(open);
     } catch (error) {
       if (this.input.signal.aborted) throw this.input.signal.reason;
       this.log?.warn({ session: this.sid, status: apiErrorInfo(error).status }, "workspace runs could not be listed; keeping the stored ones");
@@ -527,8 +568,13 @@ class Turn {
   }
 
   /** Sends the turn's message, once. The stream is already open, so nothing
-   *  the session does with it is missed. */
-  private async post(dirty: boolean) {
+   *  the session does with it is missed. `resumed`: the session was paused at
+   *  its budget, so raising it has set the old work going again. An interrupt
+   *  goes ahead of the message in the same request: the old work ends, and
+   *  the next thing the session does is this message. Stopping that work,
+   *  rather than showing what it goes on to produce as this turn's, is a
+   *  choice the owner has not confirmed yet (#76). */
+  private async post(dirty: boolean, resumed: boolean) {
     const { input } = this;
     if (input.signal.aborted) throw input.signal.reason;
     const message: BetaManagedAgentsEventParams = { type: "user.message", content: input.content };
@@ -537,8 +583,10 @@ class Turn {
       try {
         // Not tied to the turn's signal and never retried by the SDK: once
         // the request is on its way, whether it arrived has to be known.
+        // After a refusal the interrupt has gone out on its own already.
         const reply = await this.client.beta.sessions.events.send(
-          this.sid, { events: [message] }, { maxRetries: 0, timeout: SEND_TIMEOUT_MS });
+          this.sid, { events: resumed && !blocked ? [{ type: "user.interrupt" }, message] : [message] },
+          { maxRetries: 0, timeout: SEND_TIMEOUT_MS });
         this.sent = true;
         this.anchorId = reply.data?.find((event) => event.type === "user.message")?.id ?? await this.findMessage() ?? "";
         break;
@@ -568,6 +616,7 @@ class Turn {
     // follows is the turn's. Otherwise older work may still be reporting, and
     // the turn starts where its own message shows up as processed.
     this.anchored = !dirty && !blocked;
+    this.echoDue = !this.anchored;
     await input.onSent?.({ eventId: this.anchorId, ceilingCents: this.ceiling });
   }
 
@@ -654,8 +703,12 @@ class Turn {
         if (!first) {
           await this.open();
           if (this.closed) return;
+          this.echoDue = false;
           await this.reconcile();
           if (this.closed) return;
+          // Still queued when the list was read, and this connection was open
+          // before that: it is the one that will show the message taken up.
+          this.echoDue = !this.anchored;
         }
         await this.read(() => { failures = 0; });
         // A stream that just ends (a proxy's time limit) is a disconnect too.
@@ -773,72 +826,129 @@ class Turn {
 
   // ── Events ────────────────────────────────────────────────────────────
 
-  private isAnchor(event: RawEvent): boolean {
-    if (!this.sent || event.type !== "user.message" || !event.processed_at) return false;
-    // Without an id from the send, the message is recognized by its content.
+  /** The turn's own message, queued or processed. Without an id from the
+   *  send, it is recognized by its content. */
+  private own(event: RawEvent): boolean {
+    if (!this.sent || event.type !== "user.message") return false;
     return this.anchorId ? event.id === this.anchorId : contentShape(event.content) === contentShape(this.input.content);
   }
 
-  private anchor(event: RawEvent) {
-    this.anchored = true;
-    const at = event.processed_at ? Date.parse(event.processed_at) : NaN;
-    if (Number.isFinite(at)) this.anchorAt = at;
+  /** The turn's message, processed. `listed`: read from the list, not from
+   *  the stream. */
+  private isAnchor(event: RawEvent, listed = false): boolean {
+    if (!event.processed_at || !this.own(event)) return false;
+    // The list goes back to earlier turns, and the same words may have been
+    // sent before. Recognized by content alone, only a message processed
+    // since this turn opened its stream counts there, as in `findMessage`.
+    return !!this.anchorId || !listed
+      || (this.streamOpenedAt !== undefined && Date.parse(event.processed_at) >= this.streamOpenedAt);
   }
+
+  private anchor(event: RawEvent, listed = false) {
+    if (!this.anchored) {
+      // Whatever was being waited out before the message is void.
+      this.disarm();
+      this.lastError = undefined;
+      const at = listed && event.processed_at ? Date.parse(event.processed_at) : NaN;
+      this.anchorAt = Number.isFinite(at) ? at : undefined;
+    } else if (!listed) {
+      this.anchorAt = undefined;
+    }
+    this.anchored = true;
+    this.taken = true;
+  }
+  /** Older than the turn's message by its time. Only asked while the list is
+   *  what placed the message: a connection opened shortly before the message
+   *  was taken up may still deliver what came before it. Where the stream
+   *  itself showed the message, its order decides and no time is compared
+   *  (how fine the timestamps are is not documented). */
   private precedes(event: RawEvent): boolean {
     const at = event.processed_at ? Date.parse(event.processed_at) : NaN;
     return this.anchorAt !== undefined && at < this.anchorAt;
   }
 
-  private async handle(event: RawEvent): Promise<void> {
+  /** `listed`: read from the list, after the turn's message. */
+  private async handle(event: RawEvent, listed = false): Promise<void> {
     this.checkStop();
     const id = text(event.id);
     // Only a processed event is final. The echo of a queued `user.*` event
     // has no `processed_at` and comes again, with the same id, when it has.
     const final = !!id && !!event.processed_at;
-    if (final && this.seen.has(id)) return;
-    let leftover = !this.anchored;
-    if (!this.anchored) {
-      if (this.isAnchor(event)) {
-        this.seen.add(id!);
-        this.anchor(event);
-        return;
-      }
-      // A call to run or an end of turn while the position is unknown: the
-      // list says whether the turn's message was processed before it.
-      const ends = event.type === "session.status_idle" && stopType(event) === "end_turn";
-      if (this.sent && !this.reconciling && (event.type === "agent.custom_tool_use" || ends)) {
-        await this.reconcile();
-        if (final && this.seen.has(id)) return;
-        // The message was processed meanwhile, but this event was not among
-        // what followed it: older than the message, or too new for the list.
-        leftover = !this.anchored || this.precedes(event);
-      }
-    }
-    if (final) this.seen.add(id);
-    // The echo of the turn's own message, queued or processed: where the
-    // turn begins, not something that happened in it.
-    if (this.sent && this.anchorId && id === this.anchorId) return;
-    this.track(event);
-    if (leftover) {
-      // Left over from before the turn: never run, only kept from blocking.
-      if (event.type === "agent.custom_tool_use") await this.refuse(id, LEFTOVER_CALL);
-      else if (asksPermission(event)) await this.deny(id);
+    if (!listed && this.echoDue && this.isAnchor(event)) {
+      // The stream has reached the turn's message: from here on it is the turn.
+      this.echoDue = false;
+      if (id) this.seen.add(id);
+      this.anchor(event);
       return;
     }
+    if (final && this.seen.has(id)) return;
+    if (!listed && this.echoDue && !this.reconciling) {
+      // A call to run, or the session coming to rest, before the stream has
+      // shown the message as processed. Normally it is the old turn's. The
+      // list is asked where this very event stands, in case the stream never
+      // shows the message: only if the list has it after the message is it
+      // the turn's, and then it was handled from there, with all that came
+      // before it.
+      const rests = event.type === "session.status_idle" && stopType(event) !== "requires_action";
+      if (event.type === "agent.custom_tool_use" || rests) {
+        await this.reconcile();
+        if (final && this.seen.has(id)) {
+          this.echoDue = false;
+          this.anchorAt = undefined;
+          return;
+        }
+      }
+    }
+    // The echo of the turn's own message, queued or processed: where the
+    // turn begins, not something that happened in it.
+    if (this.own(event)) {
+      if (final) this.taken = true;
+      return;
+    }
+    const mine = listed || !(this.echoDue || this.precedes(event));
+    this.track(event, mine);
+    if (!mine) {
+      // Left over from before the turn: never run, only kept from blocking.
+      // It is not remembered as seen, so the list can still place it.
+      if (event.type === "agent.custom_tool_use") await this.refuse(id, LEFTOVER_CALL);
+      else if (asksPermission(event)) await this.deny(id);
+      else if (!this.anchored) this.queued(event);
+      return;
+    }
+    if (final) this.seen.add(id);
     try { this.input.observe?.(event); } catch {}
     if (this.outcome) return this.wind(event);
     await this.act(event);
   }
 
+  /** While the turn's message is still queued, what the session does is not
+   *  the turn's. Two of the ways it can stop there mean the message will not
+   *  be taken up, though, and waiting for it would last until the time limit. */
+  private queued(event: RawEvent) {
+    if (this.outcome) return;
+    switch (event.type) {
+      case "session.status_running":
+      case "workflow_run.status_running":
+        return this.disarm();
+      case "session.status_idle":
+        // At its budget the session takes up nothing until the budget changes.
+        if (stopType(event) === "budget_reached") return this.decide({ kind: "budget" });
+        // The session drops what was queued when its retries run out. As
+        // after the message, it may yet start again by itself.
+        if (stopType(event) === "retries_exhausted")
+          return this.arm(() => this.decide({ kind: "error", error: this.exhausted("retries_exhausted") }));
+    }
+  }
+
   /** State that holds wherever the event falls relative to the turn. */
-  private track(event: RawEvent) {
+  private track(event: RawEvent, mine: boolean) {
     switch (event.type) {
       case "workflow_run.created": {
         const id = text(event.workflow_run_id);
         if (!id) return;
         const run = { id, name: text(event.name) ?? id };
         this.openRuns.set(run.id, run.name);
-        if (this.anchored && !this.runsStarted.some((r) => r.id === id)) this.runsStarted.push(run);
+        if (mine && !this.runsStarted.some((r) => r.id === id)) this.runsStarted.push(run);
         // One run at a time is what the prompt asks for.
         if (this.openRuns.size > 1) this.log?.warn({ session: this.sid, open: this.openRuns.size }, "workspace session has more than one workflow run open");
         return;
@@ -857,6 +967,11 @@ class Turn {
         const reading = sessionTotals(event.usage as Parameters<typeof sessionTotals>[0]);
         // A reading from the list can be older than one already taken.
         this.usage = { totals: totalsMax(reading.totals, this.usage?.totals), cost: reading.cost || !!this.usage?.cost };
+        return;
+      }
+      case "session.error": {
+        const type = text((event.error as { type?: unknown } | undefined)?.type);
+        this.lastError = type && /^[a-z][a-z_]{0,63}$/.test(type) ? type : undefined;
         return;
       }
       case "session.status_running":
@@ -906,11 +1021,7 @@ class Turn {
         this.rounds++;
         this.context = count(usage.input_tokens) + count(usage.cache_read_input_tokens)
           + count(usage.cache_creation_input_tokens) + count(usage.output_tokens);
-        return;
-      }
-      case "session.error": {
-        const type = text((event.error as { type?: unknown } | undefined)?.type);
-        this.lastError = type && /^[a-z][a-z_]{0,63}$/.test(type) ? type : undefined;
+        if (!event.session_thread_id) this.show();
         return;
       }
       case "session.status_running":
@@ -923,7 +1034,7 @@ class Turn {
         return;
       case "session.status_idle":
         return this.idle(event);
-      case "agent.thinking": case "agent.tool_result": case "agent.mcp_tool_result":
+      case "agent.thinking": case "agent.tool_result": case "agent.mcp_tool_result": case "session.error":
       case "session.status_rescheduled": case "session.thread_created": case "session.usage":
       case "workflow_run.created": case "workflow_run.status_idle": case "workflow_run.error":
       case "workflow_run.phase_started": case "workflow_run.phase_ended":
@@ -942,6 +1053,9 @@ class Turn {
         const ids = Array.isArray(reason.event_ids) ? reason.event_ids.filter((v): v is string => typeof v === "string") : [];
         const unknown = ids.filter((id) => !this.calls.has(id) && !this.confirmed.has(id));
         if (unknown.length && !this.reconciling) await this.reconcile(unknown);
+        // One whose result is still here: the session has just said that it
+        // waits for it. Not awaited, so the stream goes on being read.
+        if (ids.some((id) => this.calls.get(id)?.unsent)) void this.resend();
         return;
       }
       case "end_turn":
@@ -949,6 +1063,7 @@ class Turn {
         // A run is still open. If it is working, the session goes back to
         // running within moments; if it is paused, nothing will, and the turn
         // ends with a note that work is left.
+        this.show();
         return this.arm(() => this.decide({
           kind: "end",
           ...(this.openRuns.size > 0 && { notice: openRunsNotice(this.openRuns.size) }),
@@ -993,6 +1108,22 @@ class Turn {
     if (!this.tail.length) return;
     const said = this.tail.join("\n\n");
     this.tail = [];
+    const shown = said === this.shown;
+    this.shown = undefined;
+    if (shown) return;
+    try { this.input.say?.(said); } catch {}
+  }
+
+  /** With a run open, the turn does not end where the model stops, and what
+   *  it wrote there is the status of the run, not the reply: the Ultra prompt
+   *  tells it so. It is passed on now instead of when the run has ended and
+   *  the next request begins. The tail keeps it, because it is the reply
+   *  after all if the run stays paused and the turn ends on it. */
+  private show() {
+    if (!this.openRuns.size || !this.tail.length) return;
+    const said = this.tail.join("\n\n");
+    if (said === this.shown) return;
+    this.shown = said;
     try { this.input.say?.(said); } catch {}
   }
 
@@ -1029,31 +1160,73 @@ class Turn {
       if (this.toolCtx.delivered) this.input.ctx.delivered = true;
       if (state.status !== "running") return;
       state.status = "done";
-      await this.answer(id, result, state);
+      // A 400 for a result is one that came too late (the server has archived
+      // the call's thread) or one the server will not take. The documentation
+      // tells them apart by the thread's status. Here a plain result is tried
+      // once instead: if the call still takes one, the session stops waiting
+      // for it and the model is told; if that is refused too, it was too late.
+      if (await this.answer(id, result, state) === "refused") await this.answer(id, failed(REFUSED_RESULT), state);
     })();
   }
 
   /** One result per request: the server refuses a whole request when it
-   *  refuses one of its events. */
-  private async answer(id: string, result: WorkspaceResult, state?: CallState) {
+   *  refuses one of its events. What could not be delivered is kept on the
+   *  call and sent again; what was refused is not. */
+  private async answer(id: string, result: WorkspaceResult, state?: CallState): Promise<Delivery> {
     try {
       await this.client.beta.sessions.events.send(this.sid, {
         events: [{ type: "user.custom_tool_result", custom_tool_use_id: id, content: result.content, is_error: result.is_error }],
       }, { signal: this.life.signal });
       if (state) delete state.unsent;
+      return "sent";
     } catch (error) {
       const status = apiErrorInfo(error).status;
-      if (state && status !== 400 && status !== 404 && !this.life.signal.aborted) state.unsent = result;
-      // A 400 is a result that came too late (the turn was interrupted, the
-      // thread is gone). There is nothing to send again.
       this.log?.warn({ session: this.sid, status }, "workspace tool result was not accepted");
+      if (status === 400 || status === 404) {
+        if (state) delete state.unsent;
+        return status === 400 ? "refused" : "gone";
+      }
+      if (state && !this.life.signal.aborted) {
+        state.unsent = result;
+        this.resendLater();
+      }
+      return "failed";
     }
+  }
+
+  /** Sends again what could not be delivered, one pass at a time. The session
+   *  waits on a call until it has a result, and while the stream stays alive
+   *  nothing else would bring it one. The tools are not run again. */
+  private resend(): Promise<void> {
+    return (this.resending ??= (async () => {
+      try {
+        for (const [id, state] of this.calls) if (state.unsent) await this.answer(id, state.unsent, state);
+      } finally {
+        this.resending = undefined;
+      }
+    })());
+  }
+  private resendLater() {
+    if (this.resendTimer || this.life.signal.aborted) return;
+    this.resendTimer = setTimeout(() => {
+      this.resendTimer = undefined;
+      void this.resend();
+    }, this.input.limits.resendMs ?? RESEND_MS);
   }
 
   private async refuse(id: string | undefined, why: string) {
     if (!id || this.calls.has(id)) return;
-    this.calls.set(id, { status: "done" });
-    await this.answer(id, failed(why));
+    const state: CallState = { status: "done" };
+    this.calls.set(id, state);
+    await this.answer(id, failed(why), state);
+  }
+
+  /** What a call found unanswered in the list is told. One made since this
+   *  turn opened its stream is the old work's, and nobody has run it. An
+   *  older one was made while an earlier turn was listening. */
+  private leftover(event: RawEvent): string {
+    const at = event.processed_at ? Date.parse(event.processed_at) : NaN;
+    return this.streamOpenedAt !== undefined && at >= this.streamOpenedAt ? LEFTOVER_CALL : OPEN_CALL;
   }
 
   /** The toolset is created with `always_allow`, so nothing should ask. If
@@ -1093,15 +1266,17 @@ class Turn {
             if (!missing.size || ++past >= LIST_PAST_EVENTS) break;
             continue;
           }
-          if (this.isAnchor(event)) {
+          if (this.isAnchor(event, true)) {
             found = true;
-            this.anchor(event);
+            this.anchor(event, true);
             if (!missing.size) break;
             continue;
           }
-          // An older message that was processed: the turn's own is still
-          // queued, and everything read so far came before it.
-          if (!this.anchored && event.type === "user.message" && event.processed_at) break;
+          // An earlier turn's message. The turn's own is not in the list as
+          // processed, then, and everything read so far came before it. This
+          // holds for a turn that began on a session at rest as well: its
+          // message can still be queued when the stream has to be reopened.
+          if (event.type === "user.message" && event.processed_at) break;
           newer.push(event);
           if (id) missing.delete(id);
           if (newer.length >= LIST_MAX_EVENTS) break;
@@ -1120,9 +1295,15 @@ class Turn {
       }
       for (const id of answered) if (!this.calls.has(id)) this.calls.set(id, { status: "done" });
       if (found && this.anchorId) this.seen.add(this.anchorId);
-      if (!this.anchored) {
+      // Without the message, nothing in the list can be told to be the turn's:
+      // what was read belongs to earlier turns, and handling it would repeat
+      // their replies and run their unanswered calls for whoever speaks now.
+      // The one exception is a turn so large that the look ended before it
+      // got back to a message that is known to have been processed.
+      if (!found && !(this.taken && newer.length >= LIST_MAX_EVENTS)) {
+        if (this.anchored) return;
         for (const event of newer) {
-          if (event.type === "agent.custom_tool_use") await this.refuse(text(event.id), LEFTOVER_CALL);
+          if (event.type === "agent.custom_tool_use") await this.refuse(text(event.id), this.leftover(event));
           else if (asksPermission(event)) await this.deny(text(event.id));
         }
         return;
@@ -1132,16 +1313,16 @@ class Turn {
       for (const event of newer) {
         if (this.closed) return;
         try {
-          await this.handle(event);
+          await this.handle(event, true);
         } catch (error) {
           return this.decide({ kind: "error", error });
         }
       }
       for (const event of older) {
-        if (event.type === "agent.custom_tool_use") await this.refuse(text(event.id), LEFTOVER_CALL);
+        if (event.type === "agent.custom_tool_use") await this.refuse(text(event.id), this.leftover(event));
         else if (asksPermission(event)) await this.deny(text(event.id));
       }
-      for (const [id, state] of this.calls) if (state.unsent) await this.answer(id, state.unsent, state);
+      await this.resend();
     } finally {
       this.reconciling = false;
     }
@@ -1179,6 +1360,9 @@ class Turn {
    *  to finish, then wait for the session to report that it is idle. */
   private async halt(reason: unknown) {
     this.work.abort(reason);
+    // A result that never got through: one more try, so the call is not left
+    // for the next turn to close without knowing that it ran.
+    const resent = this.resend();
     await interrupt(this.client, this.sid, this.cleanup(), this.log);
     // A tool that changes something is not cut off: its real result is
     // returned if it comes in time. Otherwise the model is told that the
@@ -1189,9 +1373,10 @@ class Turn {
       for (const [id, state] of running) {
         if (state.status !== "running") continue;
         state.status = "abandoned";
-        await this.answer(id, failed(STILL_RUNNING));
+        await this.answer(id, failed(STILL_RUNNING), state);
       }
     }
+    await this.within(resent, this.input.limits.settleMs ?? SETTLE_MS);
     // With a run still working the session may not go idle at all.
     if (!this.idleNow)
       await this.within(Promise.race([this.rested, this.pumping]), this.input.limits.interruptWaitMs ?? INTERRUPT_WAIT_MS);
@@ -1286,11 +1471,11 @@ class Turn {
         ]);
       } else {
         const cleanup = this.cleanup();
-        const notes: Promise<void>[] = [];
+        const notes: Promise<unknown>[] = [this.resend()];
         for (const [id, state] of this.calls) {
           if (state.status !== "running") continue;
           state.status = "abandoned";
-          notes.push(this.answer(id, failed(STILL_RUNNING)));
+          notes.push(this.answer(id, failed(STILL_RUNNING), state));
         }
         released = (await quiesce(this.client, this.sid, {
           signal: cleanup, interrupt: this.sent && !(this.idleNow && !this.openRuns.size), log: this.log,
@@ -1306,6 +1491,7 @@ class Turn {
   private dispose() {
     this.close();
     this.disarm();
+    clearTimeout(this.resendTimer);
     for (const cleanup of this.cleanups) cleanup();
     // What a tool returns from here on has nowhere to go.
     for (const state of this.calls.values()) if (state.status === "running") state.status = "abandoned";

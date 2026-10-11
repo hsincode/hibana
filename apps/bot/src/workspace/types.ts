@@ -1,4 +1,3 @@
-import type { Json } from "../types";
 export type { WorkspaceVariant } from "../claude/select";          // "plain" | "ultra"
 export type { WorkspaceTotals } from "./usage";
 

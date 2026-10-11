@@ -286,6 +286,54 @@ describe("the session table", () => {
     expect(queue()).toEqual([]);
   });
 
+  test("a session that only a checkpoint still names is queued once, and never while a channel or the queue has it", async () => {
+    const path = await dbPath();
+    const bot = startBot(path);
+    bot.table.save(session("c1", "sesn_1", "100"));
+    // The channel's own session is not one to give up, whoever names it.
+    expect(bot.table.holds("c1", "sesn_1")).toBe(true);
+    expect(bot.table.abandon(session("c1", "sesn_1", "100"))).toBe(false);
+    expect(bot.table.disposals()).toEqual([]);
+    expect(bot.table.holds("c1", "sesn_lost")).toBe(false);
+
+    bot.clock.now += 1000;
+    expect(bot.table.abandon(session("c1", "sesn_lost", "100"))).toBe(true);
+    // Archived, like every session that was not cleared. No totals: what the
+    // ledger counted of it is not known, so its removal counts all of it.
+    expect(bot.table.disposals()).toEqual([{
+      sessionId: "sesn_lost", mode: "archive", channelId: "c1", guildId: "100", key, variant: "plain",
+      queuedAt: START + 1000, attempts: 0,
+    }]);
+    expect(bot.table.disposals()[0]!.totals).toBeUndefined();
+    // The channel keeps the session it uses.
+    expect(bot.table.get("c1")!.sessionId).toBe("sesn_1");
+    expect(onDisk(path)).toMatchObject({
+      sessions: [{ session_id: "sesn_1" }], disposals: [{ session_id: "sesn_lost", mode: "archive", attempts: 0 }],
+    });
+
+    // Queued already, also when this process has not read the queue yet: the
+    // entry and its count of attempts stay as they are.
+    bot.table.failed("sesn_lost");
+    bot.restart();
+    expect(bot.table.holds("c1", "sesn_lost")).toBe(true);
+    expect(bot.table.abandon(session("c1", "sesn_lost", "100"))).toBe(false);
+    expect(bot.table.disposals().map((d) => [d.sessionId, d.mode, d.attempts])).toEqual([["sesn_lost", "archive", 1]]);
+    // A session that was cleared stays queued to be deleted.
+    bot.clock.now += 1000;
+    bot.table.retire("c1", "delete");
+    expect(bot.table.abandon(session("c1", "sesn_1", "100"))).toBe(false);
+    expect(bot.table.disposals().map((d) => [d.sessionId, d.mode])).toEqual([["sesn_lost", "archive"], ["sesn_1", "delete"]]);
+
+    // Without a store the queue is this process's own.
+    const memory = new SessionTable();
+    expect(memory.abandon(session("c1", "sesn_lost"))).toBe(true);
+    expect(memory.abandon(session("c1", "sesn_lost"))).toBe(false);
+    expect(memory.disposals().map((d) => d.sessionId)).toEqual(["sesn_lost"]);
+    // Once it is removed, the table has nothing more to say about it.
+    memory.disposed("sesn_lost");
+    expect(memory.holds("c1", "sesn_lost")).toBe(false);
+  });
+
   test("saving another session for a channel queues the one it had", async () => {
     const bot = startBot(await dbPath());
     bot.table.save(session("c1", "sesn_1", "100"));

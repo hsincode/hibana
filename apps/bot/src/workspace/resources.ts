@@ -49,12 +49,23 @@ export const budgetLimit = (cents: number): BetaManagedAgentsBudgetLimit => ({
   max_list_cost: { amount: String(Math.max(1, Math.round(cents))), currency: "USD" },
 });
 
+/** Whose resources these are: how their names start, and the `metadata.app`
+ *  they and their sessions carry. The bot's own unless another is given,
+ *  which only the smoke script does: it creates through this class so that
+ *  what it checks is the bot's code, and removes what it created afterwards.
+ *  Nothing is adopted across two identities, by name or from the file. */
+export type WorkspaceIdentity = { prefix: string; app: string };
+const BOT_IDENTITY: WorkspaceIdentity = { prefix: "hibana-workspace", app: "hibana" };
+
 type StoredResource = { id: string; spec: string };
 type StoredAgent = StoredResource & { version: number };
 type Stored = {
   version: 1;
   /** The ids belong to one API host; another host starts again. */
   base_url: string;
+  /** Whose ids these are, when not the bot's. A file of another identity is
+   *  read as empty. */
+  app?: string;
   environment?: StoredResource;
   agents: Partial<Record<WorkspaceVariant, StoredAgent>>;
 };
@@ -67,8 +78,9 @@ const AGENT_DESCRIPTION: Record<WorkspaceVariant, string> = {
   plain: "Hibana's Anthropic Workspace agent. Each session sets its own model, prompt and tools.",
   ultra: "Hibana's Anthropic Workspace agent with dynamic workflows. Each session sets its own prompt and tools.",
 };
-// Workflows only: the block's defaults would also enable subagents.
-const ULTRA_MULTIAGENT = {
+/** What the Haiku Ultra agent is created with. Workflows only: the block's
+ *  defaults would also enable subagents. */
+export const ULTRA_MULTIAGENT = {
   type: "multiagent_20261001" as const,
   workflows: { type: "enabled" as const },
   subagents: { type: "disabled" as const },
@@ -90,7 +102,7 @@ type MultiagentLike = {
 } | null | undefined;
 /** What a resolved multiagent block has that its variant must not, in a fixed
  *  word for the log, or nothing when it is as intended. */
-function multiagentMismatch(multiagent: MultiagentLike, variant: WorkspaceVariant): string | undefined {
+export function multiagentMismatch(multiagent: MultiagentLike, variant: WorkspaceVariant): string | undefined {
   if (!multiagent) return variant === "ultra" ? "no_multiagent" : undefined;
   if (multiagent.type !== "multiagent_20261001") return "other_multiagent_type";
   if (multiagent.subagents?.type !== "disabled") return "subagents_enabled";
@@ -114,10 +126,16 @@ const sameModel = (actual: string | undefined, wanted: string) =>
 export class WorkspaceResources {
   private serial = new Serial();
   private stored?: Stored;
+  private identity: WorkspaceIdentity;
   constructor(
     private client: Anthropic,
-    private options: { path: string; baseUrl: string; networking: WorkspaceNetworking; log?: Logger },
-  ) {}
+    private options: {
+      path: string; baseUrl: string; networking: WorkspaceNetworking; log?: Logger;
+      identity?: WorkspaceIdentity;
+    },
+  ) {
+    this.identity = options.identity ?? BOT_IDENTITY;
+  }
 
   /** The environment and the variant's agent, created if they do not exist.
    *  Calls are serialized: a turn that arrives while another is creating the
@@ -162,8 +180,8 @@ export class WorkspaceResources {
           },
           environment_id: resources.environmentId,
           budget: budgetLimit(spec.budgetCents),
-          metadata: { app: "hibana", variant: spec.variant, channel },
-          title: `hibana ${spec.variant} ${channel.slice(0, 8)}`,
+          metadata: { app: this.identity.app, variant: spec.variant, channel },
+          title: `${this.identity.app} ${spec.variant} ${channel.slice(0, 8)}`,
         }, { maxRetries: 0, signal });
       } catch (error) {
         if (signal?.aborted) throw signal.reason;
@@ -181,7 +199,12 @@ export class WorkspaceResources {
 
   private async load(): Promise<Stored> {
     if (this.stored) return this.stored;
-    const empty = (): Stored => ({ version: 1, base_url: this.options.baseUrl, agents: {} });
+    const { app } = this.identity;
+    // The bot's own file carries no label and stays as it was written before
+    // there was one.
+    const empty = (): Stored => ({
+      version: 1, base_url: this.options.baseUrl, ...(app !== BOT_IDENTITY.app && { app }), agents: {},
+    });
     const resource = (value: unknown): StoredResource | undefined => {
       const v = value as Partial<StoredResource> | null | undefined;
       return v && typeof v.id === "string" && typeof v.spec === "string" ? { id: v.id, spec: v.spec } : undefined;
@@ -189,7 +212,7 @@ export class WorkspaceResources {
     let stored = empty();
     try {
       const raw = await readJson<Partial<Stored> | null>(this.options.path, null);
-      if (raw?.version === 1 && raw.base_url === this.options.baseUrl) {
+      if (raw?.version === 1 && raw.base_url === this.options.baseUrl && (raw.app ?? BOT_IDENTITY.app) === app) {
         stored.environment = resource(raw.environment);
         for (const variant of ["plain", "ultra"] as const) {
           const agent = resource(raw.agents?.[variant]);
@@ -215,12 +238,14 @@ export class WorkspaceResources {
     };
     const spec = specOf(request);
     if (stored.environment?.spec === spec) return stored.environment;
-    const name = `hibana-workspace-env-${spec}`;
+    const { prefix, app } = this.identity;
+    const name = `${prefix}-env-${spec}`;
     const matches = (e: BetaEnvironment) =>
-      e.name === name && e.archived_at === null && e.metadata?.spec === spec && this.networkingMatches(e);
+      e.name === name && e.archived_at === null && e.metadata?.app === app && e.metadata?.spec === spec
+      && this.networkingMatches(e);
     const environment = await this.call(signal, async () =>
       await this.find(this.client.beta.environments.list({}, { signal }), matches)
-      ?? await this.client.beta.environments.create({ name, ...request, metadata: { app: "hibana", spec } }, { maxRetries: 0, signal }));
+      ?? await this.client.beta.environments.create({ name, ...request, metadata: { app, spec } }, { maxRetries: 0, signal }));
     stored.environment = { id: environment.id, spec };
     await this.save();
     return stored.environment;
@@ -235,16 +260,17 @@ export class WorkspaceResources {
     const spec = specOf(request);
     const kept = stored.agents[variant];
     if (kept?.spec === spec) return kept;
-    const name = `hibana-workspace-${variant}-${spec}`;
+    const { prefix, app } = this.identity;
+    const name = `${prefix}-${variant}-${spec}`;
     // An agent edited outside the bot keeps its name and metadata, so what is
     // adopted is checked against the definition, not only against its labels.
     const matches = (a: BetaManagedAgentsAgent) =>
-      a.name === name && a.archived_at === null && a.metadata?.spec === spec
+      a.name === name && a.archived_at === null && a.metadata?.app === app && a.metadata?.spec === spec
       && sameModel(a.model?.id, AGENT_MODEL) && !a.mcp_servers?.length && !a.skills?.length
       && !multiagentMismatch(a.multiagent, variant);
     const agent = await this.call(signal, async () =>
       await this.find(this.client.beta.agents.list({}, { signal }), matches)
-      ?? await this.client.beta.agents.create({ name, ...request, metadata: { app: "hibana", variant, spec } }, { maxRetries: 0, signal }));
+      ?? await this.client.beta.agents.create({ name, ...request, metadata: { app, variant, spec } }, { maxRetries: 0, signal }));
     const mismatch = multiagentMismatch(agent.multiagent, variant);
     if (mismatch) this.options.log?.warn({ agent: agent.id, variant, mismatch }, "workspace agent was created with a different multiagent setting");
     stored.agents[variant] = { id: agent.id, version: agent.version, spec };

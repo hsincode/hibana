@@ -89,10 +89,15 @@ function availableCpus(): number {
   } catch {}
   return cpus;
 }
-/** A USD amount as whole cents, at least one. The Managed Agents API takes
- *  money in minor units, so the limits are kept that way from the start. */
-function centsEnv(env: NodeJS.ProcessEnv, key: string, fallback: number, max: number): number {
-  return Math.round(numberEnv(env, key, fallback, 0.01, max) * 100);
+/** The smallest allowance an Anthropic Workspace turn is started with, in
+ *  cents: a single model request can cost more than less. A turn's own limit
+ *  cannot be set below it, or every turn would be refused (#76). */
+export const WORKSPACE_MIN_TURN_CENTS = 5;
+/** A USD amount as whole cents, at least `minCents` (one unless given). The
+ *  Managed Agents API takes money in minor units, so the limits are kept
+ *  that way from the start. */
+function centsEnv(env: NodeJS.ProcessEnv, key: string, fallback: number, max: number, minCents = 1): number {
+  return Math.round(numberEnv(env, key, fallback, minCents / 100, max) * 100);
 }
 /** Network policy of the Workspace container. A host list only means
  *  something under `limited`, so one given without it stops the start rather
@@ -258,9 +263,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     // values proposed in #76, which the owner has yet to confirm.
     anthropicWorkspace: {
       // List cost one turn may add to its session, and what all Workspace
-      // turns together may add in one UTC day and month, in cents.
-      turnBudgetCents: centsEnv(env, "ANTHROPIC_WORKSPACE_TURN_BUDGET_USD", 1, 100),
-      ultraTurnBudgetCents: centsEnv(env, "ANTHROPIC_WORKSPACE_ULTRA_TURN_BUDGET_USD", 3, 100),
+      // turns together may add in one UTC day and month, in cents. A turn's
+      // limit below what a turn is started with would refuse every turn, so
+      // it stops the start instead; the day and the month go down to a cent.
+      turnBudgetCents: centsEnv(env, "ANTHROPIC_WORKSPACE_TURN_BUDGET_USD", 1, 100, WORKSPACE_MIN_TURN_CENTS),
+      ultraTurnBudgetCents: centsEnv(env, "ANTHROPIC_WORKSPACE_ULTRA_TURN_BUDGET_USD", 3, 100, WORKSPACE_MIN_TURN_CENTS),
       dailyBudgetCents: centsEnv(env, "ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD", 5, 10000),
       monthlyBudgetCents: centsEnv(env, "ANTHROPIC_WORKSPACE_MONTHLY_BUDGET_USD", 50, 100000),
       // Wall-clock time of one turn, counted from its first start.

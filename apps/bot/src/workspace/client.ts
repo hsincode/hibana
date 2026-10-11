@@ -20,7 +20,8 @@ export function workspaceBaseUrl(baseUrl: string): string {
  * unset, `authToken` would take `ANTHROPIC_AUTH_TOKEN` (Claude Kiro's key in
  * this deployment) and `baseURL` would take `ANTHROPIC_BASE_URL` (the
  * `anthropic` provider's). Both are always passed, so this provider only ever
- * sends its own key to its own host.
+ * sends its own key to its own host. `ANTHROPIC_CUSTOM_HEADERS` is read by
+ * the SDK too and cannot be switched off; see `defaultHeaders` below.
  */
 export function createWorkspaceClient(
   config: Pick<Config, "endpoints">,
@@ -32,6 +33,11 @@ export function createWorkspaceClient(
     apiKey: endpoint.apiKey,
     authToken: null,
     baseURL: workspaceBaseUrl(endpoint.baseUrl),
+    // The SDK lays the headers of `ANTHROPIC_CUSTOM_HEADERS` over the
+    // credentials, so an `x-api-key` or `Authorization` there would replace
+    // the key above. These are merged after the environment's and win. Other
+    // headers of that variable are still sent (#76).
+    defaultHeaders: { "X-Api-Key": endpoint.apiKey, Authorization: null },
     ...(options.fetch && { fetch: options.fetch }),
     // The SDK retries connection errors, 408, 409, 429 and 5xx without an
     // idempotency key. Calls that create something pass `maxRetries: 0`.

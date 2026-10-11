@@ -4,14 +4,14 @@ import { WORKSPACE_PROVIDER } from "@hibana/shared/catalog";
 import type { Logger } from "pino";
 import type { AgentResult } from "../agent";
 import { workspaceVariant, type WorkspaceVariant } from "../claude/select";
-import type { Config } from "../config";
+import { WORKSPACE_MIN_TURN_CENTS, type Config } from "../config";
 import type { ConversationStore } from "../conversation-store";
 import type { HistoryDrop } from "../history";
 import { Semaphore, Serial, withAbort, type sleep } from "../io";
 import type { Runtime } from "../runtime";
 import type { ToolRegistry } from "../tools";
 import { emptyUsage, type Context, type Message, type Usage } from "../types";
-import { apiErrorInfo, createWorkspaceClient, SessionGone, workspaceBaseUrl } from "./client";
+import { apiErrorInfo, createWorkspaceClient, SessionGone, toProviderError, workspaceBaseUrl } from "./client";
 import { applyRunEvent, coalesce, eventLine, runLine, waitingLine, type RunView } from "./progress";
 import { contextDigest, openRunsNote, resumeContent, userContent, workspaceContextBlock, workspaceSystem } from "./prompt";
 import { WorkspaceResources } from "./resources";
@@ -79,13 +79,16 @@ type Prepared = {
    *  up a message the session already has. */
   send: { text: string; images: string[] } | { resume: WorkspaceMark };
   budget: TurnInput["budget"];
+  /** What the turn may add to the session's cost, in cents. */
+  allow: number;
   /** When a resumed turn first started: its time limit still counts from
    *  there. A new turn starts when it has a slot. */
   startedAt?: number;
 };
 
-// An allowance below this starts nothing: a single model request can cost more.
-const MIN_ALLOW_CENTS = 5;
+// An allowance below this starts nothing: a single model request can cost
+// more. The same value is the least a turn's own limit can be set to.
+const MIN_ALLOW_CENTS = WORKSPACE_MIN_TURN_CENTS;
 const SWEEP_MS = 60_000;
 // What one session may take in a sweep, so that one that hangs does not hold
 // up the others, or the start of the bot.
@@ -107,6 +110,9 @@ const MONTH_LIMIT = "Anthropic Workspace の今月の利用額の上限に達し
 const LEDGER_UNREAD = "Anthropic Workspace の利用額の記録を読み込めていないため、実行しませんでした。管理者に連絡してください。";
 const tooLong = (chars: number, max: number) =>
   `メッセージが長すぎます（${chars} 文字）。Anthropic Workspace に送れるのは ${max} 文字までです。短くして送り直してください。`;
+// The session ended its turn with no text, and nothing was posted for it. It
+// is not asked again by itself: that would be another turn's cost.
+const NO_REPLY = "返信の本文がないまま、このターンが終わりました。必要であれば、もう一度メッセージを送ってください。";
 const TURN_OVER = "The turn ended before this call ran.";
 
 const nothing = (): WorkspaceTotals => sessionTotals(undefined).totals;
@@ -140,15 +146,20 @@ function turnUsage(delta: WorkspaceTotals, context: number): Usage {
 }
 
 export class Workspace {
-  /** What the sessions cost, per day and model. Also what the day's and the
+  /** What the sessions cost, per day and model, and what the day's and the
    *  month's limits are checked against. */
   readonly usage: WorkspaceUsage;
   readonly sessions: SessionTable;
   private slots: Semaphore;
-  /** The turn running in each channel. A channel runs one turn at a time. */
+  /** The turn running in each channel. A channel runs one turn at a time:
+   *  bot.ts puts every turn of a channel, whoever wrote, on that channel's
+   *  queue, and `turn` refuses a second one rather than rely on it. */
   private live = new Map<string, Live>();
   /** Sessions the sweep is bringing to rest right now, by channel. */
   private settling = new Map<string, Promise<void>>();
+  /** Sessions whose spending this process stopped while the ledger was
+   *  unread. That is all it does for them, so they are not asked again. */
+  private parked = new Set<string>();
   private sweeps = new Serial();
   private queued?: Promise<void>;
   private timer?: ReturnType<typeof setTimeout>;
@@ -205,13 +216,22 @@ export class Workspace {
   async turn(input: WorkspaceTurn): Promise<AgentResult> {
     const { ctx } = input;
     const client = this.client();
+    // Two turns on one session would each read the other's events and answer
+    // the other's tool calls, as the wrong person. Nothing reaches here that
+    // way (see `live`); if something ever does, it fails instead.
+    if (this.live.has(ctx.channelId)) throw new Error("A Workspace turn is already running in this channel");
     const live: Live = { cancel: new AbortController(), guildId: ctx.guildId, reserved: 0 };
     this.live.set(ctx.channelId, live);
     const signal = AbortSignal.any([this.deps.shutdown, live.cancel.signal]);
     try {
       // The sweep may be interrupting this channel's session at this moment.
       await this.settling.get(ctx.channelId);
-      const first = this.prepare(input, live);
+      let first = this.prepare(input, live);
+      this.forsake(client, input);
+      // A turn that continues a message asks the session first whether that
+      // message is still its last. One that was refused above asks nothing.
+      if (!("reply" in first) && "resume" in first.send && !await this.unmoved(client, first.send.resume, signal))
+        first = this.prepare(input, live, true);
       if ("reply" in first) return this.local(input, first.reply);
       return await this.slot(ctx, signal, async () => {
         let prepared = first;
@@ -258,10 +278,74 @@ export class Workspace {
     };
   }
 
+  /**
+   * Whether the message a mark names is still the last one its session was
+   * sent. A session is its channel's and a checkpoint one person's: someone
+   * else may have been answered on the session since, and "the message above"
+   * in the note that picks a turn up would then be theirs, continued with
+   * this person's permissions. When it is not the last, the person's own
+   * message is sent again instead, as a new one. A session that is gone
+   * counts as unchanged: the runner finds that out, and the turn starts over
+   * on a new session. Any other failure fails the turn, so the note is never
+   * sent unchecked.
+   */
+  private async unmoved(client: Anthropic, mark: WorkspaceMark, signal: AbortSignal): Promise<boolean> {
+    if (!mark.eventId) return false;
+    try {
+      const page = await client.beta.sessions.events.list(
+        mark.sessionId, { types: ["user.message"], order: "desc" }, { signal });
+      return (page.data[0] as { id?: unknown } | undefined)?.id === mark.eventId;
+    } catch (error) {
+      if (signal.aborted) throw signal.reason;
+      if (apiErrorInfo(error).status === 404) return true;
+      throw toProviderError(error, "request");
+    }
+  }
+
+  /**
+   * A turn is picked up, and the session its mark names is not the channel's:
+   * the row went with a process that had no store, or the conversation ended
+   * meanwhile. Nothing else may remember that session, and it may still be
+   * running under the budget its turn raised, so it is queued to be stopped
+   * and archived. A session that is gone, archived or terminated is left
+   * alone: that is how a removal leaves a session, after it counted it, and
+   * none of them can spend. Otherwise all the session has used is counted,
+   * which can count again what an earlier process had recorded of it: the
+   * limits then err on the side of refusing. Not awaited: the turn does not
+   * depend on it. Never throws.
+   */
+  private forsake(client: Anthropic, input: WorkspaceTurn) {
+    const { ctx, resume } = input;
+    // Asked now, not when the answer below arrives: a session that is queued
+    // at this moment is being removed, and would look abandoned afterwards.
+    if (!resume || this.sessions.holds(ctx.channelId, resume.sessionId)) return;
+    const { shutdown, log } = this.deps;
+    const signal = AbortSignal.any([shutdown, AbortSignal.timeout(SWEEP_SESSION_MS)]);
+    void client.beta.sessions.retrieve(resume.sessionId, {}, { signal })
+      // Unreadable: queued, and the sweep asks again.
+      .then(
+        (session) => !session.archived_at && session.status !== "terminated",
+        (error) => apiErrorInfo(error).status !== 404,
+      )
+      .then((queue) => {
+        if (!queue || this.closed || shutdown.aborted) return;
+        const queued = this.sessions.abandon({
+          sessionId: resume.sessionId, channelId: ctx.channelId, guildId: ctx.guildId, key: input.key,
+          variant: workspaceVariant(input.settings),
+        });
+        if (!queued) return;
+        log.warn({ channel: ctx.channelId, session: resume.sessionId },
+          "Workspace session of an unfinished turn is in no row; it is stopped and all it has used is counted");
+        void this.sweep();
+      })
+      .catch(this.deps.report);
+  }
+
   /** What the turn sends, to which session, and under what budget. All from
    *  local state: no request is made, and the allowance is reserved before
-   *  the turn waits for a slot. */
-  private prepare(input: WorkspaceTurn, live: Live): Prepared | { reply: string } {
+   *  the turn waits for a slot. `moved`: the session was sent another message
+   *  after the one the mark names, so the mark no longer says where it is. */
+  private prepare(input: WorkspaceTurn, live: Live, moved = false): Prepared | { reply: string } {
     const { ctx, key } = input;
     const limits = this.config.anthropicWorkspace;
     const variant = workspaceVariant(input.settings);
@@ -273,12 +357,24 @@ export class Workspace {
       void this.sweep();
       row = undefined;
     }
-    const mark = input.resume?.sessionId === row?.sessionId ? input.resume : undefined;
+    const mark = !moved && input.resume?.sessionId === row?.sessionId ? input.resume : undefined;
+    live.reserved = 0;
     if (mark && !input.text) {
+      // Held to the ledger and to the day's and the month's limits like a new
+      // message: the allowance the turn left unused went back to them when
+      // its lease was released, and others may have used it since.
+      if (!this.usage.loaded) return { reply: LEDGER_UNREAD };
       // Picked up under the ceiling of its first start, never a new one: a
       // bot that restarts in a loop must not add an allowance each time.
-      live.reserved = Math.max(0, mark.ceilingCents - (row?.totals?.list_cost_cents ?? 0));
-      return { row, variant, send: { resume: mark }, budget: { ceilingCents: mark.ceilingCents }, startedAt: mark.startedAt };
+      const used = row?.totals?.list_cost_cents ?? 0;
+      const unused = Math.max(0, mark.ceilingCents - used);
+      // This session's own lease is part of `unused`.
+      const { day, month } = this.room(ctx.channelId);
+      const least = Math.min(unused, MIN_ALLOW_CENTS);
+      if (unused > 0 && Math.min(day, month) < least) return { reply: month < least ? MONTH_LIMIT : DAY_LIMIT };
+      const allow = Math.max(0, Math.min(unused, day, month));
+      live.reserved = allow;
+      return { row, variant, send: { resume: mark }, budget: { ceilingCents: used + allow }, allow, startedAt: mark.startedAt };
     }
     // With a mark the session already has what the earlier attempt sent, and
     // only the new message is missing. Otherwise everything recorded for this
@@ -292,26 +388,36 @@ export class Workspace {
     // read only knows this process's turns, which would let every restart
     // start the day again.
     if (!this.usage.loaded) return { reply: LEDGER_UNREAD };
-    live.reserved = 0;
-    const held = this.reserved();
-    const day = limits.dailyBudgetCents - this.usage.spentCents("day") - held;
-    const month = limits.monthlyBudgetCents - this.usage.spentCents("month") - held;
+    const { day, month } = this.room();
     const allow = Math.min(variant === "ultra" ? limits.ultraTurnBudgetCents : limits.turnBudgetCents, day, month);
     if (allow < MIN_ALLOW_CENTS) return { reply: month < MIN_ALLOW_CENTS ? MONTH_LIMIT : DAY_LIMIT };
     // With what an unfinished turn on this session may have added since the
     // ledger last counted it.
     live.reserved = allow + leftover(row);
-    return { row, variant, send: { text, images }, budget: { allowCents: allow } };
+    return { row, variant, send: { text, images }, budget: { allowCents: allow }, allow };
+  }
+
+  /** What is left of the day's and the month's limits, in cents, after what
+   *  the ledger counted and what is reserved. `except` leaves one channel's
+   *  reservation out: a turn that is picked up brings its own. */
+  private room(except?: string): { day: number; month: number } {
+    const limits = this.config.anthropicWorkspace;
+    const held = this.reserved(except);
+    return {
+      day: limits.dailyBudgetCents - this.usage.limitCents("day") - held,
+      month: limits.monthlyBudgetCents - this.usage.limitCents("month") - held,
+    };
   }
 
   /** Cents that turns under way may still add and the ledger has not seen:
    *  the allowance of each running turn, and the lease of each session whose
    *  turn ended without taking its allowance back. */
-  private reserved(): number {
+  private reserved(except?: string): number {
     const held = new Map<string, number>();
     for (const [channelId, live] of this.live) held.set(channelId, live.reserved);
     for (const row of this.sessions.leased())
       held.set(row.channelId, Math.max(held.get(row.channelId) ?? 0, leftover(row)));
+    if (except) held.delete(except);
     let sum = 0;
     for (const cents of held.values()) sum += cents;
     return sum;
@@ -427,6 +533,7 @@ export class Workspace {
     };
     let result: TurnResult | undefined;
     let delta = nothing();
+    let accepted = false;
     try {
       result = await runTurn({
         client, sessionId, model: selection.model, content, ctx, signal, steering: input.steering,
@@ -439,13 +546,18 @@ export class Workspace {
         // dies in the turn leaves the lease for the next one to find.
         onLease: (ceilingCents) => { this.sessions.touch(channelId, sessionId, { lease: { ceilingCents } }); },
         onSent: async ({ eventId, ceilingCents }) => {
+          accepted = true;
           if (digest) {
             state.contextDigest = digest;
             this.sessions.touch(channelId, sessionId, { state });
           }
           await input.onSent({
             sessionId, eventId, ceilingCents, startedAt,
-            resumes: "resume" in send ? send.resume.resumes : 0,
+            // A turn picked up without a new message counts as picked up,
+            // also when the message had to be sent again (another session,
+            // or someone else was answered since): the bot does that by
+            // itself once, whichever way it went.
+            resumes: input.resume && !input.text ? input.resume.resumes : 0,
           });
         },
         baseline: row.totals,
@@ -467,7 +579,12 @@ export class Workspace {
           delta = totalsDelta(result.cumulative, row.totals);
           patch.totals = totalsMax(result.cumulative, row.totals);
         }
-        this.usage.record({ model: selection.model, ultra: variant === "ultra", delta, cost_reported: result.costReported });
+        this.usage.record({
+          model: selection.model, ultra: variant === "ultra", delta, cost_reported: result.costReported,
+          // A session that worked and reported no cost may have used all it
+          // was allowed. One that was never asked used nothing.
+          ...((accepted || some(delta)) && { allowed_cents: prepared.allow }),
+        });
         // Otherwise the lease stays, and the sweep takes the allowance back.
         if (result.released) patch.lease = null;
       }
@@ -493,7 +610,10 @@ export class Workspace {
       runs_started: result.runsStarted.length, open_runs: result.openRuns.length,
     }, "Workspace turn finished");
     // A turn stopped because its speaker was blocked says nothing at all.
-    const text = result.stop === "stopped" ? "" : [result.text, result.notice].filter(Boolean).join("\n\n");
+    // One that ended by itself without a word says so, unless a file it
+    // posted is its answer: silence would read as a bot that did not react.
+    const said = [result.text, result.notice].filter(Boolean).join("\n\n");
+    const text = result.stop === "stopped" ? "" : said || (result.stop === "end_turn" && !ctx.delivered ? NO_REPLY : "");
     return {
       text,
       messages: [...input.messages, { role: "assistant", content: text }],
@@ -568,27 +688,50 @@ export class Workspace {
     const first = !this.swept;
     this.swept = true;
     const bounded = () => AbortSignal.any([shutdown, AbortSignal.timeout(SWEEP_SESSION_MS)]);
-    for (const row of this.sessions.leased()) {
+    for (const { channelId } of this.sessions.leased()) {
       if (shutdown.aborted) return;
-      if (this.live.has(row.channelId)) continue;
+      if (this.live.has(channelId)) continue;
+      // Read again: the list is as old as the wait for the sessions before
+      // this one. A turn that ran here meanwhile counted its own cost and
+      // released its own lease, and the row it left is the one to go by.
+      const row = this.sessions.get(channelId);
+      if (!row?.lease) continue;
       // A turn that starts on this channel meanwhile waits for this.
       const work = this.rest(client, row, bounded()).catch(this.deps.report)
-        .finally(() => this.settling.delete(row.channelId));
-      this.settling.set(row.channelId, work);
+        .finally(() => this.settling.delete(channelId));
+      this.settling.set(channelId, work);
       await work;
     }
     let waiting = false;
     for (const disposal of this.sessions.disposals()) {
       if (shutdown.aborted) return;
       if (!first && disposal.attempts >= REMOVAL_ATTEMPTS) continue;
-      if (!await this.remove(client, disposal, bounded())) waiting ||= disposal.attempts + 1 < REMOVAL_ATTEMPTS;
+      if (!await this.remove(client, disposal, bounded()))
+        waiting ||= !this.parked.has(disposal.sessionId) && disposal.attempts + 1 < REMOVAL_ATTEMPTS;
     }
-    if (waiting || this.sessions.leased().some((row) => !this.live.has(row.channelId))) this.arm();
+    const leased = this.sessions.leased().some((row) => !this.live.has(row.channelId) && !this.parked.has(row.sessionId));
+    if (waiting || leased) this.arm();
+  }
+
+  /** While the ledger is unread, a session is only kept from spending. What
+   *  it used is not counted, and nothing that says "counted" is written (the
+   *  row's totals, the released lease, the finished removal): the cost would
+   *  be in this process's memory alone and be lost with it, while the row had
+   *  moved on. The process that reads the ledger counts it, at its start.
+   *  True when that is all this pass does for the session. */
+  private async park(client: Anthropic, sessionId: string, interrupt: boolean, signal: AbortSignal): Promise<boolean> {
+    if (this.usage.loaded) return false;
+    if (this.parked.has(sessionId)) return true;
+    const settled = await quiesce(client, sessionId, { interrupt, signal, log: this.deps.log });
+    // Not lowered: asked again by the next pass.
+    if (settled.lowered) this.parked.add(sessionId);
+    return true;
   }
 
   /** Takes back the allowance a turn left on its session, and counts what
    *  the session used meanwhile. */
   private async rest(client: Anthropic, row: SessionRow, signal: AbortSignal) {
+    if (await this.park(client, row.sessionId, true, signal)) return;
     const settled = await quiesce(client, row.sessionId, { interrupt: true, signal, log: this.deps.log });
     // The conversation may have ended meanwhile. The session then waits to
     // be removed with the totals the row had, and its removal counts the
@@ -600,6 +743,7 @@ export class Workspace {
       if (some(delta)) {
         this.usage.record({
           model: modelOf(row.key), ultra: row.variant === "ultra", delta, cost_reported: !!settled.costReported, turn: false,
+          allowed_cents: leftover(row),
         });
         patch.totals = totalsMax(settled.totals, row.totals);
       }
@@ -614,6 +758,7 @@ export class Workspace {
    *  leaves it queued for the next pass. */
   private async remove(client: Anthropic, disposal: Disposal, signal: AbortSignal): Promise<boolean> {
     const { sessionId, mode } = disposal;
+    if (await this.park(client, sessionId, false, signal)) return false;
     const settled = await quiesce(client, sessionId, { signal, log: this.deps.log });
     let done = settled.status === "deleted";
     if (!done && settled.status !== "unknown") {

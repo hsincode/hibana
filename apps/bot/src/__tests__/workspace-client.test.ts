@@ -67,6 +67,30 @@ describe("the client", () => {
     });
   });
 
+  test("keeps its key when ANTHROPIC_CUSTOM_HEADERS names another one, and sends no Authorization", async () => {
+    // The SDK reads this variable by itself and lays its headers over the
+    // credentials. Written in any case: header names are not case-sensitive.
+    for (const custom of [
+      "x-api-key: another-key\nAuthorization: Bearer another-token\nx-extra: 1",
+      "X-Api-Key: another-key\nauthorization: Bearer another-token\nx-extra: 1",
+      "X-API-KEY: another-key\nAUTHORIZATION: Bearer another-token\nx-extra: 1",
+    ])
+      await withEnv({ ANTHROPIC_CUSTOM_HEADERS: custom }, async () => {
+        const { client: sdk, sent } = client(session);
+        await sdk.beta.sessions.retrieve("sesn_1");
+        await sdk.beta.sessions.events.send("sesn_1", { events: [{ type: "user.interrupt" }] });
+        expect(sent).toHaveLength(2);
+        for (const request of sent) {
+          expect(request.url.startsWith("https://api.anthropic.com/v1/sessions/sesn_1")).toBe(true);
+          expect(request.headers["x-api-key"]).toBe("fixture");
+          expect(request.headers.authorization).toBeUndefined();
+          // What does not carry a credential is still sent (#76).
+          expect(request.headers["x-extra"]).toBe("1");
+        }
+        expect(JSON.stringify(sent)).not.toContain("another-");
+      });
+  });
+
   test("drops a trailing /v1, which the SDK adds to every path itself", async () => {
     expect(workspaceBaseUrl("https://api.anthropic.com")).toBe("https://api.anthropic.com");
     expect(workspaceBaseUrl("https://api.anthropic.com/v1")).toBe("https://api.anthropic.com");

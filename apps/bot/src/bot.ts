@@ -257,6 +257,12 @@ export class Hibana {
     await this.client.login(this.config.token);
   }
   private async ready() {
+    // A Workspace session the last process left in the middle of a turn is
+    // stopped and its spending ceiling lowered. Started first: it asks
+    // nothing of Discord, and must not depend on what can fail below (a
+    // guild's settings, the command registration).
+    const swept = this.workspace.sweep();
+    this.track(swept);
     for (const id of this.client.guilds.cache.keys()) await this.runtime.initializeGuild(id);
     const applicationId = this.client.application!.id;
     await this.client.rest.put(
@@ -272,11 +278,8 @@ export class Hibana {
       { bot: this.client.user?.tag, sandbox: this.tools.sandbox.available },
       "Hibana ready",
     );
-    // A Workspace session the last process left in the middle of a turn is
-    // stopped and its spending ceiling lowered before a Workspace turn is
-    // resumed. The other harnesses' turns do not wait for that.
-    const swept = this.workspace.sweep();
-    this.track(swept);
+    // A Workspace turn is resumed only after that sweep. The other
+    // harnesses' turns do not wait for it.
     for (const cp of Object.values(this.checkpoints)) {
       if (!resumesAtStart(cp)) continue;
       const ctx = { ...cp.ctx, botId: this.client.user!.id };

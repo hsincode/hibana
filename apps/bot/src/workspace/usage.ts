@@ -93,6 +93,9 @@ export type WorkspaceBucket = WorkspaceTotals & {
   unreported_turns: number;
   /** The part of `list_cost_cents` that Haiku Ultra sessions added. */
   ultra_list_cost_cents: number;
+  /** Cents the day's and the month's limits count on top of
+   *  `list_cost_cents` (`limitCents`). Not a cost, and never shown as one. */
+  limit_extra_cents: number;
 };
 type LedgerFile = { version: 1; days: Record<string, Record<string, WorkspaceBucket>> };
 
@@ -109,21 +112,28 @@ export type LedgerEntry = {
    *  still added when it was closed. */
   turn?: boolean;
   new_session?: boolean;
+  /** What the stretch was allowed to add, in cents. The limits count it in
+   *  place of a cost the session did not report. */
+  allowed_cents?: number;
 };
 
 // The same horizon as the request ledger (usage-ledger.ts).
 const RETAIN_DAYS = 400;
 // `/usage` puts the lines above its JSON in one Discord message.
 const LINE_MAX_CHARS = 600;
+// A session reports its cost in whole cents, rounded to the nearest: one that
+// stays under half a cent reads as free, however many of them are created.
+// The limits count this much for each new session instead.
+const NEW_SESSION_CENTS = 1;
 const day = (date: Date) => date.toISOString().slice(0, 10);
 const emptyBucket = (): WorkspaceBucket => ({
   ...emptyTotals(), turns: 0, ultra_turns: 0, sessions: 0, unreported_turns: 0, ultra_list_cost_cents: 0,
+  limit_extra_cents: 0,
 });
 function add(into: WorkspaceBucket, from: Partial<WorkspaceBucket>) {
   for (const key of Object.keys(into) as (keyof WorkspaceBucket)[]) into[key] += count(from[key]);
 }
-const usd = (cents: number) => cents / 100;
-const dollars = (cents: number) => `$${usd(cents).toFixed(2)}`;
+const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
 /**
  * What Anthropic Workspace sessions cost (decision record: #76). Unlike the
@@ -136,6 +146,11 @@ const dollars = (cents: number) => `$${usd(cents).toFixed(2)}`;
  * `totalsDelta` against the totals stored for that session, `record`, then
  * store `totalsMax` of the two, with no `await` between the last two steps.
  * A crash can then lose one stretch but never count one twice.
+ *
+ * The day's and the month's limits are checked against `limitCents`, which
+ * is the reported cost plus what a report can miss: a cent for each new
+ * session, and the whole allowance of a stretch that reported no cost. What
+ * the owner is shown (`line`, `spentCents`) stays the reported cost.
  */
 export class WorkspaceUsage {
   private data: LedgerFile = { version: 1, days: {} };
@@ -165,7 +180,8 @@ export class WorkspaceUsage {
   }
   record(entry: LedgerEntry) {
     const bucket = ((this.data.days[day(this.now())] ??= {})[entry.model] ??= emptyBucket());
-    // An unreported cost is unknown. It is counted apart and never estimated.
+    // An unreported cost is unknown. It is counted apart and never estimated:
+    // the totals hold what was reported. Only the limits assume the most.
     const delta = { ...totalsDelta(entry.delta), ...(entry.cost_reported ? {} : { list_cost_cents: 0 }) };
     add(bucket, delta);
     if (entry.ultra) bucket.ultra_list_cost_cents += delta.list_cost_cents;
@@ -173,8 +189,14 @@ export class WorkspaceUsage {
       bucket.turns++;
       if (entry.ultra) bucket.ultra_turns++;
     }
-    if (!entry.cost_reported) bucket.unreported_turns++;
-    if (entry.new_session) bucket.sessions++;
+    if (!entry.cost_reported) {
+      bucket.unreported_turns++;
+      bucket.limit_extra_cents += count(entry.allowed_cents);
+    }
+    if (entry.new_session) {
+      bucket.sessions++;
+      bucket.limit_extra_cents += NEW_SESSION_CENTS;
+    }
     this.prune();
     this.save();
   }
@@ -185,49 +207,16 @@ export class WorkspaceUsage {
   /** List cost recorded so far in the current UTC day or month, in cents.
    *  Turns without a reported cost add nothing. */
   spentCents(period: "day" | "month"): number {
-    const today = day(this.now());
-    return this.total(period === "day" ? [today] : this.monthDays(today.slice(0, 7))).list_cost_cents;
+    return this.period(period).list_cost_cents;
   }
-  summary() {
-    const now = this.now();
-    const today = day(now);
-    const month = today.slice(0, 7);
-    const monthDays = this.monthDays(month);
-    const brief = (b: WorkspaceBucket) => ({
-      cost_usd: usd(b.list_cost_cents),
-      turns: b.turns,
-      ...(b.unreported_turns && { unreported_turns: b.unreported_turns }),
-    });
-    const whole = this.total(monthDays);
-    const last7 = Array.from({ length: 7 }, (_, i) => day(new Date(now.getTime() - i * 86_400_000)));
-    return {
-      note: "セッションが報告した list cost の合計（公開単価）。請求額とは一致しないことがある。日付は UTC",
-      today: brief(this.total([today])),
-      month: {
-        month,
-        ...brief(whole),
-        sessions: whole.sessions,
-        active_seconds: whole.active_seconds,
-        web_search_requests: whole.web_search_requests,
-      },
-      month_by_model: Object.fromEntries(
-        Object.entries(this.byModel(monthDays)).map(([model, b]) => [model, {
-          ...brief(b),
-          ultra_cost_usd: usd(b.ultra_list_cost_cents),
-          ultra_turns: b.ultra_turns,
-          sessions: b.sessions,
-          active_seconds: b.active_seconds,
-          input_tokens: b.input_tokens,
-          cache_read_tokens: b.cache_read_tokens,
-          cache_write_5m_tokens: b.cache_write_5m_tokens,
-          cache_write_1h_tokens: b.cache_write_1h_tokens,
-          output_tokens: b.output_tokens,
-          web_search_requests: b.web_search_requests,
-          web_fetch_requests: b.web_fetch_requests,
-        }]),
-      ),
-      last_7_days: Object.fromEntries(last7.map((d) => [d, usd(this.total([d]).list_cost_cents)])),
-    };
+  /** What the limit of the current UTC day or month is checked against, in
+   *  cents: the list cost recorded, and what the limits count on top of it. */
+  limitCents(period: "day" | "month"): number {
+    return this.spentCents(period) + this.period(period).limit_extra_cents;
+  }
+  private period(period: "day" | "month") {
+    const today = day(this.now());
+    return this.total(period === "day" ? [today] : this.monthDays(today.slice(0, 7)));
   }
   /** The lines `/usage` shows apart from the request ledger's estimate, or
    *  nothing while the current month has no Workspace record. */
@@ -294,4 +283,3 @@ export class WorkspaceUsage {
     }).catch(this.onError);
   }
 }
-export type WorkspaceUsageSummary = ReturnType<WorkspaceUsage["summary"]>;

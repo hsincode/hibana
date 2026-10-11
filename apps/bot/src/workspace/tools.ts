@@ -257,8 +257,9 @@ export function bindWorkspaceTurn(ctx: Context, access: OutputAccess): void {
 const LISTING_WAITS = [1000, 2000, 3000, 4000, 5000, 5000, 5000, 5000];
 const MAX_LISTED = 1000;
 
-/** The listed file that is `rel` (the path below the outputs directory). */
-function pickOutput(files: BetaFileMetadata[], rel: string): BetaFileMetadata | undefined {
+/** The listed file that is `rel` (the path below the outputs directory).
+ *  Throws when several listed files could be it. */
+export function pickOutput(files: BetaFileMetadata[], rel: string): BetaFileMetadata | undefined {
   const base = posix.basename(rel);
   const key = (file: BetaFileMetadata) =>
     file.filename.startsWith(WORKSPACE_OUTPUTS) ? file.filename.slice(WORKSPACE_OUTPUTS.length) : file.filename.replace(/^\/+/, "");
@@ -395,6 +396,11 @@ const WORKER: Partial<Context> = {
 };
 const FOREIGN_RUN =
   "This call was not run. It comes from a workflow run that the person now being answered did not start, and a run may only use Discord and settings tools on behalf of the person who started it. Finish with what the run already has and say what is missing in its result.";
+// The thread's run, or who started that run, could not be told: the row lost
+// it with a process that died in the turn, or the session's list was not
+// read that far back. Refused all the same, without saying whose run it is.
+const UNKNOWN_RUN =
+  "This call was not run. Who started the workflow run it comes from is not known here, and a run may only use Discord and settings tools on behalf of the person who started it. Finish with what the run already has and say what is missing in its result.";
 const NOT_STARTED = "The turn was stopped before this call ran.";
 
 function stableJson(value: unknown): string {
@@ -449,7 +455,11 @@ export class WorkspaceCalls {
     // turn comes next. Its calls are checked against the permissions of
     // `ctx.userId`, so they run only while that is the person who started it;
     // otherwise someone else's run would read with this person's access.
-    if (thread && (!call.runId || this.deps.runOwner(call.runId) !== ctx.userId)) return toolFailure(FOREIGN_RUN);
+    if (thread) {
+      const owner = call.runId ? this.deps.runOwner(call.runId) : undefined;
+      if (owner === undefined) return toolFailure(UNKNOWN_RUN);
+      if (owner !== ctx.userId) return toolFailure(FOREIGN_RUN);
+    }
     // Only an unbroken run of the same call is a loop, counted per thread:
     // agents working side by side legitimately make the same call once each.
     const key = name + stableJson(args), previous = this.streaks.get(thread ?? "");

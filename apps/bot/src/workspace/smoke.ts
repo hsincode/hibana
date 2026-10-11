@@ -8,25 +8,27 @@
 // It needs ANTHROPIC_WORKSPACE_API_KEY and is billed: model tokens, the time
 // the sessions run, and web searches. So it is not part of `make ci`, and
 // running it needs the owner's approval first (#76). A session is created
-// with the budget given, a turn is allowed at most what is left of it, and
-// the whole run stops after 15 minutes.
+// with the budget given, and before every turn the script reads from the
+// session what it has used, so a turn is allowed at most what is left of that
+// budget. The whole run stops after 15 minutes.
 //
 // It prints what each step observed and what the sessions used. Message text
 // is not printed, and of an error only its status, its codes and the field
 // names its message mentions. Custom tools are not executed: their results
 // are supplied here, so no Discord access is needed.
 //
-// Nothing of the bot's is touched. The data directory is a temporary one, and
-// the script creates an environment and agents of its own instead of looking
-// up the bot's. Everything it creates carries `metadata.app = "hibana-smoke"`
-// and has its id printed as soon as it exists, so `--cleanup` finds what a
-// run that died left behind.
+// Nothing of the bot's is touched. The data directory is a temporary one. The
+// environment, the agents and the sessions are created by the bot's own
+// `WorkspaceResources`, so its lookup by name, its create requests and its
+// check of a new session all meet the real API here, but under names that
+// start with `hibana-smoke` and with `metadata.app = "hibana-smoke"`: the
+// bot's own are never adopted, and nothing without that label is removed.
+// What a run that died left behind is found by the label with `--cleanup`.
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
 import { deflateSync } from "node:zlib";
 import { APIError } from "@anthropic-ai/sdk";
-import type { BetaManagedAgentsAgent } from "@anthropic-ai/sdk/resources/beta/agents/agents";
 import type { BetaFileMetadata } from "@anthropic-ai/sdk/resources/beta/files";
 import type { BetaManagedAgentsSession } from "@anthropic-ai/sdk/resources/beta/sessions/sessions";
 import { WORKSPACE_PROVIDER, WORKSPACE_ULTRA_MODEL } from "@hibana/shared/catalog";
@@ -38,11 +40,11 @@ import { ProviderError } from "../llm-errors";
 import { Runtime } from "../runtime";
 import definitions from "../tools/definitions.json";
 import type { Context, ToolDef } from "../types";
-import { apiErrorInfo, createWorkspaceClient } from "./client";
+import { apiErrorInfo, createWorkspaceClient, workspaceBaseUrl } from "./client";
 import { openRunsNote, userContent, workspaceContextBlock, workspaceSystem } from "./prompt";
-import { budgetLimit, cents, workspaceEffort } from "./resources";
-import { quiesce, runTurn, type TurnResult } from "./runner";
-import { outputFiles, WORKSPACE_OUTPUTS, workspaceSurface, workspaceToolParams } from "./tools";
+import { budgetLimit, cents, multiagentMismatch, ULTRA_MULTIAGENT, WorkspaceResources } from "./resources";
+import { budgetNotRaised, quiesce, runTurn, type TurnResult } from "./runner";
+import { outputFiles, pickOutput, WORKSPACE_OUTPUTS, workspaceSurface, workspaceToolParams } from "./tools";
 import type { RawEvent, WorkspaceCall, WorkspaceResult } from "./types";
 import { sessionTotals, totalsMax, type WorkspaceTotals } from "./usage";
 
@@ -97,10 +99,15 @@ const abortable = { signal: stop.signal };
 const bump = (counts: Map<string, number>, key: string) => counts.set(key, (counts.get(key) ?? 0) + 1);
 // What went over the wire: the requests, and for the event stream its frames
 // by SSE event name, its comment lines and its longest silence.
-const wire = { requests: 0, frames: new Map<string, number>(), comments: 0, last: Date.now(), silence: 0 };
+// `echoes`: the `user.message` frames, by whether they carry a `processed_at`.
+// The runner never passes a turn's own message on, so they are counted here.
+const wire = {
+  requests: 0, frames: new Map<string, number>(), comments: 0, last: Date.now(), silence: 0,
+  echoes: { queued: 0, processed: 0 },
+};
 function watchStream(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
   const decoder = new TextDecoder();
-  let rest = "";
+  let rest = "", frame = "";
   wire.last = Date.now();
   return body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
@@ -110,16 +117,28 @@ function watchStream(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Arra
       rest = lines.pop() ?? "";
       for (const line of lines) {
         if (line.startsWith(":")) wire.comments++;
-        else if (line.startsWith("event:")) bump(wire.frames, line.slice(6).trim().slice(0, 48));
+        else if (line.startsWith("event:")) bump(wire.frames, (frame = line.slice(6).trim()).slice(0, 48));
+        // Inside the message's own text the quotes would be escaped.
+        else if (line.startsWith("data:") && frame === "user.message")
+          wire.echoes[/"processed_at"\s*:\s*"/.test(line) ? "processed" : "queued"]++;
+        else if (!line) frame = "";
       }
       controller.enqueue(chunk);
     },
   }));
 }
+// The bot's own classes report an API error as a fixed classification, which
+// has no place for the field names the error's message mentions. The last
+// refusal is kept as it came over the wire, so `describe` can still name them.
+let refused: { status: number; fields: string } | undefined;
 const counted = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
   wire.requests++;
   const response = await fetch(input, init);
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  if (!response.ok) {
+    const body = await response.clone().json().catch(() => undefined) as { error?: { message?: unknown } } | undefined;
+    refused = { status: response.status, fields: mentioned(typeof body?.error?.message === "string" ? body.error.message : "") };
+  }
   if (!response.ok || !response.body || !new URL(url).pathname.endsWith("/events/stream")) return response;
   return new Response(watchStream(response.body), { status: response.status, statusText: response.statusText, headers: response.headers });
 }) as unknown as typeof fetch;
@@ -139,17 +158,20 @@ const networking = config.anthropicWorkspace.networking === "limited"
 // search_messages) and two names start with `mcp_`.
 const tools = workspaceToolParams(workspaceSurface(definitions as ToolDef[]), { web });
 const customTools = tools.filter((tool) => tool.type === "custom").length;
-// The agent's own definition for Haiku Ultra, as resources.ts writes it.
-const WORKFLOWS = {
-  type: "multiagent_20261001" as const,
-  workflows: { type: "enabled" as const },
-  subagents: { type: "disabled" as const },
-  advisor: { type: "disabled" as const },
-};
 
 // Names this run's resources and files. The codes are what the steps look for
 // in a reply or a file, so that nothing has to be printed to check it.
 const RUN = Date.now().toString(36);
+// The bot's own class under this run's names and the script's label. Its file
+// is in the temporary data directory, so no id of the bot's is ever read.
+const resourcesPath = join(dataDir, "anthropic_workspace_resources.json");
+const newStore = () => new WorkspaceResources(client, {
+  path: resourcesPath,
+  baseUrl: workspaceBaseUrl(config.endpoints[WORKSPACE_PROVIDER]!.baseUrl),
+  networking, log,
+  identity: { prefix: `${APP}-${RUN}`, app: APP },
+});
+let store = newStore();
 const code = () => crypto.randomUUID().slice(0, 8).toUpperCase();
 const codes = { memory: code(), file: code(), late: code(), tool: code(), again: code(), echo: code() };
 const TOP = `smoke-${RUN}.txt`, SUB = `smoke-${RUN}/facts.txt`, LATE = `smoke-${RUN}-late.txt`;
@@ -176,8 +198,10 @@ const mentioned = (message: string) =>
   [...new Set(message.match(/[A-Za-z]\w*(?:[._]\w+)+/g) ?? [])].slice(0, 8).map((name) => name.slice(0, 64)).join(" ");
 function describe(error: unknown): string {
   if (error instanceof ProviderError)
-    return [`provider error: ${error.kind}`, error.status && `HTTP ${error.status}`, error.diagnostics.code, error.diagnostics.reason]
-      .filter(Boolean).join(", ");
+    return [
+      `provider error: ${error.kind}`, error.status && `HTTP ${error.status}`, error.diagnostics.code, error.diagnostics.reason,
+      error.status && refused?.status === error.status && refused.fields && `mentions ${refused.fields}`,
+    ].filter(Boolean).join(", ");
   if (error instanceof APIError) {
     const info = apiErrorInfo(error), fields = mentioned(info.message);
     return [info.status ? `HTTP ${info.status}` : "no response", word(info.type), word(info.code), fields && `mentions ${fields}`]
@@ -223,77 +247,65 @@ function png(r: number, g: number, b: number, size = 64): string {
 
 // ── What the script creates ───────────────────────────────────────────────
 
-// Recorded and printed the moment each exists, whatever happens afterwards.
+// Recorded and printed as soon as the bot's class, or a create of this
+// script's own, returns it. What was created without an answer reaching the
+// script is found by its label with `--cleanup`.
 const made = { environments: new Set<string>(), agents: new Set<string>(), sessions: new Map<string, string>() };
 
-async function createEnvironment(): Promise<string> {
-  const environment = await client.beta.environments.create({
-    name: `${APP}-env-${RUN}`,
-    config: { type: "cloud", networking },
-    description: "Created by Hibana's workspace smoke script. Safe to delete.",
-    metadata: { app: APP, run: RUN },
-  }, { maxRetries: 0, ...abortable });
-  made.environments.add(environment.id);
-  console.log(`created environment ${environment.id} (${networking.type} networking)`);
-  return environment.id;
+type Resources = Awaited<ReturnType<WorkspaceResources["ensure"]>>;
+/** Notes what the bot's class used, so that it is removed afterwards. With
+ *  this run's names, an id not seen before is one that was just created. */
+function track(environmentId: string, agentId: string, variant: WorkspaceVariant) {
+  if (!made.environments.has(environmentId)) console.log(`created environment ${environmentId} (${networking.type} networking)`);
+  if (!made.agents.has(agentId)) console.log(`created agent ${agentId} (${variant})`);
+  made.environments.add(environmentId);
+  made.agents.add(agentId);
 }
 
-async function createAgent(variant: WorkspaceVariant, name = `${APP}-${variant}-${RUN}`): Promise<BetaManagedAgentsAgent> {
-  const agent = await client.beta.agents.create({
-    name,
-    model: MODEL,
-    description: "Created by Hibana's workspace smoke script. Safe to archive.",
-    ...(variant === "ultra" && { multiagent: WORKFLOWS }),
-    metadata: { app: APP, variant, run: RUN },
-  }, { maxRetries: 0, ...abortable });
-  made.agents.add(agent.id);
-  console.log(`created agent ${agent.id} (${variant})`);
-  return agent;
+/** The environment and the variant's agent the way the bot gets them: looked
+ *  up by name and definition first, created when there is none. */
+async function ensured(variant: WorkspaceVariant): Promise<Resources> {
+  const found = await store.ensure(variant, stop.signal);
+  track(found.environmentId, found.agent.id, variant);
+  return found;
 }
 
-/** A session the way resources.ts creates one: the agent with the turn's
- *  model, effort, prompt and tools laid over it, and a budget. */
+/** A session the way the bot creates one: resources.ts lays the turn's model,
+ *  effort, prompt and tools over the agent, sets the budget, and checks what
+ *  came back. */
 async function createSession(
-  variant: WorkspaceVariant, agent: BetaManagedAgentsAgent, environmentId: string,
+  variant: WorkspaceVariant,
   spec: { effort?: "low" | "medium" | "high" | "xhigh" | "max"; cents?: number; label?: string } = {},
 ): Promise<BetaManagedAgentsSession> {
-  const session = await client.beta.sessions.create({
-    agent: {
-      type: "agent_with_overrides", id: agent.id, version: agent.version,
-      model: { id: MODEL, effort: spec.effort ?? workspaceEffort(selection) },
-      system: await workspaceSystem(variant),
-      tools,
-    },
-    environment_id: environmentId,
-    budget: budgetLimit(spec.cents ?? budgetCents),
-    metadata: { app: APP, variant, run: RUN },
-    title: `${APP} ${variant} ${RUN}`,
-  }, { maxRetries: 0, ...abortable });
+  const { session } = await store.createSession({
+    variant, selection: { ...selection, ...(spec.effort && { effort: spec.effort }) },
+    system: await workspaceSystem(variant), tools,
+    budgetCents: spec.cents ?? budgetCents, channelId: ctx.channelId,
+  }, stop.signal);
   made.sessions.set(session.id, spec.label ?? variant);
   console.log(`created session ${session.id} (${spec.label ?? variant})`);
+  // An agent the class had to create again on the way is this run's too.
+  track(session.environment_id, session.agent.id, variant);
   return session;
 }
 
-type Multiagent = {
-  type: string; workflows?: { type: string } | null; subagents?: { type: string } | null; advisor?: { type: string } | null;
-} | null | undefined;
+type Multiagent = Parameters<typeof multiagentMismatch>[0];
 const multiagentText = (m: Multiagent) => !m ? "no multiagent block"
   : `${printable(m.type, 32)}: workflows ${m.workflows?.type ?? "?"}, subagents ${m.subagents?.type ?? "?"}, advisor ${m.advisor?.type ?? "?"}`;
-/** Workflows and nothing else for Haiku Ultra; neither for a plain session. */
-const asIntended = (m: Multiagent, variant: WorkspaceVariant) => !m ? variant === "plain"
-  : m.type === "multiagent_20261001" && m.subagents?.type === "disabled" && m.advisor?.type === "disabled"
-    && (m.workflows?.type === "enabled") === (variant === "ultra");
 
-/** What resources.ts checks after a create, and what it only logs: whether
- *  the override kept the agent's multiagent block. */
+/** What resources.ts checked before it returned the session (the model and
+ *  that there is a budget), and what it only logs: whether the override kept
+ *  the agent's multiagent block, by the bot's own test of it. */
 function sessionStep(name: string, session: BetaManagedAgentsSession, variant: WorkspaceVariant) {
   const { model, multiagent } = session.agent;
   const kept = session.agent.tools.filter((tool) => tool.type === "custom").length;
   const budget = cents(session.budget?.max_list_cost);
+  const mismatch = multiagentMismatch(multiagent, variant);
   step(name,
-    (model.id === MODEL || model.id.startsWith(`${MODEL}-`)) && budget === budgetCents && kept === customTools && asIntended(multiagent, variant),
+    (model.id === MODEL || model.id.startsWith(`${MODEL}-`)) && budget === budgetCents && kept === customTools && !mismatch,
     `${session.status}, model ${printable(model.id, 48)} at effort ${model.effort?.type ?? "unset"}, budget ${budget ?? "none"} cents, ` +
-    `${kept} of ${customTools} custom tools, ${multiagentText(multiagent)}, list cost ${session.usage.list_cost ? "reported" : "not reported yet"}`);
+    `${kept} of ${customTools} custom tools, ${multiagentText(multiagent)}${mismatch ? ` (${mismatch})` : ""}, ` +
+    `list cost ${session.usage.list_cost ? "reported" : "not reported yet"}`);
 }
 
 // ── One turn ──────────────────────────────────────────────────────────────
@@ -308,6 +320,11 @@ type Seen = {
   /** The turn's own `user.message`, and the idle event of a budget stop. */
   anchor?: string;
   budgetIdle?: string;
+  /** Where that message stood among the session's messages, newest first, a
+   *  moment after it was sent. `index` is -1 when it is not on the page. */
+  sent?: { index: number; of: number; queued: boolean };
+  /** How often the stream carried a `user.message` during the turn. */
+  echoes: { queued: number; processed: number };
   runs: Map<string, { createdAt: number; phases: number; endedAt?: number; result?: string }>;
   threads: Set<string>;
   runErrors: string[];
@@ -351,11 +368,35 @@ function record(seen: Seen, event: RawEvent) {
   }
 }
 
+/** What a turn may add, at most what is left of `--budget`. The runner raises
+ *  the session's budget to "used + allowance", and a step that failed after
+ *  its message went out has used something this script was never told. So
+ *  what is used is read from the session before every turn, not remembered. */
+async function allowance(session: Live, wanted: number): Promise<number> {
+  const used = sessionTotals((await client.beta.sessions.retrieve(session.id, {}, abortable)).usage).totals;
+  session.totals = totalsMax(used, session.totals);
+  return Math.min(wanted, budgetCents - session.totals.list_cost_cents);
+}
+
+/** Where a message that was just sent stands in the list of the session's
+ *  messages, newest first. The runner looks there for a message whose send
+ *  got no answer, and the bot before it picks a turn up again; both go by the
+ *  first entry and by the id the send returned. */
+async function sentMessage(sessionId: string, eventId: string): Promise<Seen["sent"]> {
+  const page = await client.beta.sessions.events.list(sessionId, { types: ["user.message"], order: "desc" }, abortable);
+  const index = page.data.findIndex((event) => event.id === eventId);
+  return { index, of: page.data.length, queued: index >= 0 && !(page.data[index] as unknown as RawEvent).processed_at };
+}
+const sentText = (at: NonNullable<Seen["sent"]>) => at.index < 0
+  ? `not among the ${at.of} message(s) listed, by the id the send returned`
+  : `entry ${at.index + 1} of ${at.of} in the list of messages, ${at.queued ? "still queued" : "already processed"}`;
+
 /** One turn through the runner, called the way workspace/index.ts calls it. */
 async function turn(session: Live, text: string, options: TurnOptions = {}): Promise<Turned> {
-  const allowCents = Math.min(options.allowCents ?? TURN_CENTS, budgetCents - (session.totals?.list_cost_cents ?? 0));
+  const allowCents = await allowance(session, options.allowCents ?? TURN_CENTS);
   if (allowCents < 1) throw new Error("the session's budget is used up");
-  const seen: Seen = { tools: [], calls: [], runs: new Map(), threads: new Set(), runErrors: [] };
+  const seen: Seen = { tools: [], calls: [], runs: new Map(), threads: new Set(), runErrors: [], echoes: { queued: 0, processed: 0 } };
+  const echoed = { ...wire.echoes };
   const timeoutMs = options.timeoutMs ?? TURN_MS;
   const result = await runTurn({
     client, sessionId: session.id, model: MODEL,
@@ -378,7 +419,17 @@ async function turn(session: Live, text: string, options: TurnOptions = {}): Pro
       record(seen, event);
       options.observe?.(event);
     },
-    onSent: async (mark) => { seen.anchor = mark.eventId || undefined; },
+    // The runner adds the allowance to what it reads from the session itself,
+    // a moment after `allowance` did. If the session spent in between, the
+    // sum is over `--budget`, and the turn fails here, before any raise.
+    onLease: (ceilingCents) => {
+      if (ceilingCents > budgetCents) throw new Error(`not started: the session's budget would go to ${ceilingCents} cents, over --budget`);
+    },
+    onSent: async (mark) => {
+      seen.anchor = mark.eventId || undefined;
+      // An observation only: the turn goes on whether or not it can be made.
+      if (mark.eventId) seen.sent = await sentMessage(session.id, mark.eventId).catch(() => undefined);
+    },
     baseline: session.totals,
     knownRuns: session.openRuns,
     limits: { idleMs: config.llmStreamIdleMs, reconnects: config.llmStreamRetries, timeoutMs },
@@ -386,6 +437,7 @@ async function turn(session: Live, text: string, options: TurnOptions = {}): Pro
   });
   if (result.cumulative) session.totals = totalsMax(result.cumulative, session.totals);
   session.openRuns = result.openRuns;
+  seen.echoes = { queued: wire.echoes.queued - echoed.queued, processed: wire.echoes.processed - echoed.processed };
   return { ...result, seen };
 }
 
@@ -399,19 +451,25 @@ async function listed(sessionId: string): Promise<BetaFileMetadata[]> {
   }
   return found;
 }
-/** The listed file that is `rel` below the outputs directory, and which of
- *  the forms `send_file` looks for it is listed under. */
+/** The listed file that is `rel` below the outputs directory, found by
+ *  `send_file`'s own matching, and the form its `filename` is listed in. The
+ *  form of a file in a subdirectory is not documented, and with the bare name
+ *  alone two files of one name in two directories cannot be told apart. */
 function entry(found: BetaFileMetadata[], rel: string): { file: BetaFileMetadata; form: string } | undefined {
-  const forms: [string, string][] = [
-    [out(rel), "its full path"],
-    [rel, rel.includes("/") ? "its path below the outputs directory" : "its name"],
-    [posix.basename(rel), "its name without the directory"],
-  ];
-  for (const [filename, form] of forms) {
-    const matches = found.filter((file) => file.filename === filename);
-    // Written twice, both versions may be listed: the newest is meant.
-    if (matches.length) return { form, file: matches.reduce((a, b) => (Date.parse(b.created_at) > Date.parse(a.created_at) ? b : a)) };
-  }
+  const file = pickOutput(found, rel);
+  if (!file) return;
+  if (file.filename === out(rel)) return { file, form: "its full path" };
+  const bare = file.filename.replace(/^\/+/, "");
+  const form = bare !== rel ? "its name without the directory"
+    : rel.includes("/") ? "its path below the outputs directory" : "its name";
+  return { file, form: bare === file.filename ? form : `${form}, after a leading slash` };
+}
+/** Why `rel` was not found: how the files that end in its name are listed.
+ *  The names are this script's own, so they can be printed. */
+function unmatched(found: BetaFileMetadata[], rel: string): string {
+  const base = posix.basename(rel);
+  const near = found.filter((file) => file.filename.endsWith(base)).map((file) => printable(file.filename, 96));
+  return `not matched among ${found.length} file(s)` + (near.length ? `; listed with that name: ${[...new Set(near)].slice(0, 3).join(", ")}` : "");
 }
 /** What `send_file` requires of a listed file before it downloads it. */
 const sendable = (file: BetaFileMetadata, sessionId: string) =>
@@ -448,6 +506,16 @@ async function eventsBetween(sessionId: string, from: string, until?: string): P
   }
 }
 const typed = (events: RawEvent[], type: string) => events.filter((event) => event.type === type).length;
+/** What a session did between its budget stop and the next turn's message,
+ *  from its events in that stretch, newest first. The interrupt nearest the
+ *  message is the one that was sent with it. */
+function resumedText(between: RawEvent[]): string {
+  const requests = typed(between, "span.model_request_start");
+  const last = between.findIndex((event) => event.type === "user.interrupt");
+  return `${typed(between, "user.interrupt")} interrupt(s) listed, ${requests} model request(s), ${typed(between, "agent.tool_use")} tool call(s): ` +
+    `the paused turn ${requests ? "went on once the budget was raised" : "did not go on"}` +
+    (last < 0 || !requests ? "" : `; ${typed(between.slice(0, last), "span.model_request_start")} of the model requests began after the last interrupt`);
+}
 
 /** The session's own usage next to the last `session.usage` event its stream
  *  carried in a turn. The runner gives a session no ceiling without a
@@ -463,40 +531,96 @@ async function usageStep(name: string, sessionId: string, seen?: Seen) {
       : `the stream's session.usage has ${JSON.stringify(streamed.totals) === JSON.stringify(t) ? "the same figures" : `other figures (${streamed.totals.list_cost_cents} cents)`}`));
 }
 
+// ── Questions that cost nothing ───────────────────────────────────────────
+// No session in this part gets a message.
+
+/** Whether agent names are unique. The bot's class does not rely on it: it
+ *  looks an agent up before it creates one. */
+async function sameNameAgent(resources: Resources) {
+  const name = "a second agent with the same name";
+  const first = await client.beta.agents.retrieve(resources.agent.id, {}, abortable);
+  try {
+    // Not through the bot's class, which would find the first one instead.
+    const twin = await client.beta.agents.create({
+      name: first.name, model: MODEL,
+      description: "Created by Hibana's workspace smoke script. Safe to archive.",
+      metadata: { app: APP, run: RUN },
+    }, { maxRetries: 0, ...abortable });
+    if (!made.agents.has(twin.id)) console.log(`created agent ${twin.id} (same name)`);
+    made.agents.add(twin.id);
+    note(name, twin.id === first.id ? "the first one came back" : "created: names are not unique");
+  } catch (error) {
+    if (!(error instanceof APIError) || !error.status) throw error;
+    note(name, `refused (${describe(error)})`);
+  }
+}
+
+/** What the bot does when its file is lost, or the answer to a create was:
+ *  it looks the two up in the account's lists, by name, label and definition,
+ *  instead of creating them again. The lists are the real ones here, with
+ *  every field as the API resolves it. */
+async function foundAgain(resources: Resources) {
+  await rm(resourcesPath, { force: true });
+  store = newStore();
+  const again = await ensured("plain");
+  const environment = again.environmentId === resources.environmentId, agent = again.agent.id === resources.agent.id;
+  step("resources found again by name", environment && agent,
+    `without its file, the environment was ${environment ? "found again" : "created a second time"} ` +
+    `and the agent was ${agent ? "found again" : "created a second time"}`);
+}
+
+/** Whether the API takes an effort the bot can be set to on this model. */
+async function effortProbe(effort: "xhigh" | "max") {
+  try {
+    const probe = await createSession("plain", { effort, cents: 1, label: `effort ${effort}` });
+    note(`effort ${effort} on ${MODEL}`, `accepted (the session reports ${probe.agent.model.effort?.type ?? "none"})`);
+    await client.beta.sessions.delete(probe.id, {}, abortable);
+    made.sessions.delete(probe.id);
+  } catch (error) {
+    // resources.ts reports the API's refusal as its fixed classification.
+    if (!(error instanceof ProviderError) || error.status !== 400) throw error;
+    note(`effort ${effort} on ${MODEL}`, `refused (${describe(error)})`);
+  }
+}
+
+/** What the bot's cleanup meets when it archives a session a second time, as
+ *  after an answer that was lost. It takes the session as put away when the
+ *  call succeeds, or when the session reads as archived afterwards. */
+async function archivedTwice() {
+  const spare = await createSession("plain", { cents: 1, label: "archived twice" });
+  const first = await client.beta.sessions.archive(spare.id, {}, abortable);
+  let second: string;
+  try {
+    const again = await client.beta.sessions.archive(spare.id, {}, abortable);
+    second = `accepted, archived_at ${!again.archived_at ? "missing" : again.archived_at === first.archived_at ? "unchanged" : "changed"}`;
+  } catch (error) {
+    if (!(error instanceof APIError) || !error.status) throw error;
+    second = `refused (${describe(error)})`;
+  }
+  const now = await client.beta.sessions.retrieve(spare.id, {}, abortable);
+  step("archiving a session twice", !!first.archived_at && !!now.archived_at,
+    `the first archive ${first.archived_at ? "set" : "did not set"} archived_at and left the session ${first.status}; ` +
+    `the second was ${second}; the session then reads as ${now.archived_at ? "archived" : "not archived"}, ${now.status}`);
+}
+
 // ── The plain session ─────────────────────────────────────────────────────
 
-async function plain(environmentId: string) {
-  // 0. The agent and a session created from it. A schema or a name the API
-  // does not take fails here, and the error names the field.
-  const agent = await attempt("agent", () => createAgent("plain"));
-  const created = agent && await attempt("session", () => createSession("plain", agent, environmentId));
-  if (!agent || !created) return;
+async function plain() {
+  // 0. The environment and the agent, then a session created from them, all
+  // by the bot's own class. A schema or a name the API does not take fails
+  // here, and the error names the field.
+  const resources = await attempt("environment and agent", () => ensured("plain"));
+  const created = resources && await attempt("session", () => createSession("plain"));
+  if (!resources || !created) return;
   sessionStep("session", created, "plain");
   const session: Live = { id: created.id, openRuns: [] };
 
-  // Two questions that cost nothing: neither session below gets a message.
-  await attempt("a second agent with the same name", async () => {
-    try {
-      const twin = await createAgent("plain", agent.name);
-      note("a second agent with the same name", twin.id === agent.id ? "the first one came back" : "created: names are not unique");
-    } catch (error) {
-      if (!(error instanceof APIError) || !error.status) throw error;
-      note("a second agent with the same name", `refused (${describe(error)})`);
-    }
-  });
-  for (const effort of ["xhigh", "max"] as const) {
-    await attempt(`effort ${effort}`, async () => {
-      try {
-        const probe = await createSession("plain", agent, environmentId, { effort, cents: 1, label: `effort ${effort}` });
-        note(`effort ${effort} on ${MODEL}`, `accepted (the session reports ${probe.agent.model.effort?.type ?? "none"})`);
-        await client.beta.sessions.delete(probe.id, {}, abortable);
-        made.sessions.delete(probe.id);
-      } catch (error) {
-        if (!(error instanceof APIError) || error.status !== 400) throw error;
-        note(`effort ${effort} on ${MODEL}`, `refused (${describe(error)})`);
-      }
-    });
-  }
+  // The second agent comes first, so that the lookup after it meets two
+  // agents of one name, if the API allows that.
+  await attempt("a second agent with the same name", () => sameNameAgent(resources));
+  await attempt("resources found again by name", () => foundAgain(resources));
+  for (const effort of ["xhigh", "max"] as const) await attempt(`effort ${effort}`, () => effortProbe(effort));
+  await attempt("archiving a session twice", archivedTwice);
 
   // 1. A reply. The first message carries the context block, as the bot's does.
   const first = await attempt("reply", async () => {
@@ -528,6 +652,18 @@ async function plain(environmentId: string) {
         : !Number.isFinite(began) ? "the list has no event of the agent to compare with"
         : `marked ${Math.abs(began - message)} ms ${message <= began ? "before" : "after"} the agent's first event and ${idle - message} ms before the session went idle`);
   });
+
+  // Two more things the bot goes by. Before it picks a turn up again it asks
+  // which message the session was sent last, and continues only when that is
+  // the id the send had returned. And on a session that was still busy, the
+  // runner takes the stream to have reached the turn where the message comes
+  // a second time, now processed (the list is asked when it never does).
+  if (first) {
+    const at = first.seen.sent, echoes = first.seen.echoes;
+    step("a message just sent is the newest in the list", at?.index === 0,
+      !first.seen.anchor ? "the send returned no id for the message" : !at ? "the list could not be read" : sentText(at));
+    note("the turn's message on the stream", `carried ${echoes.queued} time(s) without processed_at and ${echoes.processed} time(s) with it`);
+  }
 
   await attempt("usage after the first turn", () => usageStep("usage after the first turn", session.id, first?.seen));
 
@@ -601,9 +737,10 @@ async function plain(environmentId: string) {
     step("an output file through the Files API", !!top && sendable(top.file, session.id) && got.text === codes.file,
       top ? `listed under ${top.form}, ${fileText(top.file, session.id)}; the download ` +
         (got.failed ? `failed (${got.failed})` : got.text === codes.file ? "is what was written" : "is not what was written")
-        : `not listed among ${found.length} file(s)`);
+        : unmatched(found, TOP));
+    // The form decides whether send_file can tell `a/x` from `b/x`.
     step("an output file in a subdirectory", !!sub && sendable(sub.file, session.id),
-      sub ? `listed under ${sub.form}, ${fileText(sub.file, session.id)}` : `not listed among ${found.length} file(s)`);
+      sub ? `listed under ${sub.form}, ${fileText(sub.file, session.id)}` : unmatched(found, SUB));
     // The two facts the prompt leaves open, as the container's shell gave them.
     const [directory, ffprobe] = ((await read(sub?.file)).text ?? "").split("\n");
     if (directory) note("the container", `commands start in ${printable(directory, 80)}; ffprobe: ${printable(ffprobe, 80) || "?"}`);
@@ -631,10 +768,16 @@ async function plain(environmentId: string) {
   // looks for a message it sent.
   await attempt("event list", async () => {
     const page = await client.beta.sessions.events.list(session.id, { order: "desc" }, abortable);
-    const times = page.data.map((event) => (event as unknown as RawEvent).processed_at).map((at) => (at ? Date.parse(at) : NaN));
+    const stamps = page.data.map((event) => (event as unknown as RawEvent).processed_at);
+    const times = stamps.map((at) => (at ? Date.parse(at) : NaN));
     const dated = times.filter(Number.isFinite);
+    // After a reconnect the runner tells what came before the turn's message
+    // by these times alone, strictly: two events with one time are not told apart.
+    const fine = stamps.filter((at) => at && /\.\d/.test(at)).length;
+    const shared = dated.filter((at, i) => i > 0 && at === dated[i - 1]).length;
     step("the event list, newest first", dated.length > 1 && dated.every((at, i) => i === 0 || at <= dated[i - 1]!),
-      `${page.data.length} events on a page without a limit, ${page.hasNextPage() ? "more pages follow" : "no further page"}, ${times.length - dated.length} without processed_at`);
+      `${page.data.length} events on a page without a limit, ${page.hasNextPage() ? "more pages follow" : "no further page"}, ${times.length - dated.length} without processed_at; ` +
+      `${fine} of the ${dated.length} times have fractions of a second, and ${shared} neighbouring pair(s) share one time`);
   });
 
   // The runner sends an interrupt of its own before a turn whenever the
@@ -727,46 +870,53 @@ async function plain(environmentId: string) {
       const info = apiErrorInfo(error);
       const inner = (error.error as { error?: { details?: unknown } } | undefined)?.error;
       const keys = (value: unknown) => (value && typeof value === "object" ? Object.keys(value).map((key) => printable(key, 32)).join(", ") : "none");
-      // The runner's own test (`budgetNotRaised`): the code, or the sentence.
-      const sentence = /greater than the session's consumed/i.test(info.message);
-      const recognized = info.code === "budget_not_raised" || sentence || /budget_not_raised/i.test(info.message);
+      // The runner's own test of this refusal: by its code, or else by the
+      // sentence the documentation gives.
+      const recognized = budgetNotRaised(info);
       step(name, info.status === 400 && recognized,
         `HTTP ${info.status} ${word(info.type) ?? "?"}; fields of the error: ${keys(inner)}; fields of its details: ${keys(inner?.details)}; ` +
-        `details.error_code: ${word(info.code) ?? "none"}; message of ${info.message.length} characters, ` +
-        `${sentence ? "the documented sentence" : "not the documented sentence"}, mentions ${mentioned(info.message) || "no field"}`);
+        `details.error_code: ${word(info.code) ?? "none"}; message of ${info.message.length} characters, mentions ${mentioned(info.message) || "no field"}; ` +
+        (!recognized ? "the runner does not recognize it" : `the runner recognizes it by its ${info.code === "budget_not_raised" ? "code" : "message"}`));
     }
   });
 
   // 10. The message a person sends after being told the budget was reached.
-  // It goes the runner's longer way: interrupt, raise the budget, send, and
-  // wait for the message to show up as processed.
+  // The runner sends an interrupt (at its budget a session takes one and, by
+  // the documentation, stops nothing for it), raises the budget (which sets
+  // the paused work going again), and then sends the message behind a second
+  // interrupt, both in one request. The turn starts where its message shows
+  // up as processed; what the paused work did before that is not the turn's.
   await attempt("a turn after a budget stop", async () => {
     const name = "a turn after a budget stop";
     if (stopped?.stop !== "budget") return step(name, false, "not run: the step before did not leave the session at its budget");
     const result = await turn(session, "Stop the web lookups from before and do not search again. Reply with the single word: back");
     step(name, result.stop === "end_turn" && result.text.length > 0,
       `${result.text.length} characters after ${result.rounds} model request(s), ended as ${result.stop}`);
-    // Raising the budget lets a turn it paused go on. Whether that one did,
-    // before the new message was taken up, is in the list.
+    // Sent while the session may still have been busy with the older work.
+    if (result.seen.sent) note("the message sent after the budget stop", `a moment after the send: ${sentText(result.seen.sent)}; ` +
+      `the stream carried it ${result.seen.echoes.queued} time(s) without processed_at and ${result.seen.echoes.processed} time(s) with it`);
+    // Whether the paused work went on, and how far, before the new message
+    // was taken up, is in the list.
     const between = stopped.seen.budgetIdle && result.seen.anchor
       ? await eventsBetween(session.id, stopped.seen.budgetIdle, result.seen.anchor) : undefined;
-    if (!between) return;
-    const requests = typed(between, "span.model_request_start");
-    note("between the budget stop and the new message",
-      `${requests} model request(s), ${typed(between, "agent.tool_use")} tool call(s): the paused turn ${requests ? "went on once the budget was raised" : "did not go on"}`);
+    if (between) note("between the budget stop and the new message", resumedText(between));
   });
 }
 
 // ── The Haiku Ultra session ───────────────────────────────────────────────
 
-async function ultra(environmentId: string) {
+async function ultra() {
   // Whether the API takes dynamic workflows on this model is in no document.
-  const agent = await attempt(`an agent with workflows on ${MODEL}`, async () => {
-    const workflowAgent = await createAgent("ultra");
-    step(`an agent with workflows on ${MODEL}`, asIntended(workflowAgent.multiagent, "ultra"), multiagentText(workflowAgent.multiagent));
-    return workflowAgent;
+  // The agent is the one resources.ts defines, read back as the API has it.
+  const resources = await attempt(`an agent with workflows on ${MODEL}`, async () => {
+    const found = await ensured("ultra");
+    const agent = await client.beta.agents.retrieve(found.agent.id, {}, abortable);
+    const mismatch = multiagentMismatch(agent.multiagent, "ultra");
+    step(`an agent with workflows on ${MODEL}`, !mismatch,
+      `asked for ${multiagentText(ULTRA_MULTIAGENT)}; the agent has ${multiagentText(agent.multiagent)}${mismatch ? ` (${mismatch})` : ""}`);
+    return found;
   });
-  const created = agent && await attempt("Haiku Ultra session", () => createSession("ultra", agent, environmentId));
+  const created = resources && await attempt("Haiku Ultra session", () => createSession("ultra"));
   if (!created) return;
   sessionStep("Haiku Ultra session", created, "ultra");
   const session: Live = { id: created.id, openRuns: [] };
@@ -857,6 +1007,12 @@ async function leftovers() {
   console.log(`found ${made.sessions.size} session(s), ${made.environments.size} environment(s) and ${made.agents.size} agent(s) with metadata.app = ${APP}`);
 }
 
+/** Whether a session has ended for good: archived, or terminated. */
+const ended = (id: string) =>
+  client.beta.sessions.retrieve(id).then((session) => !!session.archived_at || session.status === "terminated", () => false);
+// Sessions that had ended and whose delete was refused.
+let leftEnded = 0;
+
 /** Brings a session to rest and deletes it. The budget is lowered first and
  *  also with `--keep`: a session that is left must not be able to spend. */
 async function removeSession(id: string, label: string): Promise<boolean> {
@@ -876,6 +1032,13 @@ async function removeSession(id: string, label: string): Promise<boolean> {
     } catch (error) {
       const info = apiErrorInfo(error);
       if (info.status === 404) outcome = "already gone";
+      // An archived session has ended and nothing starts it again. Whether
+      // one can be deleted is in no document, so a refusal is reported and
+      // not tried again: `--cleanup` could do no more about it.
+      else if (await ended(id)) {
+        leftEnded++;
+        outcome = `left archived or terminated (its delete was refused: ${describe(error)})`;
+      }
       else if (tries >= 6) outcome = `NOT deleted (${describe(error)}); ${capped}`;
       else await sleep(5_000);
     }
@@ -887,9 +1050,16 @@ async function removeSession(id: string, label: string): Promise<boolean> {
 async function cleanup() {
   let clean = true;
   for (const [id, label] of made.sessions) clean = await removeSession(id, label) && clean;
-  const remove = async (kind: string, id: string, done: string, run: () => Promise<unknown>) => {
+  type Labelled = { metadata?: Record<string, string> | null };
+  const remove = async (kind: string, id: string, done: string, read: () => Promise<Labelled>, run: () => Promise<unknown>) => {
     if (keep) return console.log(`cleanup: ${kind} ${id} kept`);
     try {
+      // Read from the resource itself, however its id got here: nothing
+      // without this script's label is removed, so never one of the bot's.
+      if ((await read()).metadata?.app !== APP) {
+        clean = false;
+        return console.log(`cleanup: ${kind} ${id} NOT ${done}: it does not carry metadata.app = ${APP}`);
+      }
       await run();
       console.log(`cleanup: ${kind} ${id} ${done}`);
     } catch (error) {
@@ -898,21 +1068,24 @@ async function cleanup() {
       console.log(`cleanup: ${kind} ${id} ${gone ? "already gone" : `NOT ${done} (${describe(error)})`}`);
     }
   };
-  for (const id of made.environments) await remove("environment", id, "deleted", () => client.beta.environments.delete(id));
+  for (const id of made.environments)
+    await remove("environment", id, "deleted", () => client.beta.environments.retrieve(id), () => client.beta.environments.delete(id));
   // Agents have no delete.
-  for (const id of made.agents) await remove("agent", id, "archived", () => client.beta.agents.archive(id));
+  for (const id of made.agents)
+    await remove("agent", id, "archived", () => client.beta.agents.retrieve(id), () => client.beta.agents.archive(id));
   const count = made.sessions.size + made.environments.size + made.agents.size;
   step("cleanup", clean, !clean ? "something is left: see the lines above, and run again with --cleanup"
     : !count ? "nothing to remove"
-    : keep ? "everything kept on request; the sessions were brought to rest" : "sessions and environments deleted, agents archived");
+    : keep ? "everything kept on request; the sessions were brought to rest"
+    : "sessions and environments deleted, agents archived" +
+      (leftEnded ? `; ${leftEnded} session(s) that had ended could not be deleted and were left` : ""));
 }
 
 try {
   if (option("--cleanup")) await leftovers();
   else {
-    const environmentId = await createEnvironment();
-    await plain(environmentId);
-    if (option("--ultra")) await ultra(environmentId);
+    await plain();
+    if (option("--ultra")) await ultra();
   }
 } catch (error) {
   step("run", false, stop.signal.aborted ? "stopped by a signal" : describe(error));

@@ -1,10 +1,13 @@
 import { expect, test } from "bun:test";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Client } from "discord.js";
-import { MODEL_PRESETS, WORKSPACE_PROVIDER, deprecatedProvider } from "@hibana/shared/catalog";
+import { MODEL_PRESETS, WORKSPACE_PROVIDER, deprecatedProvider, premiumPresetIds, unpublishedPresetIds } from "@hibana/shared/catalog";
 import { SUBAGENT_MODES, emptyGuild, emptyUserOverride, subagentMode, subagentModePatch } from "@hibana/shared/settings";
 import { Agent } from "../agent";
 import { conversationKey, harnessFor, keyHarness, workspaceVariant } from "../claude/select";
-import { loadConfig, type Selection } from "../config";
+import { loadConfig, WORKSPACE_MIN_TURN_CENTS, type Selection } from "../config";
 import { refuseDeprecatedPreset } from "../deprecation";
 import { assemblePrompt } from "../harness";
 import { LlmClient } from "../llm";
@@ -103,6 +106,64 @@ test("the presets are a new choice only once they are published and the key is s
   expect(runtime.resolve("g1", "member").selection.provider).toBe(WORKSPACE_PROVIDER);
 });
 
+test("a state file from before the Workspace presets existed does not publish them on a bot without the settings API", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "hibana-workspace-settings-"));
+  try {
+    const path = join(dir, "runtime_state.json");
+    const others = (ids: string[]) => ids.filter((id) => !WORKSPACE.includes(id));
+    // What the version before #76 persisted: the whole snapshot, with the two
+    // lists of a catalog that had no Workspace presets. The other presets are
+    // not at today's defaults either: opus-5-5 is published, anthropic-haiku-5-5
+    // has no plan floor, and sol is unpublished and Premium.
+    const stored = {
+      guilds: {}, user_contexts: {}, user_overrides: {}, blocked_users: [], user_roles: { owner: "premium" },
+      unpublished_presets: [...others(unpublishedPresetIds({})).filter((id) => id !== "opus-5-5"), "sol"],
+      premium_presets: [...others(premiumPresetIds({})).filter((id) => id !== "anthropic-haiku-5-5"), "sol"],
+    };
+    const start = async (extra: NodeJS.ProcessEnv = {}) => {
+      const runtime = new Runtime(loadConfig(env({ ANTHROPIC_WORKSPACE_API_KEY: "fixture", RUNTIME_STATE_PATH: path, ...extra })));
+      await runtime.load();
+      return runtime;
+    };
+    await writeFile(path, JSON.stringify(stored));
+    const runtime = await start();
+    // Nothing on this bot can publish a preset, so the key alone must not.
+    for (const id of WORKSPACE) {
+      expect(runtime.snapshot.unpublished_presets).toContain(id);
+      expect(runtime.snapshot.premium_presets).toContain(id);
+      for (const user of ["member", "owner"]) expect([id, user, runtime.canSelect(id, user)]).toEqual([id, user, false]);
+    }
+    for (const user of ["member", "owner"])
+      expect(runtime.selectablePresets(user).filter((p) => p.provider === WORKSPACE_PROVIDER)).toEqual([]);
+    await expect(runtime.patch("g1", { preset: "anthropic-workspace-opus-5-5" }, "member"))
+      .rejects.toThrow("This model is unavailable for your account");
+    expect(runtime.resolve("g1", "member").selection.provider).not.toBe(WORKSPACE_PROVIDER);
+    // Every other preset keeps the state the file had.
+    expect(others(runtime.snapshot.unpublished_presets)).toEqual(stored.unpublished_presets);
+    expect(others(runtime.snapshot.premium_presets)).toEqual(stored.premium_presets);
+    expect(runtime.snapshot.unpublished_presets).not.toContain("opus-5-5");
+    expect(runtime.canSelect("anthropic-haiku-5-5", "member")).toBe(true);
+    expect(runtime.canSelect("sol", "owner")).toBe(false);
+    // The file is written back with them, and the next start adds nothing more.
+    const saved = JSON.parse(await readFile(path, "utf8"));
+    expect(saved.unpublished_presets).toEqual(runtime.snapshot.unpublished_presets);
+    expect(saved.premium_presets).toEqual(runtime.snapshot.premium_presets);
+    const again = await start();
+    expect(again.snapshot.unpublished_presets).toEqual(runtime.snapshot.unpublished_presets);
+    expect(again.snapshot.premium_presets).toEqual(runtime.snapshot.premium_presets);
+
+    // With the settings API the lists are its to write: what the owner
+    // published in the dashboard stays published in the saved snapshot.
+    await writeFile(path, JSON.stringify(stored));
+    const web = await start({ WEB_API_URL: "http://127.0.0.1:9", WEB_INTERNAL_TOKEN: "fixture" });
+    expect(web.snapshot.unpublished_presets).toEqual(stored.unpublished_presets);
+    expect(web.snapshot.premium_presets).toEqual(stored.premium_presets);
+    expect(web.canSelect("anthropic-workspace-opus-5-5", "owner")).toBe(true);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("configuration is valid without the key, and limits outside their range stop the start", () => {
   const defaults = loadConfig({});
   // Nothing about the default provider changes.
@@ -128,6 +189,20 @@ test("configuration is valid without the key, and limits outside their range sto
     concurrency: 3, inputMaxChars: 1000,
     networking: "limited", allowedHosts: ["cdn.discordapp.com", "api.example.com"], web: false,
   });
+  // A turn's limit starts where a turn can start: with less than this, every
+  // turn would be refused as if the day's limit were reached. The day's and
+  // the month's limits still go down to one cent, which is how to stop it all.
+  expect(WORKSPACE_MIN_TURN_CENTS).toBe(5);
+  expect(loadConfig({
+    ANTHROPIC_WORKSPACE_TURN_BUDGET_USD: "0.05", ANTHROPIC_WORKSPACE_ULTRA_TURN_BUDGET_USD: "0.05",
+    ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD: "0.01", ANTHROPIC_WORKSPACE_MONTHLY_BUDGET_USD: "0.01",
+  }).anthropicWorkspace).toMatchObject({
+    turnBudgetCents: WORKSPACE_MIN_TURN_CENTS, ultraTurnBudgetCents: WORKSPACE_MIN_TURN_CENTS, dailyBudgetCents: 1, monthlyBudgetCents: 1,
+  });
+  expect(() => loadConfig({ ANTHROPIC_WORKSPACE_TURN_BUDGET_USD: "0.04" }))
+    .toThrow("ANTHROPIC_WORKSPACE_TURN_BUDGET_USD must be between 0.05 and 100");
+  expect(() => loadConfig({ ANTHROPIC_WORKSPACE_ULTRA_TURN_BUDGET_USD: "0.049" }))
+    .toThrow("ANTHROPIC_WORKSPACE_ULTRA_TURN_BUDGET_USD must be between 0.05 and 100");
   // `limited` with no host is allowed: it is the tightest setting.
   expect(loadConfig({ ANTHROPIC_WORKSPACE_NETWORKING: "limited" }).anthropicWorkspace)
     .toMatchObject({ networking: "limited", allowedHosts: [] });
@@ -135,9 +210,13 @@ test("configuration is valid without the key, and limits outside their range sto
   for (const [key, value] of [
     ["ANTHROPIC_WORKSPACE_TURN_BUDGET_USD", "0"],
     ["ANTHROPIC_WORKSPACE_TURN_BUDGET_USD", "0.001"],
+    // Below what a turn needs to start at all (`WORKSPACE_MIN_TURN_CENTS`).
+    ["ANTHROPIC_WORKSPACE_TURN_BUDGET_USD", "0.01"],
+    ["ANTHROPIC_WORKSPACE_TURN_BUDGET_USD", "0.04"],
     ["ANTHROPIC_WORKSPACE_TURN_BUDGET_USD", "100.01"],
     ["ANTHROPIC_WORKSPACE_TURN_BUDGET_USD", "one"],
     ["ANTHROPIC_WORKSPACE_ULTRA_TURN_BUDGET_USD", "-3"],
+    ["ANTHROPIC_WORKSPACE_ULTRA_TURN_BUDGET_USD", "0.04"],
     ["ANTHROPIC_WORKSPACE_ULTRA_TURN_BUDGET_USD", "101"],
     ["ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD", "0"],
     ["ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD", "10001"],

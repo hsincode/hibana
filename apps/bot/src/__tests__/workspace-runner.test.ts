@@ -18,13 +18,21 @@ type Json = Record<string, any>;
 type Sent = { method: string; path: string; query: URLSearchParams; body?: Json };
 const SESSION = "/v1/sessions/sesn_1";
 const usd = (amount: number) => ({ amount: String(amount), currency: "USD" });
+// `retry-after-ms` keeps the SDK's own retries (two, as in production) from
+// taking seconds; it changes when a request is tried again, not whether.
 const rejected = (status: number, error: Json = { type: "invalid_request_error", message: "upstream text" }) =>
-  Response.json({ type: "error", error }, { status });
+  Response.json({ type: "error", error }, { status, headers: { "retry-after-ms": "1" } });
 
 /**
  * One session of the Managed Agents API. Tests set its state, decide what it
  * emits and when, and read back every request. An emitted event goes to the
  * open stream and into the list, as on the real API.
+ *
+ * What it does at its budget follows the public documentation ("When a
+ * session reaches its budget", "Resume a session at its budget"): there it
+ * takes no `user.message`, an interrupt is accepted and stops nothing, a new
+ * budget has to be above what was used, and an accepted one resumes the work
+ * the budget had paused without anything more from the client.
  */
 class FakeSession {
   sent: Sent[] = [];
@@ -33,15 +41,22 @@ class FakeSession {
   /** Called when the turn's message arrives; what it emits is the turn. */
   onMessage: (fake: FakeSession) => void = () => {};
   onResult: (event: Json, fake: FakeSession) => void = () => {};
+  /** An interrupt that found something to stop. Not called at the budget. */
   onInterrupt: (fake: FakeSession) => void = () => {};
+  /** The budget was raised on a session paused at it: what was paused goes on. */
+  onResume: (fake: FakeSession) => void = () => {};
   onStream: (fake: FakeSession, opened: number) => void = () => {};
+  /** Events one page of the list holds. */
+  pageSize = Infinity;
   private routes = new Map<string, (request: Sent) => Response | undefined>();
   private streams: ReadableStreamDefaultController<Uint8Array>[] = [];
   private n = 0;
   private message?: RawEvent;
   readonly client = createWorkspaceClient(
     loadConfig({ ANTHROPIC_WORKSPACE_API_KEY: "fixture", RUNTIME_STATE_PATH: "", LOG_DIR: "" }),
-    { fetch: ((input: unknown, init?: RequestInit) => this.fetch(input, init)) as unknown as typeof fetch, maxRetries: 0 });
+    // The client's own default of two retries is kept, as in production: what
+    // must be sent only once has to say so itself.
+    { fetch: ((input: unknown, init?: RequestInit) => this.fetch(input, init)) as unknown as typeof fetch });
 
   /** By default at rest as the last turn left it: 40 cents used, the budget lowered to 41. */
   constructor(state: { status?: string; budget?: number | null; used?: number | null; usage?: Json } = {}) {
@@ -88,15 +103,19 @@ class FakeSession {
   drop() {
     try { this.streams.at(-1)?.close(); } catch {}
   }
-  /** The turn's message leaves the queue: it is echoed again, now processed. */
-  process() {
+  /** The turn's message leaves the queue: it is echoed again, now processed.
+   *  `at` gives it a time of its own; `echo: false` leaves the stream out. */
+  process(how: { at?: string; echo?: boolean } = {}) {
     if (!this.message || this.message.processed_at) return;
     this.history = this.history.filter((e) => e !== this.message);
-    this.message = { ...this.message, processed_at: new Date(Date.UTC(2026, 9, 12, 0, 0, ++this.n)).toISOString() };
+    this.message = { ...this.message, processed_at: how.at ?? new Date(Date.UTC(2026, 9, 12, 0, 0, ++this.n)).toISOString() };
     this.history.push(this.message);
-    this.write(`event: user.message\ndata: ${JSON.stringify(this.message)}\n\n`);
+    if (how.echo !== false) this.write(`event: user.message\ndata: ${JSON.stringify(this.message)}\n\n`);
   }
   use(amount: number, more: Json = {}) { this.state.usage = { ...this.state.usage, list_cost: usd(amount), ...more }; }
+  get used() { return Number(this.state.usage?.list_cost?.amount ?? 0); }
+  /** Paused at its budget: what it has used has reached the limit. */
+  get capped() { return !!this.state.budget && Number(this.state.budget.max_list_cost.amount) <= this.used; }
 
   private async fetch(input: unknown, init?: RequestInit): Promise<Response> {
     const url = new URL(String(input));
@@ -111,35 +130,55 @@ class FakeSession {
     switch (key) {
       case `GET ${SESSION}`:
         return Response.json(this.state);
-      case `POST ${SESSION}`:
-        if (request.body?.budget) this.state.budget = request.body.budget;
+      case `POST ${SESSION}`: {
+        if (!request.body?.budget) return Response.json(this.state);
+        if (!(Number(request.body.budget.max_list_cost.amount) > this.used))
+          return rejected(400, { type: "invalid_request_error", message: "budget.max_list_cost must be greater than the session's consumed list cost" });
+        const paused = this.capped;
+        this.state.budget = request.body.budget;
+        if (paused) this.onResume(this);
         return Response.json(this.state);
+      }
       case `GET ${SESSION}/events/stream`: {
         const body = new ReadableStream<Uint8Array>({ start: (controller) => { this.streams.push(controller); } });
+        // The session's own clock, a tick past everything it has emitted.
+        const date = new Date(Date.UTC(2026, 9, 12, 0, 0, ++this.n)).toUTCString();
         this.onStream(this, this.streams.length);
-        return new Response(body, { headers: { "content-type": "text/event-stream" } });
+        return new Response(body, { headers: { "content-type": "text/event-stream", date } });
       }
       case `GET ${SESSION}/events`: {
         const types = request.query.getAll("types[]");
         const data = this.history.filter((e) => !types.length || types.includes(e.type));
-        return Response.json({ data: request.query.get("order") === "desc" ? [...data].reverse() : data, next_page: null });
+        if (request.query.get("order") === "desc") data.reverse();
+        const from = Number(request.query.get("page") ?? 0), to = from + this.pageSize;
+        return Response.json({ data: data.slice(from, to), next_page: to < data.length ? String(to) : null });
       }
       case `POST ${SESSION}/events`: {
-        const event = request.body!.events[0] as Json;
-        if (event.type === "user.message") {
-          // Queued first: no `processed_at` until the agent takes it up.
-          this.message = { id: "sevt_msg", type: "user.message", content: event.content, processed_at: null };
-          this.history.push(this.message);
-          this.write(`event: user.message\ndata: ${JSON.stringify(this.message)}\n\n`);
-          this.onMessage(this);
-          return Response.json({ data: [this.message] });
+        const events = request.body!.events as Json[];
+        // One event the session does not take refuses the whole request.
+        if (this.capped && events.some((event) => event.type === "user.message"))
+          return rejected(400, { type: "invalid_request_error", message: "at its budget the session accepts only user.tool_confirmation, user.tool_result, user.custom_tool_result and user.interrupt" });
+        // In the order they were sent: an interrupt ahead of a message ends
+        // what was running before the message is taken up.
+        const data: Json[] = [];
+        for (const event of events) {
+          if (event.type === "user.message") {
+            // Queued first: no `processed_at` until the agent takes it up.
+            this.message = { id: "sevt_msg", type: "user.message", content: event.content, processed_at: null };
+            this.history.push(this.message);
+            this.write(`event: user.message\ndata: ${JSON.stringify(this.message)}\n\n`);
+            this.onMessage(this);
+            data.push(this.message);
+            continue;
+          }
+          if (event.type === "user.interrupt" && !this.capped) this.onInterrupt(this);
+          if (event.type === "user.custom_tool_result") {
+            this.history.push({ id: `sevt_${++this.n}`, processed_at: new Date().toISOString(), ...event } as RawEvent);
+            this.onResult(event, this);
+          }
+          data.push({ id: `sevt_${++this.n}`, ...event });
         }
-        if (event.type === "user.interrupt") this.onInterrupt(this);
-        if (event.type === "user.custom_tool_result") {
-          this.history.push({ id: `sevt_${++this.n}`, processed_at: new Date().toISOString(), ...event } as RawEvent);
-          this.onResult(event, this);
-        }
-        return Response.json({ data: [{ id: `sevt_${++this.n}`, ...event }] });
+        return Response.json({ data });
       }
     }
     return rejected(404, { type: "not_found_error", message: "no such route" });
@@ -316,6 +355,47 @@ describe("a turn", () => {
     expect(spoken).toEqual(["調査を始めました。"]);
   });
 
+  test("what the model writes when it stops with a run open is passed on while the run works, and only once", async () => {
+    const request = (type: "start" | "end"): Json =>
+      ({ type: `span.model_request_${type}`, ...(type === "end" && { is_error: false, model_usage: { input_tokens: 10, output_tokens: 5 } }) });
+    const fake = new FakeSession();
+    fake.onMessage = (f) => {
+      f.process();
+      // The model says what it is about to do, starts the run with a tool
+      // call, then writes its one line and stops, as the Ultra prompt asks.
+      // No idle follows: the session stays running while the run works.
+      f.emit(running(), request("start"), said("12 件に分けて調べます。"),
+        { type: "agent.tool_use", name: "start_workflow", input: {}, evaluated_permission: "allow" },
+        { type: "workflow_run.created", workflow_run_id: "wrun_1", name: "survey", description: null, phases: [] },
+        { type: "workflow_run.status_running", workflow_run_id: "wrun_1" },
+        request("end"), request("start"), said("40 件のファイルを確認する run を始めました。"), request("end"));
+    };
+    const spoken: string[] = [];
+    const work = runTurn(turn(fake, { say: (text) => { spoken.push(text); } }));
+    await until(() => fake.events("user.message").length === 1);
+    // The run works for a while: several times this test's grace period.
+    await Bun.sleep(100);
+    expect(spoken).toEqual(["12 件に分けて調べます。", "40 件のファイルを確認する run を始めました。"]);
+    fake.emit({ type: "workflow_run.status_ended", workflow_run_id: "wrun_1", result: { type: "completed" } },
+      running(), request("start"), said("確認が終わりました。"), request("end"), idle());
+    const result = await work;
+    // Shown already, so not said again when the next request begins; and the reply is the last request's.
+    expect(spoken).toEqual(["12 件に分けて調べます。", "40 件のファイルを確認する run を始めました。"]);
+    expect(result.text).toBe("確認が終わりました。");
+
+    // A request that ends in a tool call has passed its text on already, and
+    // without a run open nothing is shown early: it may be the reply.
+    const plain = new FakeSession();
+    plain.onMessage = (f) => {
+      f.process();
+      f.emit(running(), request("start"), said("これが返事です。"), request("end"));
+      setTimeout(() => f.emit(idle()), 60);
+    };
+    const early: string[] = [];
+    expect((await runTurn(turn(plain, { say: (text) => { early.push(text); } }))).text).toBe("これが返事です。");
+    expect(early).toEqual([]);
+  });
+
   test("finishes with a note when a run stays paused past the grace period", async () => {
     const fake = new FakeSession();
     fake.onMessage = (f) => {
@@ -348,14 +428,24 @@ describe("a turn", () => {
     expect(fake.events("user.interrupt")).toHaveLength(0);
   });
 
-  test("interrupts first when the session was left at its budget, and ignores what precedes its own message", async () => {
+  test("a session left at its budget is stopped again once the budget is raised, and the turn starts at its own message", async () => {
     const fake = new FakeSession({ budget: 100, used: 100 });
+    // The raise lets the paused work go on.
+    fake.onResume = (f) => { f.state.status = "running"; f.emit(running(), said("（止まっていた作業の続き）")); };
+    // An interrupt after the raise ends it: its idle, and a call it made on the way out.
+    fake.onInterrupt = (f) => { f.state.status = "idle"; f.emit(idle(), calls("send_message", "call_old", { content: "late" })); };
     fake.onMessage = (f) => {
-      // Still the old turn: its end, and a call it made on the way out.
-      f.emit(idle(), calls("send_message", "call_old", { content: "late" }));
+      if (f.state.status !== "running") return;
+      // Nobody stopped the resumed work, so the message waits behind it
+      // while the turn's allowance goes to the old request.
+      f.use(195);
+      f.emit(said("（止まっていた作業の結果）"), reported(195), idle());
+      f.process();
+      f.use(198);
+      f.emit(running(), said("作業は上のとおり終わっています。"), reported(198), idle());
     };
-    // Only after that is the new message taken up.
-    fake.onResult = (_event, f) => { f.process(); f.emit(running(), said("新しい返事。"), idle()); };
+    // Only when the old call is closed is the new message taken up.
+    fake.onResult = (_event, f) => { f.process(); f.use(104); f.emit(running(), said("新しい返事。"), reported(104), idle()); };
     let executed = 0;
     const observed: string[] = [];
     const result = await runTurn(turn(fake, {
@@ -364,20 +454,78 @@ describe("a turn", () => {
     }));
     expect(fake.log.slice(0, 5)).toEqual([
       "GET /",
-      // Alone, and before the raise: the raise would resume what the budget paused.
+      // At its budget this stops no thread. It is there for runs: one that an
+      // interrupt paused stays paused when the budget goes up.
       "POST /events user.interrupt",
       "POST / budget=200",
       "GET /events/stream",
-      "POST /events user.message",
+      // The raise resumed what the budget had paused. That is stopped in the
+      // request that brings the message, and ahead of it.
+      "POST /events user.interrupt+user.message",
     ]);
     expect(result).toMatchObject({ text: "新しい返事。", stop: "end_turn" });
+    expect(result.cumulative?.list_cost_cents).toBe(104);
     expect(executed).toBe(0);
     // Progress starts with the turn, not with what was left over.
-    expect(observed).toEqual(["session.status_running", "agent.message", "session.status_idle"]);
+    expect(observed).toEqual(["session.status_running", "agent.message", "session.usage", "session.status_idle"]);
     expect(fake.events("user.custom_tool_result")).toEqual([{
       type: "user.custom_tool_result", custom_tool_use_id: "call_old", is_error: true,
       content: [{ type: "text", text: "This call belongs to an earlier turn that was stopped, so it was not run." }],
     }]);
+  });
+
+  test("a session that was still working is interrupted before the raise, and its message goes out alone", async () => {
+    const fake = new FakeSession({ status: "running", budget: 141, used: 40 });
+    fake.onInterrupt = (f) => { f.state.status = "idle"; f.emit(idle()); };
+    fake.onMessage = answers("止めてから答えました。");
+    const result = await runTurn(turn(fake));
+    expect(fake.log.slice(0, 5)).toEqual([
+      "GET /", "POST /events user.interrupt", "POST / budget=140", "GET /events/stream", "POST /events user.message",
+    ]);
+    expect(result.text).toBe("止めてから答えました。");
+  });
+
+  test("a budget stop while the turn's message is still queued ends the turn as a budget stop", async () => {
+    const fake = new FakeSession({ budget: 100, used: 100 });
+    fake.onResume = (f) => { f.state.status = "running"; f.emit(running()); };
+    // The interrupt is not applied while a tool call of the resumed work
+    // runs, and the request after that call takes the session to its budget.
+    fake.onInterrupt = () => {};
+    fake.onMessage = (f) => { f.use(201); f.emit(reported(201), idle("budget_reached")); };
+    const started = Date.now();
+    const result = await runTurn(turn(fake, { deadlineAt: Date.now() + 600 }));
+    // Nothing moves until the budget does: waiting for the message to be
+    // taken up would last until the time limit.
+    expect(Date.now() - started).toBeLessThan(400);
+    expect(result).toMatchObject({ text: "", stop: "budget", released: true });
+    expect(result.notice).toBe(budgetNotice(100));
+    expect(result.cumulative?.list_cost_cents).toBe(201);
+    // Paused at its budget: it is neither interrupted again nor is its budget
+    // touched. The list was asked once whether the stop came after the message.
+    expect(fake.log.slice(-3)).toEqual(["POST /events user.interrupt+user.message", "GET /events", "GET /"]);
+    expect(fake.history.find((event) => event.type === "user.message")).toMatchObject({ id: "sevt_msg", processed_at: null });
+  });
+
+  test("exhausted retries while the turn's message is still queued end the turn, unless the session goes on", async () => {
+    const overloaded: Json = { type: "session.error", error: { type: "model_overloaded_error", message: "upstream text", retry_status: { type: "exhausted" } } };
+    // Older work was still going. It fails for good, and with that the
+    // session drops what was queued behind it: the message is never taken up.
+    const fake = new FakeSession({ status: "running", budget: 141, used: 40 });
+    fake.onMessage = (f) => { f.emit(overloaded, idle("retries_exhausted")); };
+    const started = Date.now();
+    const error = await failure(runTurn(turn(fake, { deadlineAt: Date.now() + 600 }))) as ProviderError;
+    expect(Date.now() - started).toBeLessThan(400);
+    expect([error.kind, error.retryable, error.diagnostics.type]).toEqual(["transient", true, "model_overloaded_error"]);
+
+    // The same, but the message is taken up after all.
+    const goes = new FakeSession({ status: "running", budget: 141, used: 40 });
+    goes.onMessage = (f) => {
+      f.emit(overloaded, idle("retries_exhausted"));
+      f.process();
+      f.emit(running());
+      setTimeout(() => f.emit(said("続けられました。"), idle()), 80);
+    };
+    expect((await runTurn(turn(goes))).text).toBe("続けられました。");
   });
 
   test("handles each event once across a reconnect and never runs a tool twice", async () => {
@@ -490,25 +638,280 @@ describe("a turn", () => {
 });
 
 describe("catching up", () => {
+  /** The session refuses a call's result as often as told, each attempt of
+   *  the client's own retries included, and counts what it was sent. */
+  function refusing(fake: FakeSession, times: number, status = 503) {
+    const seen = { posts: 0, refused: 0 };
+    fake.on(`POST ${SESSION}/events`, (request) => {
+      if (request.body!.events[0].type !== "user.custom_tool_result") return undefined;
+      seen.posts++;
+      if (seen.refused >= times) return undefined;
+      seen.refused++;
+      return rejected(status, status === 400 ? undefined : { type: "overloaded_error", message: "busy" });
+    });
+    return seen;
+  }
+  const fiveMessages = { custom_tool_use_id: "call_1", is_error: false, content: [{ type: "text", text: "five messages" }] };
+
   test("a result that could not be delivered is sent again after the reconnect; the tool is not run again", async () => {
     const fake = new FakeSession();
     fake.onMessage = (f) => { f.process(); f.emit(running(), calls("read_messages", "call_1")); };
-    let refusedOnce = false;
-    fake.on(`POST ${SESSION}/events`, (request) => {
-      if (request.body!.events[0].type !== "user.custom_tool_result" || refusedOnce) return undefined;
-      refusedOnce = true;
-      setTimeout(() => fake.drop(), 5);
-      return rejected(503, { type: "overloaded_error", message: "busy" });
-    });
+    // All three attempts of the first delivery fail, then the connection drops.
+    const seen = refusing(fake, 3);
     fake.onResult = (_event, f) => { f.emit(said("読めました。"), idle()); };
     let executed = 0;
-    const result = await runTurn(turn(fake, { executeTool: async () => { executed++; return ok("five messages"); } }));
+    const work = runTurn(turn(fake, { executeTool: async () => { executed++; return ok("five messages"); } }));
+    await until(() => seen.refused === 3);
+    await Bun.sleep(5);
+    fake.drop();
+    const result = await work;
     expect(result.text).toBe("読めました。");
     expect(executed).toBe(1);
-    expect(fake.events("user.custom_tool_result")).toMatchObject([
-      { custom_tool_use_id: "call_1", content: [{ type: "text", text: "five messages" }] },
-      { custom_tool_use_id: "call_1", content: [{ type: "text", text: "five messages" }] },
+    expect(fake.streamsOpened).toBe(2);
+    expect(fake.events("user.custom_tool_result")).toMatchObject([fiveMessages, fiveMessages, fiveMessages, fiveMessages]);
+  });
+
+  test("a result that could not be delivered is sent again while the stream stays open", async () => {
+    const fake = new FakeSession();
+    // The session says at once that it waits on the call, as it always does.
+    fake.onMessage = (f) => { f.process(); f.emit(running(), calls("send_message", "call_1"), idle("requires_action", { event_ids: ["call_1"] })); };
+    refusing(fake, 3);
+    fake.onResult = (_event, f) => { f.emit(running(), said("送りました。"), idle()); };
+    // Pings keep the connection from being reopened for having gone quiet.
+    const ping = setInterval(() => fake.write("event: ping\ndata: {\"type\":\"ping\"}\n\n"), 10);
+    let executed = 0;
+    try {
+      const result = await runTurn(turn(fake, {
+        deadlineAt: Date.now() + 1500,
+        executeTool: async () => { executed++; return ok("five messages"); },
+        limits: { idleMs: 100, reconnects: 2, graceMs: 30, interruptWaitMs: 60, settleMs: 60, resendMs: 40 },
+      }));
+      expect(result).toMatchObject({ text: "送りました。", stop: "end_turn" });
+    } finally {
+      clearInterval(ping);
+    }
+    // The tool ran once; its result went out again by itself, on the same connection.
+    expect(executed).toBe(1);
+    expect(fake.streamsOpened).toBe(1);
+    expect(fake.events("user.custom_tool_result")).toMatchObject([fiveMessages, fiveMessages, fiveMessages, fiveMessages]);
+  });
+
+  test("a session that says it still waits on a call gets the undelivered result at once", async () => {
+    const fake = new FakeSession();
+    fake.onMessage = (f) => { f.process(); f.emit(running(), calls("send_message", "call_1")); };
+    const seen = refusing(fake, 3);
+    fake.onResult = (_event, f) => { f.emit(running(), said("送りました。"), idle()); };
+    let executed = 0;
+    // The wait before the result goes out again by itself is far longer than this turn may take.
+    const work = runTurn(turn(fake, { deadlineAt: Date.now() + 1500, executeTool: async () => { executed++; return ok("five messages"); } }));
+    await until(() => seen.refused === 3);
+    await Bun.sleep(5);
+    fake.emit(idle("requires_action", { event_ids: ["call_1"] }));
+    expect(await work).toMatchObject({ text: "送りました。", stop: "end_turn" });
+    expect(executed).toBe(1);
+    expect(seen.posts).toBe(4);
+  });
+
+  test("a result the session refuses is replaced once by a plain one, so the session does not wait for the call", async () => {
+    const fake = new FakeSession();
+    fake.onMessage = (f) => { f.process(); f.emit(running(), calls("send_message", "call_1")); };
+    refusing(fake, 1, 400);
+    fake.onResult = (_event, f) => { f.emit(running(), said("結果は受け取れませんでした。"), idle()); };
+    let executed = 0;
+    const result = await runTurn(turn(fake, { deadlineAt: Date.now() + 1500, executeTool: async () => { executed++; return ok("five messages"); } }));
+    expect(result.text).toBe("結果は受け取れませんでした。");
+    expect(executed).toBe(1);
+    expect(fake.events("user.custom_tool_result")).toEqual([
+      { type: "user.custom_tool_result", ...fiveMessages },
+      {
+        type: "user.custom_tool_result", custom_tool_use_id: "call_1", is_error: true,
+        content: [{ type: "text", text: "This call was carried out, but the session did not accept its result. It may have taken effect. Check before repeating it." }],
+      },
     ]);
+
+    // Refused again: the call takes no result any more (its thread is gone), and nothing more is sent for it.
+    const late = new FakeSession();
+    late.onMessage = (f) => { f.process(); f.emit(running(), calls("send_message", "call_1", {}, "sth_1")); setTimeout(() => f.emit(said("先に進みました。"), idle()), 60); };
+    const refusals = refusing(late, 5, 400);
+    expect((await runTurn(turn(late))).text).toBe("先に進みました。");
+    expect(refusals.posts).toBe(2);
+  });
+
+  test("a turn that is stopped sends what could not be delivered once more before it ends", async () => {
+    const fake = new FakeSession();
+    fake.onMessage = (f) => { f.process(); f.emit(running(), calls("send_message", "call_1")); };
+    fake.onInterrupt = (f) => { f.emit(idle()); };
+    const seen = refusing(fake, 3);
+    const steering = new AbortController();
+    const work = runTurn(turn(fake, { steering: steering.signal, executeTool: async () => ok("five messages") }));
+    await until(() => seen.refused === 3);
+    await Bun.sleep(5);
+    steering.abort(new Error("User steering"));
+    expect((await work).stop).toBe("interrupted");
+    // Left unanswered, the next turn would have to close the call without knowing that it ran.
+    expect(fake.events("user.custom_tool_result")).toMatchObject([fiveMessages, fiveMessages, fiveMessages, fiveMessages]);
+  });
+
+  test("a reconnect before the turn's message was taken up replays nothing of earlier turns", async () => {
+    const fake = new FakeSession();
+    fake.pageSize = 4;
+    fake.missed({ type: "user.message", content: [{ type: "text", text: "もっと前の質問" }] }, running(), said("もっと前の返事。"), idle());
+    // The turn before this one, with a call whose result never reached the session.
+    fake.missed(
+      { type: "user.message", content: [{ type: "text", text: "前の質問" }] }, running(),
+      calls("delete_message", "call_prev", { message_id: "1" }), said("前のターンの返事。"), idle(),
+    );
+    fake.onMessage = (f) => {
+      // The connection breaks right after the send, and the list is read
+      // while the message is still waiting to be taken up.
+      f.drop();
+      setTimeout(() => { f.process(); f.use(55); f.emit(running(), said("今回の返事。"), reported(55), idle()); }, 60);
+    };
+    const executed: string[] = [], observed: string[] = [];
+    const result = await runTurn(turn(fake, {
+      executeTool: async (call) => { executed.push(call.id); return ok("x"); },
+      observe: (event) => { observed.push(event.type); },
+    }));
+    expect(fake.streamsOpened).toBe(2);
+    expect(result).toMatchObject({ text: "今回の返事。", stop: "end_turn" });
+    // Not run for the person who is speaking now, and not answered for either.
+    expect(executed).toEqual([]);
+    expect(fake.events("user.custom_tool_result")).toEqual([]);
+    expect(observed).toEqual(["session.status_running", "agent.message", "session.usage", "session.status_idle"]);
+    expect(fake.log.at(-1)).toBe("POST / budget=56");
+    // The look back ends at the last message an earlier turn had processed:
+    // two pages of four, not the session's whole history.
+    expect(fake.of("GET", `${SESSION}/events`).map((r) => r.query.get("page"))).toEqual([null, "4"]);
+  });
+
+  test("without an id from the send, an older message with the same words is not taken for the turn's", async () => {
+    const fake = new FakeSession();
+    fake.missed({ type: "user.message", content: [{ type: "text", text: "hello" }] }, running(), said("前に同じ質問へ返した答え。"), idle());
+    fake.on(`POST ${SESSION}/events`, (request) => {
+      if (request.body!.events[0].type !== "user.message") return undefined;
+      // Accepted, but the answer names no event and the list does not have it yet.
+      setTimeout(() => {
+        const message = { id: "sevt_late", type: "user.message", content: request.body!.events[0].content, processed_at: null as string | null };
+        fake.history.push(message);
+        fake.drop();
+        setTimeout(() => {
+          fake.history = fake.history.filter((event) => event !== message);
+          fake.emit({ ...message, processed_at: "2026-10-12T00:01:00Z" }, running(), said("今回の答え。"), idle());
+        }, 60);
+      }, 5);
+      return Response.json({});
+    });
+    let mark: unknown;
+    const result = await runTurn(turn(fake, { onSent: async (m) => { mark = m; } }));
+    expect(mark).toEqual({ eventId: "", ceilingCents: 140 });
+    expect(fake.streamsOpened).toBe(2);
+    expect(result.text).toBe("今回の答え。");
+  });
+
+  test("what the stream still carries from before the turn's message is not the turn's, whatever the list says", async () => {
+    // The last turn was still going. Its interrupt ends it with a call, a
+    // usage report and its idle; by the time the first of these is read, the
+    // list already shows the new message as taken up.
+    const stale = (f: FakeSession) => f.emit(calls("read_messages", "call_old"), reported(41), idle());
+    const later = (f: FakeSession) => setTimeout(() => { f.use(60); f.emit(said("本当の返事。"), reported(60), idle()); }, 60);
+    const fake = new FakeSession({ status: "running", budget: 141, used: 40 });
+    fake.onMessage = (f) => { stale(f); f.process(); f.emit(running()); later(f); };
+    let executed = 0;
+    const result = await runTurn(turn(fake, { executeTool: async () => { executed++; return ok("x"); } }));
+    expect(result).toMatchObject({ text: "本当の返事。", stop: "end_turn" });
+    expect(executed).toBe(0);
+    expect(fake.events("user.custom_tool_result")).toMatchObject([{ custom_tool_use_id: "call_old", is_error: true }]);
+    // The turn's own allowance was not taken back under it.
+    expect(fake.log.filter((line) => line.includes("budget="))).toEqual(["POST / budget=140", "POST / budget=61"]);
+
+    // One stale idle that carries the very time the message was taken up at.
+    const at = "2026-10-12T00:05:00Z";
+    const same = new FakeSession({ status: "running", budget: 141, used: 40 });
+    same.onMessage = (f) => {
+      f.emit({ ...idle(), processed_at: at });
+      f.process({ at });
+      f.emit({ ...running(), processed_at: at });
+      later(f);
+    };
+    expect((await runTurn(turn(same))).text).toBe("本当の返事。");
+
+    // The list shows the message as taken up while the stream is still at
+    // the old turn's last events, and the interrupt was sent twice.
+    const twice = new FakeSession({ status: "running", budget: 141, used: 40 });
+    twice.onMessage = (f) => { f.emit(idle(), idle()); f.process(); f.emit(running()); later(f); };
+    expect((await runTurn(turn(twice))).text).toBe("本当の返事。");
+  });
+
+  test("after a reconnect, what the new connection still carries from before the turn's message is not the turn's", async () => {
+    const later = (f: FakeSession) => setTimeout(() => { f.use(60); f.emit(said("本当の返事。"), reported(60), idle()); }, 60);
+    // The connection breaks while the old turn is still going. The new one
+    // is open when that turn ends and the message is taken up, and the list
+    // is read only after both.
+    const fake = new FakeSession({ status: "running", budget: 141, used: 40 });
+    fake.onMessage = (f) => { f.drop(); };
+    fake.onStream = (f, opened) => {
+      if (opened !== 2) return;
+      f.emit(said("（前のターンの最後の文）"), idle());
+      f.process();
+      f.emit(running());
+      later(f);
+    };
+    expect(await runTurn(turn(fake))).toMatchObject({ text: "本当の返事。", stop: "end_turn" });
+    expect(fake.streamsOpened).toBe(2);
+
+    // The message is still queued when the list is read after the reconnect:
+    // the new connection is then the one that shows it being taken up, and
+    // its order decides, even where the times are the same.
+    const at = "2026-10-12T00:05:00Z";
+    const queued = new FakeSession({ status: "running", budget: 141, used: 40 });
+    queued.onMessage = (f) => { f.drop(); };
+    queued.onStream = (f, opened) => {
+      if (opened !== 2) return;
+      setTimeout(() => {
+        f.emit({ ...said("（前のターンの最後の文）"), processed_at: at }, { ...idle(), processed_at: at });
+        f.process({ at });
+        f.emit({ ...running(), processed_at: at });
+        later(f);
+      }, 20);
+    };
+    expect(await runTurn(turn(queued))).toMatchObject({ text: "本当の返事。", stop: "end_turn" });
+  });
+
+  test("a stream that never shows the turn's message as taken up is placed by the list", async () => {
+    // Not what the documentation describes. If it happened, every event of
+    // the turn would be taken for the old turn's and the reply would be lost.
+    const plain = new FakeSession({ status: "running", budget: 141, used: 40 });
+    plain.onMessage = (f) => {
+      f.emit(said("（前のターンの続き）"));
+      f.process({ echo: false });
+      f.use(60);
+      f.emit(running(), said("本当の返事。"), reported(60), idle());
+    };
+    expect(await runTurn(turn(plain))).toMatchObject({ text: "本当の返事。", stop: "end_turn" });
+
+    const fake = new FakeSession({ status: "running", budget: 141, used: 40 });
+    fake.onMessage = (f) => {
+      f.process({ echo: false });
+      f.emit(running(), { type: "span.model_request_start" }, said("調べます。"), calls("read_messages", "call_1"));
+    };
+    fake.onResult = (_event, f) => { f.emit(running(), { type: "span.model_request_start" }, said("読みました。"), idle()); };
+    const executed: string[] = [], spoken: string[] = [];
+    const result = await runTurn(turn(fake, {
+      executeTool: async (call) => { executed.push(call.id); return ok("x"); },
+      say: (text) => { spoken.push(text); },
+    }));
+    expect(result).toMatchObject({ text: "読みました。", stop: "end_turn" });
+    expect(executed).toEqual(["call_1"]);
+    expect(spoken).toEqual(["調べます。"]);
+
+    // A turn that stops at its budget keeps what it had said.
+    const stopped = new FakeSession({ status: "running", budget: 141, used: 40 });
+    stopped.onMessage = (f) => {
+      f.process({ echo: false });
+      f.use(143);
+      f.emit(running(), said("ここまで。"), reported(143), idle("budget_reached"));
+    };
+    expect(await runTurn(turn(stopped))).toMatchObject({ text: "ここまで。", stop: "budget" });
   });
 
   test("a call the session still waits on from before the turn is closed, not run", async () => {
@@ -521,7 +924,11 @@ describe("catching up", () => {
     const result = await runTurn(turn(fake, { executeTool: async () => { executed++; return ok("x"); } }));
     expect(result.text).toBe("続けます。");
     expect(executed).toBe(0);
-    expect(fake.events("user.custom_tool_result")).toMatchObject([{ custom_tool_use_id: "call_before", is_error: true }]);
+    // Made while an earlier turn was listening: that turn may have run it.
+    expect(fake.events("user.custom_tool_result")).toEqual([{
+      type: "user.custom_tool_result", custom_tool_use_id: "call_before", is_error: true,
+      content: [{ type: "text", text: "This call was left open by an earlier turn. Whether it was carried out is not known here, so check before repeating it." }],
+    }]);
   });
 
   test("the runs a session row lists are checked against the session's own events", async () => {
@@ -531,12 +938,20 @@ describe("catching up", () => {
       created("wrun_b", "second"));
     fake.onMessage = answers("まだ一つ残っています。");
     const result = await runTurn(turn(fake, { knownRuns: [{ id: "wrun_a", name: "first" }, { id: "wrun_b", name: "stale name" }] }));
-    expect(fake.of("GET", `${SESSION}/events`)[0]!.query.getAll("types[]")).toEqual(["workflow_run.created", "workflow_run.status_ended"]);
+    expect(fake.of("GET", `${SESSION}/events`)[0]!.query.getAll("types[]"))
+      .toEqual(["workflow_run.created", "workflow_run.status_ended", "session.thread_created"]);
     // One is still open, so whatever it was doing is interrupted before the budget is raised.
     expect(fake.log.slice(1, 4)).toEqual(["GET /events", "POST /events user.interrupt", "POST / budget=140"]);
     expect(result.openRuns).toEqual([{ id: "wrun_b", name: "second" }]);
     expect(result.runsStarted).toEqual([]);
     expect(result.notice).toBe(openRunsNotice(1));
+
+    // Two that are still open are kept in the order they were started in.
+    const both = new FakeSession();
+    both.missed(created("wrun_a", "first"), created("wrun_b", "second"));
+    both.onMessage = answers("二つ残っています。");
+    const two = await runTurn(turn(both, { knownRuns: [{ id: "wrun_b", name: "second" }, { id: "wrun_a", name: "first" }] }));
+    expect(two.openRuns).toEqual([{ id: "wrun_a", name: "first" }, { id: "wrun_b", name: "second" }]);
 
     // All of them ended while nobody was listening: the session is simply at rest.
     const rested = new FakeSession();
@@ -546,6 +961,64 @@ describe("catching up", () => {
     expect(rested.events("user.interrupt")).toHaveLength(0);
     expect(after.openRuns).toEqual([]);
     expect(after.notice).toBeUndefined();
+  });
+
+  test("a call from a thread that an earlier turn's run created names that run", async () => {
+    // The run was left open by the last turn. Its threads go on in this one
+    // without being announced again, and a call's event names only the thread.
+    const fake = new FakeSession();
+    fake.missed(
+      { type: "workflow_run.created", workflow_run_id: "wrun_1", name: "review", description: null, phases: [] },
+      { type: "session.thread_created", session_thread_id: "sth_1", agent_name: "reader", workflow_run_id: "wrun_1" },
+      // A thread that is not part of any run stays without one.
+      { type: "session.thread_created", session_thread_id: "sth_other", agent_name: "helper", workflow_run_id: null },
+    );
+    fake.onMessage = (f) => {
+      f.process();
+      f.emit(running(), calls("read_messages", "call_run", {}, "sth_1"), calls("read_messages", "call_other", {}, "sth_other"));
+    };
+    let results = 0;
+    fake.onResult = (_event, f) => {
+      if (++results === 2) f.emit({ type: "workflow_run.status_ended", workflow_run_id: "wrun_1", result: { type: "completed" } }, said("終わりました。"), idle());
+    };
+    const executed: WorkspaceCall[] = [];
+    const result = await runTurn(turn(fake, {
+      knownRuns: [{ id: "wrun_1", name: "review" }],
+      executeTool: async (call) => { executed.push(call); return ok("x"); },
+    }));
+    expect(result.text).toBe("終わりました。");
+    expect(executed.map((call) => [call.id, call.threadId, call.runId])).toEqual([
+      ["call_run", "sth_1", "wrun_1"],
+      ["call_other", "sth_other", null],
+    ]);
+    // Read with the runs, in the one request that was made already.
+    expect(fake.of("GET", `${SESSION}/events`)).toHaveLength(1);
+  });
+
+  test("the look for open runs goes back no further than the oldest run the row lists", async () => {
+    const created = (id: string, name: string): Json => ({ type: "workflow_run.created", workflow_run_id: id, name, description: null, phases: [] });
+    const thread = (id: string, run: string): Json => ({ type: "session.thread_created", session_thread_id: id, agent_name: "reader", workflow_run_id: run });
+    const ended = (id: string): Json => ({ type: "workflow_run.status_ended", workflow_run_id: id, result: { type: "completed" } });
+    const fake = new FakeSession();
+    fake.pageSize = 4;
+    // Runs that ended long ago, with their threads: a session lives for weeks.
+    fake.missed(created("wrun_1", "one"), thread("sth_1", "wrun_1"), thread("sth_2", "wrun_1"), ended("wrun_1"),
+      created("wrun_2", "two"), thread("sth_3", "wrun_2"), ended("wrun_2"),
+      // The one the last turn left open, and one the row never heard of.
+      created("wrun_3", "three"), thread("sth_4", "wrun_3"), created("wrun_4", "four"), thread("sth_5", "wrun_4"));
+    fake.onMessage = (f) => { f.process(); f.emit(running(), calls("read_messages", "call_1", {}, "sth_4"), calls("read_messages", "call_2", {}, "sth_5")); };
+    let results = 0;
+    fake.onResult = (_event, f) => { if (++results === 2) f.emit(ended("wrun_3"), ended("wrun_4"), said("終わりました。"), idle()); };
+    const executed: WorkspaceCall[] = [];
+    const result = await runTurn(turn(fake, {
+      knownRuns: [{ id: "wrun_3", name: "three" }],
+      executeTool: async (call) => { executed.push(call); return ok("x"); },
+    }));
+    expect(result.text).toBe("終わりました。");
+    expect(executed.map((call) => [call.threadId, call.runId])).toEqual([["sth_4", "wrun_3"], ["sth_5", "wrun_4"]]);
+    // Newest first, and done with the first page: the run's own start is on it.
+    const looks = fake.of("GET", `${SESSION}/events`).filter((r) => r.query.has("types[]"));
+    expect(looks.map((r) => [r.query.get("order"), r.query.get("page")])).toEqual([["desc", null]]);
   });
 });
 
@@ -595,6 +1068,8 @@ describe("sending the message", () => {
   test("closes the calls an earlier turn left open, then sends once more", async () => {
     const fake = new FakeSession();
     fake.history.push(
+      // Before the last message that was processed: not looked at any more.
+      { id: "call_ancient", type: "agent.custom_tool_use", name: "send_message", input: {}, processed_at: "2026-10-11T22:00:00Z" },
       { id: "sevt_old_msg", type: "user.message", content: [{ type: "text", text: "earlier" }], processed_at: "2026-10-11T23:00:00Z" },
       { id: "call_done", type: "agent.custom_tool_use", name: "read_messages", input: {}, processed_at: "2026-10-11T23:00:01Z" },
       { id: "sevt_r", type: "user.custom_tool_result", custom_tool_use_id: "call_done", processed_at: "2026-10-11T23:00:02Z" },
@@ -618,7 +1093,36 @@ describe("sending the message", () => {
       "POST /events user.custom_tool_result",
       "POST /events user.message",
     ]);
-    expect(fake.events("user.custom_tool_result")).toMatchObject([{ custom_tool_use_id: "call_open", is_error: true }]);
+    expect(fake.events("user.custom_tool_result")).toMatchObject([{
+      custom_tool_use_id: "call_open", is_error: true, content: [{ text: expect.stringContaining("left open by an earlier turn") }],
+    }]);
+  });
+
+  test("a session left at its budget that also waits on a call is interrupted on its own before the second send", async () => {
+    const fake = new FakeSession({ budget: 100, used: 100 });
+    fake.history.push(
+      { id: "sevt_old_msg", type: "user.message", content: [{ type: "text", text: "earlier" }], processed_at: "2026-10-11T23:00:00Z" },
+      { id: "call_open", type: "agent.custom_tool_use", name: "send_message", input: {}, processed_at: "2026-10-11T23:00:03Z" },
+    );
+    let blocked = true;
+    fake.on(`POST ${SESSION}/events`, (request) => {
+      const types = (request.body!.events as Json[]).map((event) => event.type);
+      if (types.includes("user.custom_tool_result")) blocked = false;
+      // Refused whole: the interrupt that came with the message did not take effect either.
+      return types.includes("user.message") && blocked ? rejected(400) : undefined;
+    });
+    fake.onMessage = answers("続きです。", 110);
+    const result = await runTurn(turn(fake));
+    expect(result.text).toBe("続きです。");
+    expect(fake.log.filter((line) => line.startsWith("POST /"))).toEqual([
+      "POST /events user.interrupt",
+      "POST / budget=200",
+      "POST /events user.interrupt+user.message",
+      "POST /events user.interrupt",
+      "POST /events user.custom_tool_result",
+      "POST /events user.message",
+      "POST / budget=111",
+    ]);
   });
 
   test("a second rejection is the turn's failure", async () => {
@@ -648,6 +1152,39 @@ describe("the budget", () => {
     expect(fake.of("POST", SESSION).map((r) => r.body!.budget.max_list_cost.amount)).toEqual(["140", "145", "61"]);
     // The budget is replaced by another limit every time, never removed.
     expect(fake.of("POST", SESSION).every((r) => r.body!.budget?.type === "limit" && Object.keys(r.body!).length === 1)).toBe(true);
+  });
+
+  test("a lease that is not taken fails the turn before the budget goes up, on the first try and on a later one", async () => {
+    // The caller records the ceiling here, or refuses it: the bot writes the
+    // lease to its store, and the smoke script holds a session to its own
+    // budget. Both rely on nothing being raised or sent once this throws.
+    const refused = new Error("the lease was not taken");
+    const fake = new FakeSession({ budget: 41, used: 40 });
+    fake.onMessage = answers("はい。", 60);
+    expect(await failure(runTurn(turn(fake, { onLease: () => { throw refused; } })))).toBe(refused);
+    expect(fake.log).toEqual(["GET /"]);
+
+    // The session spent more between the read and the update, so the ceiling
+    // is worked out again: that one is asked about too, before it is used.
+    const later = new FakeSession({ budget: 41, used: 40 });
+    later.on(`POST ${SESSION}`, () => {
+      later.use(45);
+      return rejected(400, { type: "invalid_request_error", message: "budget.max_list_cost must be greater than the session's consumed list cost" });
+    });
+    later.onMessage = answers("はい。", 60);
+    const leases: number[] = [];
+    const error = await failure(runTurn(turn(later, {
+      onLease: (ceiling) => {
+        leases.push(ceiling);
+        if (ceiling > 140) throw refused;
+      },
+    })));
+    expect(error).toBe(refused);
+    expect(leases).toEqual([140, 145]);
+    // Only the raise that was refused by the session ever went out.
+    expect(later.of("POST", SESSION).map((r) => r.body!.budget.max_list_cost.amount)).toEqual(["140"]);
+    expect(later.events("user.message")).toHaveLength(0);
+    expect(later.streamsOpened).toBe(0);
   });
 
   test("any other rejection stops the turn before a message is sent", async () => {
@@ -938,6 +1475,16 @@ describe("a turn that cannot go on", () => {
     expect(await kind("model_overloaded_error")).toEqual(["transient", "model_overloaded_error"]);
     expect(await kind("mcp_connection_failed_error")).toEqual(["protocol", "mcp_connection_failed_error"]);
     expect(await kind(undefined)).toEqual(["transient", undefined]);
+
+    // An error the old turn reported before the message was taken up is not the turn's.
+    const fake = new FakeSession({ status: "running", budget: 141, used: 40 });
+    fake.onMessage = (f) => {
+      f.emit({ type: "session.error", error: { type: "billing_error", message: "upstream text", retry_status: { type: "retrying" } } }, running());
+      f.process();
+      f.emit(running(), idle("retries_exhausted"));
+    };
+    const error = await failure(runTurn(turn(fake))) as ProviderError;
+    expect([error.kind, error.diagnostics.type]).toEqual(["transient", undefined]);
   });
 
   test("exhausted retries are not the end when the server starts another turn by itself", async () => {

@@ -31,6 +31,12 @@ const entry = (over: Partial<LedgerEntry> = {}): LedgerEntry => ({
   delta: totals({ list_cost_cents: 42, active_seconds: 90, input_tokens: 1000, output_tokens: 200 }),
   ...over,
 });
+/** The days on disk, once everything a loaded ledger recorded is written:
+ *  what `/usage` does not show is read there. */
+async function stored(usage: WorkspaceUsage, path: string) {
+  await usage.flush();
+  return JSON.parse(await readFile(path, "utf8")).days as Record<string, Record<string, Record<string, number>>>;
+}
 
 test("reads a session's cumulative usage in both shapes the API reports it", () => {
   // As `sessions.retrieve` returns it, and as a `session.usage` event carries it.
@@ -101,9 +107,11 @@ test("the delta of two cumulative snapshots never goes negative", () => {
   expect(totalsMax(now)).toEqual(now);
 });
 
-test("adds each turn's delta to the UTC day and model", () => {
+test("adds each turn's delta to the UTC day and model", async () => {
   let now = "2026-09-30T23:59:59Z";
-  const usage = new WorkspaceUsage(join(dir, "w.json"), () => new Date(now));
+  const path = join(dir, "w.json");
+  const usage = new WorkspaceUsage(path, () => new Date(now));
+  await usage.load();
   usage.record(entry({ new_session: true }));
   now = "2026-10-01T00:00:00Z";
   usage.record(entry({ new_session: true }));
@@ -117,25 +125,30 @@ test("adds each turn's delta to the UTC day and model", () => {
   // What a session still added when it was closed is spend, but not a turn.
   usage.record(entry({ ultra: true, turn: false, delta: totals({ list_cost_cents: 5 }) }));
 
-  const s = usage.summary();
-  expect(s.today).toEqual({ cost_usd: 6.05, turns: 4 });
-  expect(s.month).toEqual({ month: "2026-10", cost_usd: 6.05, turns: 4, sessions: 2, active_seconds: 3720, web_search_requests: 2 });
-  expect(s.month_by_model).toEqual({
+  expect(usage.line()).toBe([
+    "Anthropic Workspace（セッションの list_cost の合計。公開単価での額で、請求額とは一致しないことがあります。日付は UTC）",
+    "今日: $6.05 / 4 ターン",
+    "2026-10: $6.05 / 4 ターン（稼働 1.0 時間、web search 2 回）",
+    "  claude-haiku-5-5: $3.55 / 3 ターン（うち Ultra $3.05 / 1 ターン）",
+    "  claude-opus-5-5: $2.50 / 1 ターン",
+  ].join("\n"));
+  const days = await stored(usage, path);
+  expect(days["2026-09-30"]).toMatchObject({ "claude-haiku-5-5": { list_cost_cents: 42, turns: 1, sessions: 1 } });
+  expect(days["2026-10-01"]).toEqual({
     "claude-haiku-5-5": {
-      cost_usd: 3.55, turns: 3, ultra_cost_usd: 3.05, ultra_turns: 1, sessions: 2, active_seconds: 3720,
-      input_tokens: 1000, cache_read_tokens: 0, cache_write_5m_tokens: 0, cache_write_1h_tokens: 0, output_tokens: 200,
+      list_cost_cents: 355, active_seconds: 3720, input_tokens: 1000, cache_read_tokens: 0,
+      cache_write_5m_tokens: 0, cache_write_1h_tokens: 0, output_tokens: 200,
       web_search_requests: 2, web_fetch_requests: 1,
+      turns: 3, ultra_turns: 1, sessions: 2, unreported_turns: 0, ultra_list_cost_cents: 305, limit_extra_cents: 2,
     },
     "claude-opus-5-5": {
-      cost_usd: 2.5, turns: 1, ultra_cost_usd: 0, ultra_turns: 0, sessions: 0, active_seconds: 0,
-      input_tokens: 0, cache_read_tokens: 40_000, cache_write_5m_tokens: 10, cache_write_1h_tokens: 20, output_tokens: 0,
+      list_cost_cents: 250, active_seconds: 0, input_tokens: 0, cache_read_tokens: 40_000,
+      cache_write_5m_tokens: 10, cache_write_1h_tokens: 20, output_tokens: 0,
       web_search_requests: 0, web_fetch_requests: 0,
+      turns: 1, ultra_turns: 0, sessions: 0, unreported_turns: 0, ultra_list_cost_cents: 0, limit_extra_cents: 0,
     },
   });
-  expect(s.last_7_days["2026-10-01"]).toBe(6.05);
-  expect(s.last_7_days["2026-09-30"]).toBe(0.42);
-  expect(Object.keys(s.last_7_days)).toHaveLength(7);
-  // The limits read the same sums, in cents.
+  // The reported cost of the day and of the month, in cents.
   expect(usage.spentCents("day")).toBe(605);
   expect(usage.spentCents("month")).toBe(605);
   now = "2026-10-02T09:00:00Z";
@@ -145,22 +158,71 @@ test("adds each turn's delta to the UTC day and model", () => {
   expect(usage.spentCents("month")).toBe(0);
 });
 
-test("a span without a list cost is counted apart", () => {
-  const usage = new WorkspaceUsage(join(dir, "w.json"), at("2026-10-09T12:00:00Z"));
+test("a span without a list cost is counted apart", async () => {
+  const path = join(dir, "w.json");
+  const usage = new WorkspaceUsage(path, at("2026-10-09T12:00:00Z"));
+  await usage.load();
   usage.record(entry());
   // The cost is unknown, not zero: it is never estimated from the tokens,
   // and a figure that came along with it is not trusted either.
   usage.record(entry({ cost_reported: false, delta: totals({ list_cost_cents: 999, input_tokens: 50, active_seconds: 10 }) }));
   usage.record(entry({ ultra: true, cost_reported: false, delta: totals({ list_cost_cents: 999 }) }));
-  expect(usage.summary().today).toEqual({ cost_usd: 0.42, turns: 3, unreported_turns: 2 });
-  expect(usage.summary().month_by_model["claude-haiku-5-5"]).toMatchObject({
-    cost_usd: 0.42, turns: 3, unreported_turns: 2, ultra_cost_usd: 0, ultra_turns: 1, input_tokens: 1050, active_seconds: 100,
+  const lines = () => usage.line()!.split("\n");
+  expect([lines()[1], lines().at(-1)]).toEqual(["今日: $0.42 / 3 ターン", "額の報告が無かったターン: 2（合計に入っていません）"]);
+  expect((await stored(usage, path))["2026-10-09"]!["claude-haiku-5-5"]).toMatchObject({
+    list_cost_cents: 42, turns: 3, unreported_turns: 2, ultra_list_cost_cents: 0, ultra_turns: 1, input_tokens: 1050, active_seconds: 100,
   });
   expect(usage.spentCents("day")).toBe(42);
   // Figures that are not counts add nothing and take nothing away.
   usage.record(entry({ delta: totals({ list_cost_cents: -500, input_tokens: Number.NaN, output_tokens: Infinity }) }));
-  expect(usage.summary().today).toEqual({ cost_usd: 0.42, turns: 4, unreported_turns: 2 });
-  expect(usage.summary().month_by_model["claude-haiku-5-5"]).toMatchObject({ input_tokens: 1050, output_tokens: 200 });
+  expect([lines()[1], lines().at(-1)]).toEqual(["今日: $0.42 / 4 ターン", "額の報告が無かったターン: 2（合計に入っていません）"]);
+  expect((await stored(usage, path))["2026-10-09"]!["claude-haiku-5-5"]).toMatchObject({ input_tokens: 1050, output_tokens: 200 });
+});
+
+test("the limits count a cent for each new session and the whole allowance of a stretch without a cost; the owner's lines do not", async () => {
+  const path = join(dir, "w.json");
+  const usage = new WorkspaceUsage(path, at("2026-10-09T12:00:00Z"));
+  await usage.load();
+  // A session reports whole cents, rounded: three short ones read as free.
+  for (let n = 0; n < 3; n++) {
+    usage.record(entry({ delta: totals(), turn: false, new_session: true }));
+    usage.record(entry({ delta: totals({ input_tokens: 12_000 }), allowed_cents: 100 }));
+  }
+  expect(usage.spentCents("day")).toBe(0);
+  expect(usage.limitCents("day")).toBe(3);
+  expect(usage.limitCents("month")).toBe(3);
+  // A turn whose session reported no cost may have used all it was allowed.
+  usage.record(entry({ cost_reported: false, delta: totals({ list_cost_cents: 999, input_tokens: 50 }), allowed_cents: 100 }));
+  // A settlement that knows no allowance adds nothing, and neither does a figure that is not a count.
+  usage.record(entry({ cost_reported: false, turn: false, delta: totals({ input_tokens: 50 }) }));
+  usage.record(entry({ cost_reported: false, turn: false, delta: totals(), allowed_cents: -5 }));
+  expect(usage.spentCents("day")).toBe(0);
+  expect(usage.limitCents("day")).toBe(103);
+  // A reported cost counts as itself, whatever was allowed.
+  usage.record(entry({ delta: totals({ list_cost_cents: 42 }), allowed_cents: 100 }));
+  expect(usage.spentCents("day")).toBe(42);
+  expect(usage.limitCents("day")).toBe(145);
+  // What the owner reads is the reported cost alone.
+  expect(usage.line()).toBe([
+    "Anthropic Workspace（セッションの list_cost の合計。公開単価での額で、請求額とは一致しないことがあります。日付は UTC）",
+    "今日: $0.42 / 5 ターン",
+    "2026-10: $0.42 / 5 ターン（稼働 0.0 時間）",
+    "  claude-haiku-5-5: $0.42 / 5 ターン",
+    "額の報告が無かったターン: 3（合計に入っていません）",
+  ].join("\n"));
+
+  // It is kept with the day, so a restart does not start the count again.
+  await usage.flush();
+  expect(JSON.parse(await readFile(path, "utf8")).days["2026-10-09"]["claude-haiku-5-5"])
+    .toMatchObject({ list_cost_cents: 42, sessions: 3, limit_extra_cents: 103 });
+  const next = new WorkspaceUsage(path, at("2026-10-10T00:00:00Z"));
+  await next.load();
+  expect([next.limitCents("day"), next.limitCents("month"), next.spentCents("month")]).toEqual([0, 145, 42]);
+  // A file written before the figure existed counts what it reported.
+  await writeFile(path, JSON.stringify({ version: 1, days: { "2026-10-09": { "claude-haiku-5-5": { list_cost_cents: 12, turns: 2, sessions: 2 } } } }));
+  const older = new WorkspaceUsage(path, at("2026-10-09T00:00:00Z"));
+  await older.load();
+  expect([older.spentCents("day"), older.limitCents("day")]).toEqual([12, 12]);
 });
 
 test("merges the stored file and survives a reload", async () => {
@@ -177,7 +239,7 @@ test("merges the stored file and survives a reload", async () => {
     list_cost_cents: 42, active_seconds: 90, input_tokens: 1000, cache_read_tokens: 0,
     cache_write_5m_tokens: 0, cache_write_1h_tokens: 0, output_tokens: 200,
     web_search_requests: 0, web_fetch_requests: 0,
-    turns: 1, ultra_turns: 0, sessions: 1, unreported_turns: 0, ultra_list_cost_cents: 0,
+    turns: 1, ultra_turns: 0, sessions: 1, unreported_turns: 0, ultra_list_cost_cents: 0, limit_extra_cents: 1,
   });
 
   const second = new WorkspaceUsage(path, at("2026-10-09T01:00:00Z"));
@@ -190,7 +252,7 @@ test("merges the stored file and survives a reload", async () => {
   await second.load();
   await second.flush();
   expect(second.spentCents("day")).toBe(84);
-  expect(second.summary().today).toEqual({ cost_usd: 0.84, turns: 2 });
+  expect(second.line()!.split("\n")[1]).toBe("今日: $0.84 / 2 ターン");
   expect(JSON.parse(await readFile(path, "utf8")).days["2026-10-09"]["claude-haiku-5-5"])
     .toMatchObject({ turns: 2, ultra_turns: 1, sessions: 1, list_cost_cents: 84, ultra_list_cost_cents: 42 });
 
@@ -220,8 +282,10 @@ test("a ledger file that cannot be read is left as it is and reported", async ()
   await writeFile(path, JSON.stringify({ version: 1, days: { "2026-10-09": { "claude-haiku-5-5": { list_cost_cents: "12", turns: 2, input_tokens: -4, extra: 9 } }, "2026-10-08": null } }));
   const repaired = new WorkspaceUsage(path, at("2026-10-09T00:00:00Z"));
   await repaired.load();
-  expect(repaired.summary().today).toEqual({ cost_usd: 0, turns: 2 });
-  expect(repaired.summary().month_by_model["claude-haiku-5-5"]).toMatchObject({ input_tokens: 0 });
+  expect(repaired.line()!.split("\n")[1]).toBe("今日: $0.00 / 2 ターン");
+  const bucket = (await stored(repaired, path))["2026-10-09"]!["claude-haiku-5-5"]!;
+  expect(bucket).toMatchObject({ list_cost_cents: 0, turns: 2, input_tokens: 0 });
+  expect(bucket).not.toHaveProperty("extra");
 });
 
 test("the lines for /usage read as written, and there are none without a record", () => {
@@ -261,8 +325,8 @@ test("the lines for /usage read as written, and there are none without a record"
   expect(long).toContain("  claude-opus-5-5: $25.00 / 1 ターン");
   expect(long).toMatch(/\n  ほか \d+ モデル\n額の報告が無かったターン: 2（合計に入っていません）$/);
 
-  // A new month starts empty; the earlier one stays in the file.
+  // A new month starts empty.
   now = "2026-11-01T00:00:00Z";
   expect(usage.line()).toBeUndefined();
-  expect(usage.summary().last_7_days).toMatchObject({ "2026-11-01": 0 });
+  expect(usage.spentCents("month")).toBe(0);
 });

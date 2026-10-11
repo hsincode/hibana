@@ -14,7 +14,7 @@ import { ToolRegistry } from "../tools";
 import definitions from "../tools/definitions.json";
 import { ToolOutput, type Context, type Json } from "../types";
 import {
-  WORKSPACE_OUTPUTS, WorkspaceCalls, bindWorkspaceTurn, isWorkspaceTool, outputFiles, refuseFileArguments,
+  WORKSPACE_OUTPUTS, WorkspaceCalls, bindWorkspaceTurn, isWorkspaceTool, outputFiles, pickOutput, refuseFileArguments,
   toolFailure, toolResult, toolsFingerprint, workspaceToolParams,
 } from "../workspace/tools";
 import type { WorkspaceCall, WorkspaceResult } from "../workspace/types";
@@ -489,9 +489,15 @@ describe("a call", () => {
       const other = await call("read_messages", { limit: 5 }, context(), { threadId: "sthr_1", runId: "wrun_1" });
       expect(other.is_error).toBe(true);
       expect(text(other)).toContain("a workflow run that the person now being answered did not start");
-      // A thread whose run is unknown is nobody's.
-      expect((await call("read_messages", { limit: 5 }, context(), { threadId: "sthr_2" })).is_error).toBe(true);
-      expect((await call("read_messages", { limit: 5 }, context(), { threadId: "sthr_3", runId: "wrun_9" })).is_error).toBe(true);
+      // A thread whose run is unknown, or a run nobody is recorded to have
+      // started, is nobody's. It is refused too, without a claim about who
+      // started it: that may well be the person now being answered.
+      for (const from of [{ threadId: "sthr_2" }, { threadId: "sthr_3", runId: "wrun_9" }]) {
+        const unknown = await call("read_messages", { limit: 5 }, context(), from);
+        expect(unknown.is_error).toBe(true);
+        expect(text(unknown)).toContain("Who started the workflow run it comes from is not known here");
+        expect(text(unknown)).not.toContain("did not start");
+      }
       expect(seen).toEqual([]);
       expect(gets).toEqual([]);
       expect((await call("read_messages", { limit: 5 }, context(), { threadId: "sthr_4", runId: "wrun_2" })).is_error).toBe(false);
@@ -894,6 +900,21 @@ describe("send_file", () => {
       expect(text(await send([listed("file_1", "drafts/q3.png")]))).toContain("charts/q3.png did not appear");
       expect(posted).toHaveLength(2);
     } finally { await close(); }
+  });
+
+  test("matches a listing the same way for the smoke script, which reports the form the API uses", () => {
+    // The script asks the real API how a file in a subdirectory is listed
+    // (not documented), with this function and not a copy of it.
+    const full = listed("file_1", `${OUT}charts/q3.png`), relative = listed("file_2", "charts/q3.png"), bare = listed("file_3", "q3.png");
+    expect(pickOutput([bare, full], "charts/q3.png")).toBe(full);
+    expect(pickOutput([bare, relative], "charts/q3.png")).toBe(relative);
+    expect(pickOutput([bare], "charts/q3.png")).toBe(bare);
+    expect(pickOutput([listed("file_4", "drafts/q3.png")], "charts/q3.png")).toBeUndefined();
+    expect(() => pickOutput([bare, listed("file_5", "q3.png")], "charts/q3.png")).toThrow("2 files named q3.png");
+    // At the top of the directory the bare name is the path, and the newest version is meant.
+    const newer = listed("file_6", "/q3.png", { created_at: "2026-10-12T00:05:00Z" });
+    expect(pickOutput([bare, newer], "q3.png")).toBe(newer);
+    expect(pickOutput([], "q3.png")).toBeUndefined();
   });
 
   test("never takes a file scoped to another session", async () => {

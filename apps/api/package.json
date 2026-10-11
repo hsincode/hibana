@@ -6,7 +6,6 @@
     "dev": "bun --watch src/dev.ts",
     "start": "bun src/dev.ts",
     "test": "bun test src",
-    "export-logs": "bun src/export-logs.ts",
     "typecheck": "bun check"
   },
   "dependencies": {

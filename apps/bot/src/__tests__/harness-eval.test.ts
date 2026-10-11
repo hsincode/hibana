@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { anthropicCost } from "@hibana/shared/catalog";
-import { amount, blind, dryReply, earlierTurns, exclusion, pickPage, replay, replayPrompt, reviewPage, select, selection, similar, summarize, totals, warmUp, type ArmResult, type Case } from "../harness-eval";
+import { amount, blind, dryReply, earlierTurns, exclusion, fixed, pickPage, replay, replayPrompt, reviewPage, select, selection, similar, summarize, totals, warmUp, type ArmResult, type Case } from "../harness-eval";
 import type { RequestRecord } from "../llm";
 
 // The comparison itself calls the real API and is run by hand (#69). These
@@ -58,6 +58,26 @@ describe("which production turns are replayed", () => {
     // Not simply the oldest five.
     expect(first).not.toEqual(["c0-0", "c1-0", "c2-0", "c3-0", "c4-0"]);
     expect(select(cases, { seed: 7, ids: ["c9-0", "c3-0", "x-0"] }).chosen.map((c) => c.id).sort()).toEqual(["c3-0", "c9-0"]);
+  });
+
+  test("a run can replay every case on one model, at the nearest effort it allows", () => {
+    const on = (effort: string | null, efforts?: string[]) => fixed(turn({ model: "claude-opus-5-5", effort }), "claude-haiku-5-5", efforts);
+    expect(on("medium", ["medium", "high"])).toMatchObject({ model: "claude-haiku-5-5", effort: "medium", logged: { model: "claude-opus-5-5", effort: "medium" } });
+    expect(on("high", ["medium", "high"]).effort).toBe("high");
+    expect(on("low", ["medium", "high"]).effort).toBe("medium");
+    expect(on("xhigh", ["medium", "high"]).effort).toBe("high");
+    expect(on("max", ["medium", "high"]).effort).toBe("high");
+    // Equally near two of them: the lower one. No effort in the log: the first allowed.
+    expect(on("medium", ["low", "high"]).effort).toBe("low");
+    expect(on(null, ["high", "medium"]).effort).toBe("high");
+    // Only the model is fixed, or nothing is.
+    expect(on("xhigh")).toMatchObject({ model: "claude-haiku-5-5", effort: "xhigh" });
+    expect(fixed(turn())).toEqual(turn());
+    expect(fixed(turn()).logged).toBeUndefined();
+    expect(() => fixed(turn(), "gpt-5.5")).toThrow("price table");
+    expect(() => fixed(turn(), undefined, ["medium", "hihg"])).toThrow("--efforts");
+    // A replayable case stays replayable on the fixed model.
+    expect(exclusion(on("low", ["medium", "high"]))).toBeNull();
   });
 
   test("a trial can take a fixed number of every model", () => {

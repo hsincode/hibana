@@ -61,6 +61,9 @@ export type Case = {
    *  not be rebuilt; it replies to a message that cannot be seen any more;
    *  the message was edited after it was sent. */
   after_unknown?: boolean; attachments_unknown?: boolean; edited?: boolean;
+  /** Set when a run replays the case on another model or effort than the
+   *  production turn's: what the log had. */
+  logged?: { model: string | null; effort: string | null };
   production: { latency_ms: number | null } | null;
 };
 export type ArmResult = {
@@ -153,6 +156,23 @@ function shuffle<T>(items: T[], next: () => number): T[] {
     [out[i], out[j]] = [out[j]!, out[i]!];
   }
   return out;
+}
+
+const EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"];
+
+/** The case as a run replays it when the owner fixes the model, the efforts it
+ *  may use, or both. A logged effort that is not among those allowed becomes
+ *  the nearest one that is, the lower of two equally near; a turn with no
+ *  logged effort gets the first allowed. What the log had is kept. */
+export function fixed(c: Case, model?: string, efforts?: string[]): Case {
+  if (!model && !efforts) return c;
+  if (model && !ANTHROPIC_PRICES[model]) throw new Error(`--model ${model} is not a model in the price table`);
+  const unknown = efforts?.find((e) => !EFFORTS.includes(e));
+  if (unknown !== undefined || efforts?.length === 0) throw new Error(`--efforts takes a list from ${EFFORTS.join(", ")}`);
+  const at = EFFORTS.indexOf(c.effort ?? "");
+  const effort = !efforts ? c.effort : efforts.includes(c.effort ?? "") ? c.effort : at < 0 ? efforts[0]!
+    : [...efforts].sort((a, b) => Math.abs(EFFORTS.indexOf(a) - at) - Math.abs(EFFORTS.indexOf(b) - at) || EFFORTS.indexOf(a) - EFFORTS.indexOf(b))[0]!;
+  return { ...c, model: model ?? c.model, effort, logged: { model: c.model, effort: c.effort } };
 }
 
 /** The turns to replay, in a seeded random order so that a limit is a sample
@@ -550,11 +570,13 @@ async function run() {
     // Ids given on the command line, or the file the pick page wrote.
     ids: value("ids")?.split(",") ?? (value("selection") ? selection(JSON.parse(await readFile(value("selection")!, "utf8")), basename(casesFile())) : undefined),
     image: value("image"), perArm: amount("per-turn", value("per-turn"), 2), minutes: amount("minutes", value("minutes"), 15),
+    // Replay every case on one model, at an effort from a list, instead of the production turn's own.
+    model: value("model"), efforts: value("efforts")?.split(","),
     warm: !has("no-warm"),
     ...(dry && { fake: dryReply }),
   };
   if (!o.fake && !process.env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY is required");
-  const cases = await lines<Case>(casesFile());
+  const cases = (await lines<Case>(casesFile())).map((c) => fixed(c, o.model, o.efforts));
   if (!cases.length) throw new Error(`No cases in ${casesFile()}: export them first (see export-conversations.ts, export-discord-turns.ts)`);
   const { chosen, eligible, excluded } = select(cases, o);
   // Asked for by id and not there, or not replayable: stop, instead of running fewer than was chosen.

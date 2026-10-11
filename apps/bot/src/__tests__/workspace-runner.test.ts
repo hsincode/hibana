@@ -1232,6 +1232,13 @@ describe("the budget", () => {
     expect(error).toMatchObject({ kind: "protocol", retryable: false });
     expect((error as ProviderError).diagnostics.code).toBe("list_cost_missing");
     expect(fake.log).toEqual(["GET /"]);
+
+    // Nor is one the bot has counted use for, when the session itself reports nothing at all.
+    const blank = new FakeSession({ used: null });
+    blank.onMessage = answers("始まってはいけないターンの返事。");
+    const counted = await failure(runTurn(turn(blank, { baseline: { list_cost_cents: 40 } as TurnResult["cumulative"] })));
+    expect((counted as ProviderError).diagnostics.code).toBe("list_cost_missing");
+    expect(blank.log).toEqual(["GET /"]);
   });
 
   test("a session that was never used may report none yet", async () => {
@@ -1242,6 +1249,59 @@ describe("the budget", () => {
     expect(fake.of("POST", SESSION).map((r) => r.body!.budget.max_list_cost.amount)).toEqual(["100", "13"]);
     // Whether it was used is asked of the list, since the usage cannot say.
     expect(fake.of("GET", `${SESSION}/events`)[0]!.query.getAll("types[]")).toEqual(["user.message"]);
+  });
+
+  test("a message the session has not taken up is not use, and the turn begins where its own is taken up", async () => {
+    // A new session, and the same person wrote again before it took up the
+    // first message: nothing was spent, and no cost is reported yet. That a
+    // session reports none until then is read from the SDK's types ("absent
+    // until cost tracking is available"); it was not seen on the API.
+    const first = { id: "sevt_first", type: "user.message", content: [{ type: "text", text: "最初の依頼" }] };
+    const fake = new FakeSession({ used: null, budget: 1 });
+    fake.history.push({ ...first, processed_at: null } as RawEvent);
+    fake.onMessage = (f) => {
+      // Events are taken up in the order they were sent ("queued behind
+      // earlier events"): the first message, cut short by the interrupt, and
+      // only then the turn's own.
+      f.history = f.history.filter((event) => event.id !== first.id);
+      f.emit(first, running(), said("（最初の依頼に答えかけた文）"), idle());
+      setTimeout(() => {
+        f.process();
+        f.use(12);
+        f.emit(running(), said("言い直しへの返事。"), reported(12), idle());
+      }, 5);
+    };
+    const result = await runTurn(turn(fake));
+    expect(result).toMatchObject({ text: "言い直しへの返事。", stop: "end_turn", costReported: true, released: true });
+    expect(result.cumulative?.list_cost_cents).toBe(12);
+    // The message ahead of the turn's is older work like any other: it is
+    // stopped first, on its own, and the allowance is counted from nothing.
+    expect(fake.log.slice(0, 6)).toEqual([
+      "GET /",
+      "GET /events",
+      "POST /events user.interrupt",
+      "POST / budget=100",
+      "GET /events/stream",
+      "POST /events user.message",
+    ]);
+    expect(fake.events("user.message")).toEqual([{ type: "user.message", content: [{ type: "text", text: "hello" }] }]);
+  });
+
+  test("a session that took a message up and reports no cost is not given a ceiling, whatever is queued behind it", async () => {
+    const message = (id: string, text: string, processed_at: string | null) =>
+      ({ id, type: "user.message", content: [{ type: "text", text }], processed_at }) as RawEvent;
+    const taken = message("sevt_first", "最初の依頼", "2026-10-11T23:00:00.000Z");
+    for (const history of [[taken], [taken, message("sevt_second", "言い直し", null)]]) {
+      const fake = new FakeSession({ used: null, budget: 1 });
+      fake.history.push(...history);
+      // A turn that went on regardless would end here, not at its time limit.
+      fake.onMessage = answers("始まってはいけないターンの返事。");
+      const error = await failure(runTurn(turn(fake)));
+      expect(error).toMatchObject({ kind: "protocol", retryable: false });
+      expect((error as ProviderError).diagnostics.code).toBe("list_cost_missing");
+      // Nothing was raised, and nothing was sent.
+      expect(fake.log).toEqual(["GET /", "GET /events"]);
+    }
   });
 });
 

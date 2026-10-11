@@ -21,7 +21,7 @@ export function workspaceBaseUrl(baseUrl: string): string {
  * this deployment) and `baseURL` would take `ANTHROPIC_BASE_URL` (the
  * `anthropic` provider's). Both are always passed, so this provider only ever
  * sends its own key to its own host. `ANTHROPIC_CUSTOM_HEADERS` is read by
- * the SDK too and cannot be switched off; see `defaultHeaders` below.
+ * the SDK too and cannot be switched off; see `withOwnKey` below.
  */
 export function createWorkspaceClient(
   config: Pick<Config, "endpoints">,
@@ -33,12 +33,13 @@ export function createWorkspaceClient(
     apiKey: endpoint.apiKey,
     authToken: null,
     baseURL: workspaceBaseUrl(endpoint.baseUrl),
-    // The SDK lays the headers of `ANTHROPIC_CUSTOM_HEADERS` over the
-    // credentials, so an `x-api-key` or `Authorization` there would replace
-    // the key above. These are merged after the environment's and win. Other
-    // headers of that variable are still sent (#76).
+    // For the SDK's own check before it sends: it refuses a request whose
+    // merged headers hold no credential, and a line of
+    // `ANTHROPIC_CUSTOM_HEADERS` can blank the key there (`x-api-key:`).
+    // What is sent is decided in `withOwnKey`, not here.
     defaultHeaders: { "X-Api-Key": endpoint.apiKey, Authorization: null },
-    ...(options.fetch && { fetch: options.fetch }),
+    // The global `fetch` is what the SDK would take by itself.
+    fetch: withOwnKey(options.fetch ?? fetch, endpoint.apiKey),
     // The SDK retries connection errors, 408, 409, 429 and 5xx without an
     // idempotency key. Calls that create something pass `maxRetries: 0`.
     maxRetries: options.maxRetries ?? 2,
@@ -48,6 +49,27 @@ export function createWorkspaceClient(
     logLevel: "off",
     fetchOptions: { redirect: "error" },
   });
+}
+
+/**
+ * `send` with this provider's key on every request, and no `Authorization`.
+ * The SDK lays the lines of `ANTHROPIC_CUSTOM_HEADERS` over the credentials as
+ * the keys of an object, and one name in two spellings (`X-Api-Key`, then
+ * `x-api-key`) is two keys there: a value the client is given under one
+ * spelling leaves the other, and the one written later is sent. So the two
+ * headers are set here, after all of the SDK's merging. Every request of the
+ * client leaves through its `fetch`, the event stream and the file downloads
+ * included. Other headers of that variable are still sent (#76).
+ */
+function withOwnKey(send: typeof fetch, apiKey: string) {
+  return (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    // The SDK passes its headers in `init`, never in a Request, whose own
+    // headers these replace.
+    const headers = new Headers(init?.headers);
+    headers.set("x-api-key", apiKey);
+    headers.delete("authorization");
+    return send(input, { ...init, headers });
+  };
 }
 
 /** Why a session can no longer take a turn. */

@@ -3,6 +3,7 @@ import { APIUserAbortError } from "@anthropic-ai/sdk";
 import { loadConfig } from "../config";
 import { ProviderError, providerFailureNotice } from "../llm-errors";
 import { apiErrorInfo, createWorkspaceClient, SessionGone, toProviderError, workspaceBaseUrl } from "../workspace/client";
+import { outputFiles } from "../workspace/tools";
 
 // Decision record: #76. The official SDK as Anthropic Workspace uses it: which
 // key goes to which host, and how its errors become the bot's fixed
@@ -12,13 +13,13 @@ const config = (extra: NodeJS.ProcessEnv = {}) => loadConfig({
   ANTHROPIC_WORKSPACE_API_KEY: "fixture", SANDBOX_ENABLED: "false", SKILLS_ENABLED: "false",
   RUNTIME_STATE_PATH: "", LOG_DIR: "", ...extra,
 });
-type Sent = { url: string; headers: Record<string, string> };
+type Sent = { url: string; method?: string; body?: unknown; headers: Record<string, string> };
 /** A client whose requests are answered by `reply` and recorded. */
-function client(reply: () => Response | Promise<Response>, extra: NodeJS.ProcessEnv = {}) {
+function client(reply: (url: URL) => Response | Promise<Response>, extra: NodeJS.ProcessEnv = {}) {
   const sent: Sent[] = [];
   const fetcher = async (input: unknown, init?: RequestInit) => {
-    sent.push({ url: String(input), headers: Object.fromEntries(new Headers(init?.headers).entries()) });
-    return reply();
+    sent.push({ url: String(input), method: init?.method, body: init?.body, headers: Object.fromEntries(new Headers(init?.headers).entries()) });
+    return reply(new URL(String(input)));
   };
   // The SDK waits between its own retries; these tests never need them.
   return { sent, client: createWorkspaceClient(config(extra), { fetch: fetcher as unknown as typeof fetch, maxRetries: 0 }) };
@@ -35,6 +36,9 @@ async function thrown(reply: () => Response | Promise<Response>): Promise<unknow
   }
   throw new Error("the request did not fail");
 }
+/** `ANTHROPIC_CUSTOM_HEADERS` with each credential header twice: first in the
+ *  spelling the SDK itself writes, then in another one. */
+const TWICE = "X-Api-Key: another-key\nx-api-key: another-key-2\nAuthorization: Bearer another-token\nauthorization: Bearer another-token-2\nx-extra: 1";
 /** Runs with variables the SDK would read from the environment by itself. */
 async function withEnv(values: Record<string, string>, run: () => Promise<void>) {
   const before = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
@@ -74,12 +78,27 @@ describe("the client", () => {
       "x-api-key: another-key\nAuthorization: Bearer another-token\nx-extra: 1",
       "X-Api-Key: another-key\nauthorization: Bearer another-token\nx-extra: 1",
       "X-API-KEY: another-key\nAUTHORIZATION: Bearer another-token\nx-extra: 1",
+      // One name in several spellings. To the SDK these are separate keys of
+      // an object, so a value it is given for one spelling leaves the others.
+      TWICE,
+      "x-api-key: another-key-2\nX-Api-Key: another-key\nauthorization: Bearer another-token-2\nAuthorization: Bearer another-token\nx-extra: 1",
+      "X-Api-Key: another-key\nx-api-key: another-key-2\nX-API-KEY: another-key-3\n" +
+        "Authorization: Bearer another-token\nauthorization: Bearer another-token-2\nAUTHORIZATION: Bearer another-token-3\nx-extra: 1",
+      " x-api-key : another-key\r\n Authorization : Bearer another-token\r\nx-extra: 1\r\n",
+      // A line without a value does not blank the key either. Without a
+      // credential among its headers the SDK would refuse to send at all.
+      "x-api-key:\nx-extra: 1",
+      "X-Api-Key: another-key\nx-api-key:\nx-extra: 1",
+      "x-api-key:\nAuthorization: Bearer another-token\nauthorization:\nx-extra: 1",
     ])
       await withEnv({ ANTHROPIC_CUSTOM_HEADERS: custom }, async () => {
         const { client: sdk, sent } = client(session);
         await sdk.beta.sessions.retrieve("sesn_1");
         await sdk.beta.sessions.events.send("sesn_1", { events: [{ type: "user.interrupt" }] });
         expect(sent).toHaveLength(2);
+        // Nothing else about a request changes on the way.
+        expect(sent.map((request) => request.method)).toEqual(["GET", "POST"]);
+        expect(sent[1]!.body).toBe(JSON.stringify({ events: [{ type: "user.interrupt" }] }));
         for (const request of sent) {
           expect(request.url.startsWith("https://api.anthropic.com/v1/sessions/sesn_1")).toBe(true);
           expect(request.headers["x-api-key"]).toBe("fixture");
@@ -89,6 +108,31 @@ describe("the client", () => {
         }
         expect(JSON.stringify(sent)).not.toContain("another-");
       });
+  });
+
+  test("sends the event stream and the file requests with its key too", async () => {
+    // The requests the runner and `send_file` make, the way they make them.
+    await withEnv({ ANTHROPIC_CUSTOM_HEADERS: TWICE }, async () => {
+      const { client: sdk, sent } = client((url) =>
+        url.pathname.endsWith("/events/stream") ? new Response("event: ping\ndata: {}\n\n", { headers: { "content-type": "text/event-stream" } })
+          : url.pathname.endsWith("/content") ? new Response("written by the session")
+          : Response.json({ data: [], has_more: false, first_id: null, last_id: null }));
+      const stream = await sdk.beta.sessions.events.stream("sesn_1", {}, { maxRetries: 0 }).asResponse();
+      expect(await stream.text()).toContain("event: ping");
+      const files = outputFiles(sdk);
+      for await (const file of files.list("sesn_1")) throw new Error(`listed ${file.id}`);
+      expect(await (await files.download("file_1")).text()).toBe("written by the session");
+      expect(sent.map((request) => new URL(request.url).pathname)).toEqual([
+        "/v1/sessions/sesn_1/events/stream", "/v1/files", "/v1/files/file_1/content",
+      ]);
+      for (const request of sent) {
+        expect(new URL(request.url).origin).toBe("https://api.anthropic.com");
+        expect(request.headers["x-api-key"]).toBe("fixture");
+        expect(request.headers.authorization).toBeUndefined();
+        expect(request.headers["x-extra"]).toBe("1");
+      }
+      expect(JSON.stringify(sent)).not.toContain("another-");
+    });
   });
 
   test("drops a trailing /v1, which the SDK adds to every path itself", async () => {

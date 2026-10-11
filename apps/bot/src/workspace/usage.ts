@@ -113,7 +113,8 @@ export type LedgerEntry = {
   turn?: boolean;
   new_session?: boolean;
   /** What the stretch was allowed to add, in cents. The limits count it in
-   *  place of a cost the session did not report. */
+   *  place of a cost the session did not report. Left out for a stretch in
+   *  which the session reported no usage at all, which is taken as none. */
   allowed_cents?: number;
 };
 
@@ -149,8 +150,9 @@ const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
  *
  * The day's and the month's limits are checked against `limitCents`, which
  * is the reported cost plus what a report can miss: a cent for each new
- * session, and the whole allowance of a stretch that reported no cost. What
- * the owner is shown (`line`, `spentCents`) stays the reported cost.
+ * session, and the whole allowance of a stretch whose session reported usage
+ * but no cost. What the owner is shown (`line`, `spentCents`) stays the
+ * reported cost.
  */
 export class WorkspaceUsage {
   private data: LedgerFile = { version: 1, days: {} };

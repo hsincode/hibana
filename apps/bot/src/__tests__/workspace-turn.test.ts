@@ -1043,6 +1043,121 @@ describe("picking a turn up again", () => {
     } finally { await hibana.close(); }
   });
 
+  // The mark names the last message the session took. What the person wrote
+  // after it is recorded behind it, and may never have reached the session.
+  describe("a message that failed before it went out", () => {
+    /** The first message is taken and then fails. The second fails before it
+     *  is sent: the session refuses the budget its turn asks for. `between`
+     *  runs after the first. */
+    async function leftUnsent(
+      second: string, first: Context = dm, between: (made: Awaited<ReturnType<typeof bot>>) => Promise<unknown> = async () => {},
+    ) {
+      const made = await bot();
+      const { hibana, cloud } = made;
+      cloud.onMessage = fails(30);
+      await hibana.respond("一つ目の依頼", { ...first });
+      const session = cloud.sessions[0]!;
+      await between(made);
+      const raise = `POST /v1/sessions/${session.id}`;
+      cloud.on(raise, () => rejected(403, "permission_error"));
+      await hibana.respond(second, { ...first });
+      cloud.off(raise);
+      return { ...made, session };
+    }
+
+    test("is sent by /retry as the message it is, not passed over with a note about the one before it", async () => {
+      const { hibana, cloud, sent, checkpoints, session } = await leftUnsent("やっぱり二つ目の依頼にして");
+      try {
+        expect(sent.at(-1)).toBe(`プロバイダの認証・権限エラーです。APIキーと利用権限を確認してください。（送信時・HTTP 403）${KEPT}`);
+        expect(session.messages).toHaveLength(1);
+        // Both are kept. The mark names the first, and says that the session
+        // has that one alone.
+        const saved = checkpoints()["10/20"]!;
+        expect(saved.messages.map((m) => m.content)).toEqual(["一つ目の依頼", "やっぱり二つ目の依頼にして"]);
+        expect(saved.ctx.workspaceMark).toMatchObject({ eventId: `sevt_${session.id}_msg1`, sent: 1, resumes: 0 });
+
+        // The session takes the second message, and fails once more.
+        cloud.onMessage = fails(5);
+        const before = cloud.log.length;
+        await hibana.retry({ ...dm });
+        expect(session.messages).toHaveLength(2);
+        expect(session.messages[1]).toEqual([{ type: "text", text: `やっぱり二つ目の依頼にして\n[date: ${today}]` }]);
+        // A message of its own: what the session has used (30) plus a turn's
+        // allowance, and a time limit that starts now. A turn picked up
+        // without a new message all the same.
+        expect(cloud.log.slice(before)).toContain(`POST /sessions/${session.id} budget=130`);
+        const next = checkpoints()["10/20"]!.ctx.workspaceMark!;
+        expect(next).toMatchObject({ eventId: `sevt_${session.id}_msg2`, sent: 2, ceilingCents: 130, resumes: 1 });
+        expect(next.startedAt).toBeGreaterThan(saved.ctx.workspaceMark!.startedAt);
+
+        // Now the session has everything, and the work goes on from there.
+        cloud.onMessage = (s) => s.answer("二つ目の返事", 5);
+        await hibana.retry({ ...dm });
+        expect(sent.at(-1)).toBe("二つ目の返事");
+        expect(session.messages).toHaveLength(3);
+        expect(session.text(2).startsWith("[The bot restarted while you were working on the message above")).toBe(true);
+        expect(checkpoints()).toEqual({});
+        expect(hibana.history.info("10").turns).toBe(1);
+      } finally { await hibana.close(); }
+    });
+
+    test("goes with the next message the person writes, ahead of it", async () => {
+      const { hibana, cloud, sent, checkpoints, session } = await leftUnsent("二つ目: 送信前に失敗する依頼");
+      try {
+        cloud.onMessage = (s) => s.answer("三つ目への返事", 5);
+        await hibana.respond("三つ目の依頼", { ...dm });
+        expect(sent.at(-1)).toBe("三つ目への返事");
+        // One message for both. The first is not sent again: the session has it.
+        expect(session.messages).toHaveLength(2);
+        expect(session.messages[1]).toEqual([{ type: "text", text: `二つ目: 送信前に失敗する依頼\n\n三つ目の依頼\n[date: ${today}]` }]);
+        expect(checkpoints()).toEqual({});
+      } finally { await hibana.close(); }
+    });
+
+    test("is sent by /retry alone even after someone else's turn: it is a message of its own, and the session has the one before", async () => {
+      const a = inGuild("11", "20");
+      const { hibana, cloud, sent, session } = await leftUnsent("A の二つ目の依頼", a, async (made) => {
+        made.cloud.onMessage = (s) => s.answer("B への返事");
+        await made.hibana.respond("B の依頼", inGuild("11", "21"));
+      });
+      try {
+        expect(session.messages).toHaveLength(2);
+        cloud.onMessage = (s) => s.answer("A への返事", 5);
+        await hibana.retry(a);
+        expect(sent.at(-1)).toBe("A への返事");
+        expect(session.messages).toHaveLength(3);
+        expect(session.messages[2]!.at(-1)!.text).toBe(`A の二つ目の依頼\n[date: ${today}]`);
+        expect(session.text(2)).not.toContain("一つ目の依頼");
+      } finally { await hibana.close(); }
+    });
+
+    test("a mark from before the count was kept is read as it was then, and a count that is too high holds no new message back", async () => {
+      const { hibana, cloud, checkpoints } = await bot();
+      try {
+        cloud.onMessage = fails(30);
+        await hibana.respond("DM の依頼", { ...dm });
+        await hibana.respond("チャンネルの依頼", inGuild("11"));
+        await hibana.respond("別のチャンネルの依頼", inGuild("12"));
+        for (const key of ["10/20", "11/20"]) delete checkpoints()[key]!.ctx.workspaceMark!.sent;
+        // A count that is past what was recorded never holds a new message back.
+        checkpoints()["12/20"]!.ctx.workspaceMark!.sent = 9;
+        cloud.onMessage = (s) => s.answer("ok", 5);
+        // Without a new message everything recorded counts as sent; with one,
+        // everything but that message.
+        await hibana.retry({ ...dm });
+        await hibana.respond("二つ目の依頼", inGuild("11"));
+        await hibana.respond("二つ目の依頼", inGuild("12"));
+        const [direct, channel, other] = cloud.sessions;
+        expect(direct!.messages).toHaveLength(2);
+        expect(direct!.text(1).startsWith("[The bot restarted while you were working on the message above")).toBe(true);
+        for (const session of [channel, other]) {
+          expect(session!.messages).toHaveLength(2);
+          expect(session!.messages[1]).toEqual([{ type: "text", text: `二つ目の依頼\n[date: ${today}]` }]);
+        }
+      } finally { await hibana.close(); }
+    });
+  });
+
   test("when the session cannot say which message is last, the turn fails and sends nothing", async () => {
     const { hibana, cloud, sent, checkpoints } = await bot();
     try {
@@ -1796,6 +1911,84 @@ describe("limits", () => {
       await hibana.respond("次の依頼", inGuild("11"));
       expect(cloud.of("POST", "/v1/sessions").at(-1)!.body!.budget.max_list_cost.amount).toBe("100");
       expect(hibana.workspace.usage.limitCents("day")).toBe(19);
+    } finally { await hibana.close(); }
+  });
+
+  // The session has the message and never takes it up (its container is not
+  // ready yet, say): it reports no tokens, no running time and no cost. Each
+  // of the next three turns ends that way. None is counted as its allowance:
+  // under the default limits, five of them would use up the day for everyone.
+  describe("a turn whose message the session never took up is not counted as its allowance", () => {
+    test("when the conversation is cleared, however often", async () => {
+      const { hibana, cloud, sent } = await bot();
+      try {
+        cloud.onMessage = () => {};
+        for (let n = 0; n < 6; n++) {
+          const turn = hibana.respond(`依頼 ${n}`, { ...dm });
+          await until(() => cloud.sessions[n]?.messages.length === 1);
+          await slash(hibana, "clear");
+          expect(await turn).toBe("");
+          await until(() => cloud.deleted.length === n + 1 && hibana.workspace.sessions.disposals().length === 0);
+          // Only the cent of each session that was created.
+          expect(hibana.workspace.usage.limitCents("day")).toBe(n + 1);
+        }
+        expect(cloud.sessions.map((session) => session.state.usage)).toEqual(Array(6).fill({}));
+        expect(hibana.workspace.usage.spentCents("day")).toBe(0);
+        // Nobody was refused, and the next turn has a whole allowance.
+        expect(sent).toEqual([]);
+        cloud.onMessage = (session) => session.answer("ok");
+        await hibana.respond("次の依頼", inGuild("11"));
+        expect(cloud.of("POST", "/v1/sessions").map((r) => r.body!.budget.max_list_cost.amount)).toEqual(Array(7).fill("100"));
+      } finally { await hibana.close(); }
+    });
+
+    test("when the turn runs out of time", async () => {
+      const { hibana, cloud, sent } = await bot({ ANTHROPIC_WORKSPACE_TURN_TIMEOUT_MS: "80" });
+      try {
+        cloud.onMessage = () => {};
+        await hibana.respond("依頼", { ...dm });
+        expect(sent).toEqual(["このターンの時間の上限（1 分）に達したため、中断しました。続けるには、もう一度メッセージを送ってください。"]);
+        expect(cloud.sessions[0]!.messages).toHaveLength(1);
+        expect(cloud.sessions[0]!.state.usage).toEqual({});
+        expect(hibana.workspace.usage.limitCents("day")).toBe(1);
+      } finally { await hibana.close(); }
+    });
+
+    test("when the same person writes again", async () => {
+      // What the person writes next is too long to be sent, so this is about
+      // the turn that was given up alone: the next one asks nothing of the session.
+      const { hibana, cloud, sent } = await bot({ ANTHROPIC_WORKSPACE_INPUT_MAX_CHARS: "200" });
+      try {
+        cloud.onMessage = () => {};
+        const first = onMessage(hibana, incoming("最初の依頼", "1"));
+        await until(() => cloud.sessions[0]?.messages.length === 1);
+        await onMessage(hibana, incoming("言い直し".repeat(60), "2"));
+        await first;
+        await until(() => sent.length === 1);
+        expect(sent[0]!.startsWith("メッセージが長すぎます")).toBe(true);
+        const [session] = cloud.sessions;
+        expect(session!.interrupts).toBe(1);
+        expect(session!.messages).toHaveLength(1);
+        expect(session!.state.usage).toEqual({});
+        expect(hibana.workspace.usage.limitCents("day")).toBe(1);
+      } finally { await hibana.close(); }
+    });
+  });
+
+  test("a turn that failed before the session took its message up is not counted by the sweep either", async () => {
+    const { hibana, cloud, sent } = await bot();
+    try {
+      // The session gives up without having started on the message.
+      cloud.onMessage = (session) => session.emit(idle("retries_exhausted"));
+      await hibana.respond("依頼", { ...dm });
+      expect(sent).toEqual([`${FAILED}（受信中）${KEPT}`]);
+      // The turn threw, so its allowance is still leased on the row.
+      expect(hibana.workspace.sessions.get("10")!.lease).toMatchObject({ ceilingCents: 100 });
+      await hibana.workspace.sweep();
+      expect(hibana.workspace.sessions.get("10")!.lease).toBeUndefined();
+      expect(cloud.sessions[0]!.state.usage).toEqual({});
+      expect(hibana.workspace.usage.limitCents("day")).toBe(1);
+      expect(hibana.workspace.usageLine()).not.toContain("額の報告が無かったターン");
     } finally { await hibana.close(); }
   });
 

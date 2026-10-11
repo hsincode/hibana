@@ -229,7 +229,9 @@ export class Workspace {
       let first = this.prepare(input, live);
       this.forsake(client, input);
       // A turn that continues a message asks the session first whether that
-      // message is still its last. One that was refused above asks nothing.
+      // message is still its last. One that was refused above asks nothing,
+      // and neither does one that sends what was left unsent: that is a
+      // message of its own, as a new one is.
       if (!("reply" in first) && "resume" in first.send && !await this.unmoved(client, first.send.resume, signal))
         first = this.prepare(input, live, true);
       if ("reply" in first) return this.local(input, first.reply);
@@ -344,7 +346,8 @@ export class Workspace {
   /** What the turn sends, to which session, and under what budget. All from
    *  local state: no request is made, and the allowance is reserved before
    *  the turn waits for a slot. `moved`: the session was sent another message
-   *  after the one the mark names, so the mark no longer says where it is. */
+   *  after the one the mark names, so the mark no longer says where it is,
+   *  and all that is recorded for the turn goes again. */
   private prepare(input: WorkspaceTurn, live: Live, moved = false): Prepared | { reply: string } {
     const { ctx, key } = input;
     const limits = this.config.anthropicWorkspace;
@@ -358,8 +361,23 @@ export class Workspace {
       row = undefined;
     }
     const mark = !moved && input.resume?.sessionId === row?.sessionId ? input.resume : undefined;
+    // With a mark the session has what the earlier attempts sent. What was
+    // recorded after that is still to go: the new message, and any message
+    // whose own attempt failed before it went out. Picked up with only the
+    // note about "the message above", the session would never see that one.
+    // A mark from before the count was kept is read as it was then: all but
+    // a new message was sent. Without a mark everything recorded for this
+    // turn goes, in one message.
+    const earlier = input.messages.length - (input.text ? 1 : 0);
+    // Never past what earlier attempts recorded: a new message always goes.
+    const sent = mark ? Math.min(mark.sent ?? earlier, earlier) : 0;
+    const records = input.messages.slice(sent).filter((m) => m.role === "user");
+    const text = records.map((m) => m.content ?? "").join("\n\n");
+    const images = records.flatMap((m) => m.images ?? []).slice(-MAX_IMAGES);
+    const unsent = !!text.trim() || images.length > 0;
     live.reserved = 0;
-    if (mark && !input.text) {
+    // Picked up where it was: nothing new was written, and nothing is unsent.
+    if (mark && !input.text && !unsent) {
       // Held to the ledger and to the day's and the month's limits like a new
       // message: the allowance the turn left unused went back to them when
       // its lease was released, and others may have used it since.
@@ -376,13 +394,11 @@ export class Workspace {
       live.reserved = allow;
       return { row, variant, send: { resume: mark }, budget: { ceilingCents: used + allow }, allow, startedAt: mark.startedAt };
     }
-    // With a mark the session already has what the earlier attempt sent, and
-    // only the new message is missing. Otherwise everything recorded for this
-    // turn goes in one message.
-    const records = (mark ? input.messages.slice(-1) : input.messages).filter((m) => m.role === "user");
-    const text = records.map((m) => m.content ?? "").join("\n\n");
-    const images = records.flatMap((m) => m.images ?? []).slice(-MAX_IMAGES);
-    if (!text.trim() && !images.length) throw new Error("再開できる作業はありません。");
+    // From here on it is a message of its own, with its own allowance and
+    // time limit, held to the length limit, the ledger and the day's and the
+    // month's limits. That includes a turn picked up without a new message
+    // (`/retry`, the start of the bot) that still has something unsent.
+    if (!unsent) throw new Error("再開できる作業はありません。");
     if (text.length > limits.inputMaxChars) return { reply: tooLong(text.length, limits.inputMaxChars) };
     // The limits below are checked against the ledger. One that could not be
     // read only knows this process's turns, which would let every restart
@@ -533,7 +549,6 @@ export class Workspace {
     };
     let result: TurnResult | undefined;
     let delta = nothing();
-    let accepted = false;
     try {
       result = await runTurn({
         client, sessionId, model: selection.model, content, ctx, signal, steering: input.steering,
@@ -546,13 +561,15 @@ export class Workspace {
         // dies in the turn leaves the lease for the next one to find.
         onLease: (ceilingCents) => { this.sessions.touch(channelId, sessionId, { lease: { ceilingCents } }); },
         onSent: async ({ eventId, ceilingCents }) => {
-          accepted = true;
           if (digest) {
             state.contextDigest = digest;
             this.sessions.touch(channelId, sessionId, { state });
           }
           await input.onSent({
             sessionId, eventId, ceilingCents, startedAt,
+            // Everything recorded for the turn is in the session now: sent
+            // with this message, or by the attempts it follows.
+            sent: input.messages.length,
             // A turn picked up without a new message counts as picked up,
             // also when the message had to be sent again (another session,
             // or someone else was answered since): the bot does that by
@@ -581,9 +598,14 @@ export class Workspace {
         }
         this.usage.record({
           model: selection.model, ultra: variant === "ultra", delta, cost_reported: result.costReported,
-          // A session that worked and reported no cost may have used all it
-          // was allowed. One that was never asked used nothing.
-          ...((accepted || some(delta)) && { allowed_cents: prepared.allow }),
+          // A session that reports tokens or running time without a cost may
+          // have used all it was allowed. One that reports nothing at all is
+          // taken to have used nothing: its message was not sent, or was
+          // still waiting when the turn ended (cleared, written over, out of
+          // time). That the message was accepted does not count by itself:
+          // a few such turns would use up the day for everyone. The sweep
+          // goes by the same rule (`rest`).
+          ...(some(delta) && { allowed_cents: prepared.allow }),
         });
         // Otherwise the lease stays, and the sweep takes the allowance back.
         if (result.released) patch.lease = null;
@@ -740,6 +762,9 @@ export class Workspace {
     const patch: SessionPatch = {};
     if (settled.totals) {
       const delta = totalsDelta(settled.totals, row.totals);
+      // As a turn settles (`run`): the allowance stands in for a cost only
+      // when the session reported tokens or running time without one. A
+      // session that reported nothing since the row was written adds nothing.
       if (some(delta)) {
         this.usage.record({
           model: modelOf(row.key), ultra: row.variant === "ultra", delta, cost_reported: !!settled.costReported, turn: false,

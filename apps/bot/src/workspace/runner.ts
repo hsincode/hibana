@@ -410,7 +410,7 @@ class Turn {
     const { input } = this;
     const session = await this.retrieve();
     const reading = sessionTotals(session.usage);
-    await this.requireCost(reading);
+    const ahead = await this.requireCost(reading);
     this.before = reading;
     await this.rebuildRuns();
     const max = cents(session.budget?.max_list_cost);
@@ -429,8 +429,14 @@ class Turn {
     // the raise resumes them. It is still sent, for the runs: one that an
     // interrupt paused stays paused when the budget goes up. What the raise
     // resumed is stopped with the message itself (`post`).
+    // A message still waiting to be taken up is older work as well, whatever
+    // status the session reads as: events are taken up in the order they
+    // were sent, so the next thing the session does is that message. It is
+    // only known where the list was read for the cost (`requireCost`); a
+    // session that reports a cost is not asked. Treating it like work under
+    // way is a choice the owner has not confirmed yet (#76).
     const capped = max <= consumed;
-    const dirty = session.status !== "idle" || capped || this.openRuns.size > 0;
+    const dirty = session.status !== "idle" || capped || this.openRuns.size > 0 || ahead;
     if (dirty) {
       try {
         await this.client.beta.sessions.events.send(this.sid, { events: [{ type: "user.interrupt" }] }, { signal: input.signal });
@@ -466,20 +472,29 @@ class Turn {
   }
 
   /** A session that has been used but reports no list cost cannot be given a
-   *  ceiling: "what it has used plus the allowance" would start from zero. */
-  private async requireCost(reading: Reading) {
-    if (reading.cost) return;
+   *  ceiling: "what it has used plus the allowance" would start from zero.
+   *  Used: it reports tokens or running time, the bot has counted use for it
+   *  before, or it has taken a message up. A message that is only queued is
+   *  not use. A new session is taken to report no cost until its first
+   *  message is taken up (the SDK's types call the figure absent until cost
+   *  tracking is available; not verified against the API), and the same
+   *  person may write again before that. True when such a message waits
+   *  ahead of this turn's. */
+  private async requireCost(reading: Reading): Promise<boolean> {
+    if (reading.cost) return false;
     const some = (totals?: WorkspaceTotals) => !!totals && Object.values(totals).some((value) => value > 0);
-    let used = some(reading.totals) || some(this.input.baseline);
-    if (!used) {
-      try {
-        const page = await this.client.beta.sessions.events.list(this.sid, { types: ["user.message"] }, { signal: this.input.signal });
-        used = page.data.length > 0;
-      } catch (error) {
-        throw this.requestError(error);
-      }
+    if (some(reading.totals) || some(this.input.baseline)) throw this.protocol("list_cost_missing");
+    let messages: RawEvent[];
+    try {
+      // In the list's own order, oldest first. Messages are taken up in the
+      // order they were sent, so one that was taken up is on the first page.
+      const page = await this.client.beta.sessions.events.list(this.sid, { types: ["user.message"] }, { signal: this.input.signal });
+      messages = page.data as unknown as RawEvent[];
+    } catch (error) {
+      throw this.requestError(error);
     }
-    if (used) throw this.protocol("list_cost_missing");
+    if (messages.some((event) => event.processed_at)) throw this.protocol("list_cost_missing");
+    return messages.length > 0;
   }
 
   /** The runs still open, from the session's own events. The row can be

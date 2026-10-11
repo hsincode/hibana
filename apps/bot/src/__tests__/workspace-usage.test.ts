@@ -218,11 +218,17 @@ test("the limits count a cent for each new session and the whole allowance of a 
   const next = new WorkspaceUsage(path, at("2026-10-10T00:00:00Z"));
   await next.load();
   expect([next.limitCents("day"), next.limitCents("month"), next.spentCents("month")]).toEqual([0, 145, 42]);
+  // `load` writes the merged ledger back without waiting for it. That write
+  // has to be over before the same path gets another file, or it lands on it.
+  await next.flush();
   // A file written before the figure existed counts what it reported.
   await writeFile(path, JSON.stringify({ version: 1, days: { "2026-10-09": { "claude-haiku-5-5": { list_cost_cents: 12, turns: 2, sessions: 2 } } } }));
   const older = new WorkspaceUsage(path, at("2026-10-09T00:00:00Z"));
   await older.load();
   expect([older.spentCents("day"), older.limitCents("day")]).toEqual([12, 12]);
+  // Its own write-back, which would otherwise put the directory back after
+  // it was removed.
+  await older.flush();
 });
 
 test("merges the stored file and survives a reload", async () => {

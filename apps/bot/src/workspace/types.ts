@@ -13,7 +13,15 @@ export type WorkspaceCall = { id: string; name: string; input: unknown; threadId
 export type WorkspaceResult = { content: [{ type: "text"; text: string }]; is_error: boolean };
 
 /** Saved on the context (and so in the checkpoint) once the message was accepted. */
-export type WorkspaceMark = { sessionId: string; eventId: string; ceilingCents: number; startedAt: number; resumes: number };
+export type WorkspaceMark = {
+  sessionId: string; eventId: string; ceilingCents: number; startedAt: number; resumes: number;
+  /** How many of the messages recorded for the turn the session had been sent
+   *  by then. The checkpoint goes on collecting what the person writes, and a
+   *  message whose own attempt failed before it went out is recorded behind
+   *  the mark without having reached the session. Absent on a mark written
+   *  before this was counted. */
+  sent?: number;
+};
 
 /** Persisted per session row. */
 export type WorkspaceState = {

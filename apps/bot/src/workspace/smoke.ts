@@ -36,7 +36,7 @@ import pino from "pino";
 import type { WorkspaceVariant } from "../claude/select";
 import { loadConfig, type Selection } from "../config";
 import { sleep } from "../io";
-import { ProviderError } from "../llm-errors";
+import { httpFailure, ProviderError } from "../llm-errors";
 import { Runtime } from "../runtime";
 import definitions from "../tools/definitions.json";
 import type { Context, ToolDef } from "../types";
@@ -1007,15 +1007,23 @@ async function leftovers() {
   console.log(`found ${made.sessions.size} session(s), ${made.environments.size} environment(s) and ${made.agents.size} agent(s) with metadata.app = ${APP}`);
 }
 
-/** Whether a session has ended for good: archived, or terminated. */
-const ended = (id: string) =>
-  client.beta.sessions.retrieve(id).then((session) => !!session.archived_at || session.status === "terminated", () => false);
-// Sessions that had ended and whose delete was refused.
-let leftEnded = 0;
+/** A session that has ended for good (archived, or terminated), as it reads
+ *  now. Nothing when it has not ended, or cannot be read. */
+const ended = (id: string) => client.beta.sessions.retrieve(id).then(
+  (session) => (session.archived_at || session.status === "terminated" ? session : undefined), () => undefined);
+/** Whether a request that failed was refused: answered, with a status that
+ *  asking again does not change (by the bot's own reading of a status). A
+ *  5xx, a 429 or a lost connection may go differently the next time. */
+const refusal = (error: unknown) => {
+  const { status } = apiErrorInfo(error);
+  return status !== undefined && !httpFailure(status).retryable;
+};
 
 /** Brings a session to rest and deletes it. The budget is lowered first and
- *  also with `--keep`: a session that is left must not be able to spend. */
-async function removeSession(id: string, label: string): Promise<boolean> {
+ *  also with `--keep`: a session that is left must not be able to spend.
+ *  `left` is the environment of a session that had ended and whose delete
+ *  was refused: the session stays, and nothing can be done about it. */
+async function removeSession(id: string, label: string): Promise<{ ok: boolean; left?: string }> {
   const rest = await quiesce(client, id, { interrupt: true, log });
   const t = rest.totals;
   if (t && (t.list_cost_cents || t.active_seconds || t.output_tokens))
@@ -1024,48 +1032,75 @@ async function removeSession(id: string, label: string): Promise<boolean> {
       `${t.output_tokens} output tokens, ${t.web_search_requests} web search(es)`);
   const capped = rest.lowered ? "it cannot spend more" : "its budget was NOT lowered";
   let outcome = rest.status === "deleted" ? "already gone" : keep ? `kept, ${capped}` : "";
+  let left: string | undefined;
   // A session that is still stopping, or has a workflow run open, refuses.
   for (let tries = 1; !outcome; tries++) {
     try {
       await client.beta.sessions.delete(id);
       outcome = "deleted";
     } catch (error) {
-      const info = apiErrorInfo(error);
-      if (info.status === 404) outcome = "already gone";
-      // An archived session has ended and nothing starts it again. Whether
-      // one can be deleted is in no document, so a refusal is reported and
-      // not tried again: `--cleanup` could do no more about it.
-      else if (await ended(id)) {
-        leftEnded++;
-        outcome = `left archived or terminated (its delete was refused: ${describe(error)})`;
+      if (apiErrorInfo(error).status === 404) outcome = "already gone";
+      else {
+        // An archived session has ended and nothing starts it again. Whether
+        // one can be deleted is in no document, so a refusal is reported and
+        // not tried again: `--cleanup` could do no more about it. A delete
+        // that failed in another way is tried again like any other.
+        const over = refusal(error) ? await ended(id) : undefined;
+        if (over) {
+          left = over.environment_id;
+          outcome = `left archived or terminated (its delete was refused: ${describe(error)})`;
+        }
+        else if (tries >= 6) outcome = `NOT deleted (${describe(error)}); ${capped}`;
+        else await sleep(5_000);
       }
-      else if (tries >= 6) outcome = `NOT deleted (${describe(error)}); ${capped}`;
-      else await sleep(5_000);
     }
   }
   console.log(`cleanup: session ${id} (${label}) ${outcome}`);
-  return !outcome.includes("NOT");
+  return { ok: !outcome.includes("NOT"), left };
 }
 
 async function cleanup() {
-  let clean = true;
-  for (const [id, label] of made.sessions) clean = await removeSession(id, label) && clean;
+  // `again`: whether something is left that another run could still remove.
+  let clean = true, again = false;
+  const failed = (retry: boolean) => {
+    clean = false;
+    again ||= retry;
+  };
+  // The sessions that stay for good, counted by the environment each one is
+  // in. An environment is deleted "only if no sessions reference it" (public
+  // documentation), so such an environment may have to stay with them.
+  const held = new Map<string, number>();
+  for (const [id, label] of made.sessions) {
+    const { ok, left } = await removeSession(id, label);
+    if (!ok) failed(true);
+    if (left !== undefined) held.set(left, (held.get(left) ?? 0) + 1);
+  }
+  let heldEnvironments = 0;
   type Labelled = { metadata?: Record<string, string> | null };
   const remove = async (kind: string, id: string, done: string, read: () => Promise<Labelled>, run: () => Promise<unknown>) => {
     if (keep) return console.log(`cleanup: ${kind} ${id} kept`);
+    let labelled = false;
     try {
       // Read from the resource itself, however its id got here: nothing
       // without this script's label is removed, so never one of the bot's.
       if ((await read()).metadata?.app !== APP) {
-        clean = false;
+        // Not a case for `--cleanup`, which would not remove it either.
+        failed(false);
         return console.log(`cleanup: ${kind} ${id} NOT ${done}: it does not carry metadata.app = ${APP}`);
       }
+      labelled = true;
       await run();
       console.log(`cleanup: ${kind} ${id} ${done}`);
     } catch (error) {
-      const gone = apiErrorInfo(error).status === 404;
-      clean &&= gone;
-      console.log(`cleanup: ${kind} ${id} ${gone ? "already gone" : `NOT ${done} (${describe(error)})`}`);
+      if (apiErrorInfo(error).status === 404) return console.log(`cleanup: ${kind} ${id} already gone`);
+      // Refused on behalf of a session that stays: the next run would be
+      // refused the same way, so this is reported and is not a failure.
+      if (kind === "environment" && labelled && held.has(id) && refusal(error)) {
+        heldEnvironments++;
+        return console.log(`cleanup: environment ${id} left: ${held.get(id)} session(s) that were left still refer to it (its delete was refused: ${describe(error)})`);
+      }
+      failed(true);
+      console.log(`cleanup: ${kind} ${id} NOT ${done} (${describe(error)})`);
     }
   };
   for (const id of made.environments)
@@ -1074,11 +1109,13 @@ async function cleanup() {
   for (const id of made.agents)
     await remove("agent", id, "archived", () => client.beta.agents.retrieve(id), () => client.beta.agents.archive(id));
   const count = made.sessions.size + made.environments.size + made.agents.size;
-  step("cleanup", clean, !clean ? "something is left: see the lines above, and run again with --cleanup"
+  const leftSessions = [...held.values()].reduce((sum, n) => sum + n, 0);
+  step("cleanup", clean, !clean ? `something is left: see the lines above${again ? ", and run again with --cleanup" : ""}`
     : !count ? "nothing to remove"
     : keep ? "everything kept on request; the sessions were brought to rest"
     : "sessions and environments deleted, agents archived" +
-      (leftEnded ? `; ${leftEnded} session(s) that had ended could not be deleted and were left` : ""));
+      (!leftSessions ? "" : `; ${leftSessions} session(s) that had ended could not be deleted and were left` +
+        (!heldEnvironments ? "" : `, and with them ${heldEnvironments} environment(s) they still refer to; --cleanup would leave these again`)));
 }
 
 try {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Preset } from "./api";
 import { Badge, Icon, Modal, ProviderTile, providerMeta } from "./ui";
 
@@ -36,8 +36,20 @@ export function matchesSelection(
 }
 
 /**
+ * 非推奨のプロバイダのプリセットは、新しい選択肢に出さない（判断記録 #67）。
+ * 現在の選択だけは残す。何を使っているかが見えなくなるのと、同じ値の送り直しは API が通すため。
+ */
+export function offeredPresets(
+  presets: Preset[],
+  isCurrent: (p: Preset) => boolean,
+): Preset[] {
+  return presets.filter((p) => !p.deprecated || isCurrent(p));
+}
+
+/**
  * モデルを選ぶダイアログ。
  * preset は十数件あり provider がバラバラなので、文字とプロバイダで絞り込める一覧にしている。
+ * 非推奨のプリセットは `isSelected` のものだけを「非推奨」の印つきで出す。
  */
 export function ModelDialog({
   open,
@@ -75,20 +87,19 @@ export function ModelDialog({
   }, [open]);
 
   const keyOf = (p: Preset) => p.provider ?? providerMeta(undefined, p.label).label;
-  // 出現順を保ったままプロバイダを集計する（カタログの並び = 推奨順）
-  const providers = useMemo(() => {
-    const acc: { key: string; count: number; label: string }[] = [];
-    for (const p of presets) {
-      const key = keyOf(p);
-      const hit = acc.find((x) => x.key === key);
-      if (hit) hit.count += 1;
-      else acc.push({ key, count: 1, label: providerMeta(p.provider, p.label).label });
-    }
-    return acc;
-  }, [presets]);
+  const offered = offeredPresets(presets, isSelected);
+  // 出現順を保ったままプロバイダを集計する（カタログの並び = 推奨順）。
+  // 一覧は描くたびに作り直されるので、覚えておかずに毎回数える（多くて数十件）。
+  const providers: { key: string; count: number; label: string }[] = [];
+  for (const p of offered) {
+    const key = keyOf(p);
+    const hit = providers.find((x) => x.key === key);
+    if (hit) hit.count += 1;
+    else providers.push({ key, count: 1, label: providerMeta(p.provider, p.label).label });
+  }
 
   const needle = query.trim().toLowerCase();
-  const shown = presets.filter((p) => {
+  const shown = offered.filter((p) => {
     if (filter !== "all" && keyOf(p) !== filter) return false;
     if (!needle) return true;
     const meta = providerMeta(p.provider, p.label);
@@ -119,7 +130,7 @@ export function ModelDialog({
             aria-pressed={filter === "all"}
             onClick={() => setFilter("all")}
           >
-            すべて <span className="mono">{presets.length}</span>
+            すべて <span className="mono">{offered.length}</span>
           </button>
           {providers.map((pv) => (
             <button
@@ -161,7 +172,9 @@ export function ModelDialog({
             ? `${p.label}（${p.min_role} 以上）`
             : offline
               ? `${p.label}（ボット側で未接続と報告されています）`
-              : p.label;
+              : p.deprecated
+                ? `${p.label}（非推奨。現在の選択としてだけ表示しています）`
+                : p.label;
           return (
             <button
               key={p.id}
@@ -179,6 +192,7 @@ export function ModelDialog({
               <span className="p-prov">{meta.label}</span>
               <span className="p-id">{p.id}</span>
               <span className="p-tags">
+                {p.deprecated && <Badge tone="warn">非推奨</Badge>}
                 {locked && <Badge tone="warn">Premium</Badge>}
                 {!locked && offline && <Badge tone="warn">未接続</Badge>}
                 {selected && <Icon.check />}
@@ -187,11 +201,13 @@ export function ModelDialog({
           );
         })}
         {shown.length === 0 && (
-          <p className="palette-empty">一致するモデルがありません。</p>
+          <p className="palette-empty">
+            {offered.length === 0 ? "選べるモデルがありません。" : "一致するモデルがありません。"}
+          </p>
         )}
       </div>
       <p className="note">
-        「Premium」は、あなたのプランでは選べないプリセットです。「未接続」は、ボット側で未接続と報告されているプロバイダです。
+        「Premium」は、あなたのプランでは選べないプリセットです。「未接続」は、ボット側で未接続と報告されているプロバイダです。「非推奨」は、新しくは選べなくなったプロバイダのプリセットで、現在の選択だけを表示しています。
       </p>
     </Modal>
   );
@@ -224,18 +240,25 @@ export function FixedModelButton({
   const [open, setOpen] = useState(false);
   const current = presets.find((p) => p.id === value) ?? null;
   const name = current?.model ?? current?.id ?? value;
+  const deprecated = current?.deprecated === true;
   return (
     <>
       <button
         type="button"
         className="btn fixed-btn"
-        aria-label={`${label}: ${name}`}
+        aria-label={`${label}: ${name}${deprecated ? "（非推奨）" : ""}`}
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen(true)}
       >
         <span>
           {label}: <span className="mono">{name}</span>
+          {deprecated && (
+            <>
+              {" "}
+              <Badge tone="warn">非推奨</Badge>
+            </>
+          )}
         </span>
         <Icon.chevronRight size={14} />
       </button>

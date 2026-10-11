@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
-import { emptyGuild } from "@hibana/shared/settings";
+import { emptyGuild, emptyUserOverride, subagentModePatch } from "@hibana/shared/settings";
 import { AUTO_ROUTE_FALLBACK } from "@hibana/shared/catalog";
 import { GUILD_PAGES, GUILD_SETTINGS, guildPath } from "../src/nav";
 
@@ -10,24 +10,44 @@ const guilds = [
   { id: "300", name: "Research lab", icon: null, preset: "GPT" },
 ];
 const catalog = {
+  // As the API answers since #67: every provider except Anthropic is
+  // deprecated. The servers in these fixtures are on DeepSeek V4, the way a
+  // server that chose its model before the deprecation is.
   presets: [
     {
       id: "deepseek",
       provider: "deepseek",
       model: "DeepSeek V4",
       label: "DeepSeek / DeepSeek V4",
+      deprecated: true,
     },
     {
       id: "claude",
       provider: "claude_kiro",
       model: "Claude Opus",
       label: "Claude Kiro / Claude Opus",
+      deprecated: true,
     },
     {
       id: "gpt",
       provider: "codex_plus",
       model: "GPT",
       label: "Codex Plus / GPT",
+      deprecated: true,
+    },
+    {
+      id: "opus",
+      provider: "anthropic",
+      model: "Opus 5.5",
+      label: "Anthropic / Opus 5.5",
+      deprecated: false,
+    },
+    {
+      id: "haiku",
+      provider: "anthropic",
+      model: "Haiku 5.5",
+      label: "Anthropic / Haiku 5.5",
+      deprecated: false,
     },
   ],
   // Include the legacy alias to verify new pickers do not offer it.
@@ -562,14 +582,14 @@ test("subagent model and effort policies save independently on desktop and mobil
     }
     await page.getByRole("button", { name: /^固定モデル:/ }).click();
     const dialog = page.getByRole("dialog");
-    await dialog.getByRole("button", { name: /GPT/ }).click();
-    await expect.poll(() => writes.some(w => w.path === path && (w.body.subagent_model as { preset?: string })?.preset === "gpt")).toBe(true);
+    await dialog.getByRole("button", { name: /Haiku 5\.5/ }).click();
+    await expect.poll(() => writes.some(w => w.path === path && (w.body.subagent_model as { preset?: string })?.preset === "haiku")).toBe(true);
     await page.getByRole("combobox", { name: "サブエージェントの effort 選択方式" }).click();
     await page.getByRole("option", { name: "固定（指定した effort）", exact: true }).click();
     await page.getByRole("combobox", { name: "サブエージェントの固定 effort" }).click();
     await page.getByRole("option", { name: "high", exact: true }).click();
     await expect.poll(() => writes.some(w => w.path === path && (w.body.subagent_effort as { effort?: string })?.effort === "high")).toBe(true);
-    await expect(page.getByRole("button", { name: /^固定モデル:/ })).toContainText("GPT");
+    await expect(page.getByRole("button", { name: /^固定モデル:/ })).toContainText("Haiku 5.5");
     for (const label of ["任意（エージェントが選択）", "同一（親エージェントと同じ）"]) {
       await page.getByRole("combobox", { name: "サブエージェントの effort 選択方式" }).click();
       await page.getByRole("option", { name: label, exact: true }).click();
@@ -671,10 +691,10 @@ for (const [url, path, width] of [["/g/100", "/api/guilds/100/settings", 1440], 
     await page.getByRole("combobox", { name: "検証のモデル" }).click();
     await page.getByRole("option", { name: "固定", exact: true }).click();
     await page.getByRole("button", { name: /^検証の固定モデル:/ }).click();
-    await page.getByRole("dialog").getByRole("button", { name: /Claude Opus/ }).click();
+    await page.getByRole("dialog").getByRole("button", { name: /Haiku 5\.5/ }).click();
     await expect.poll(() => writes.some(w => w.path === path &&
-      JSON.stringify((w.body.multi_agent_roles as Record<string, unknown>)?.reviewer) === JSON.stringify({ model: { mode: "fixed", preset: "claude" }, effort: { mode: "default" } }))).toBe(true);
-    await expect(page.getByLabel("検証の実際の設定")).toContainText("Claude Opus");
+      JSON.stringify((w.body.multi_agent_roles as Record<string, unknown>)?.reviewer) === JSON.stringify({ model: { mode: "fixed", preset: "haiku" }, effort: { mode: "default" } }))).toBe(true);
+    await expect(page.getByLabel("検証の実際の設定")).toContainText("Haiku 5.5");
     await expect(page.getByLabel("作成の実際の設定")).toContainText("DeepSeek V4（任意）");
     await page.getByRole("combobox", { name: "調査の effort" }).click();
     await page.getByRole("option", { name: "固定", exact: true }).click();
@@ -685,13 +705,244 @@ for (const [url, path, width] of [["/g/100", "/api/guilds/100/settings", 1440], 
     // The reviewer override survives the explorer edit.
     expect(last.reviewer!.model.mode).toBe("fixed");
     await page.reload();
-    await expect(page.getByLabel("検証の実際の設定")).toContainText("Claude Opus");
+    await expect(page.getByLabel("検証の実際の設定")).toContainText("Haiku 5.5");
     await page.getByRole("combobox", { name: "検証のモデル" }).click();
     await page.getByRole("option", { name: "親と同じ", exact: true }).click();
     await expect(page.getByLabel("検証の実際の設定")).toContainText("DeepSeek V4");
     await expect(page.getByRole("button", { name: /^検証の固定モデル:/ })).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   });
+
+/* ============================================================
+   Deprecated providers (#67). A preset outside Anthropic stays in the
+   catalog but is offered only where it is the current selection, and
+   it carries a 非推奨 mark there.
+   ============================================================ */
+
+const onDeepseek = { provider: "deepseek", model: "DeepSeek V4", effort: "max" };
+
+/** A settings endpoint that applies `preset` the way the API does, so that a pick moves the selection. */
+async function mockSettings(page: Page, path: string, initial: object, presets = catalog.presets) {
+  let settings: Record<string, unknown> = { ...initial };
+  const writes: Record<string, unknown>[] = [];
+  await page.route(`**${path}`, async (route) => {
+    if (route.request().method() === "PATCH") {
+      const { preset, ...rest } = route.request().postDataJSON() as Record<string, unknown>;
+      writes.push({ preset, ...rest });
+      settings = { ...settings, ...rest };
+      const picked = presets.find((p) => p.id === preset);
+      if (picked) settings.selection = { provider: picked.provider, model: picked.model, effort: "max" };
+      if (preset === "reset") settings.selection = null;
+    }
+    await route.fulfill({ json: { settings } });
+  });
+  return writes;
+}
+
+test("a deprecated model is offered only while it is the current selection, and is marked 非推奨", async ({ page }) => {
+  await mockApi(page);
+  const writes = await mockSettings(page, "/api/guilds/100/settings", { ...emptyGuild(), selection: onDeepseek });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/g/100");
+  const row = page.locator('[data-row="g-preset"]');
+  const card = row.locator(".model-card");
+  await expect(card).toContainText("DeepSeek V4");
+  await expect(card.locator(".badge")).toHaveText("非推奨");
+  await expect(row).toContainText("選択中のモデルは非推奨のプロバイダのものです。");
+
+  await page.getByRole("button", { name: "モデルを変更" }).click();
+  const dialog = page.getByRole("dialog", { name: "モデルを選ぶ" });
+  const rows = dialog.locator(".picker-row");
+  // The current selection, and the two presets that can still be chosen.
+  await expect(rows).toHaveCount(3);
+  const current = rows.filter({ hasText: "DeepSeek V4" });
+  await expect(current).toHaveAttribute("aria-pressed", "true");
+  await expect(current.locator(".badge")).toHaveText("非推奨");
+  await expect(rows.filter({ hasText: "Claude Opus" })).toHaveCount(0);
+  await expect(rows.filter({ hasText: "GPT" })).toHaveCount(0);
+  for (const name of ["Opus 5.5", "Haiku 5.5"]) {
+    await expect(rows.filter({ hasText: name })).toBeEnabled();
+    await expect(rows.filter({ hasText: name }).locator(".badge")).toHaveCount(0);
+  }
+  // The filters count and find only what is offered.
+  const filters = dialog.getByRole("group", { name: "プロバイダで絞り込み" }).getByRole("button");
+  await expect(filters).toHaveText([/^すべて\s*3$/, /^DeepSeek\s*1$/, /^Anthropic\s*2$/]);
+  const search = dialog.getByRole("searchbox", { name: "モデルを絞り込む" });
+  await search.fill("gpt");
+  await expect(rows).toHaveCount(0);
+  await expect(dialog.getByText("一致するモデルがありません。")).toBeVisible();
+  await search.fill("");
+
+  // Once the server leaves the deprecated model, it is not offered again.
+  await rows.filter({ hasText: "Opus 5.5" }).click();
+  await expect.poll(() => writes.at(-1)?.preset).toBe("opus");
+  await expect(card).toContainText("Opus 5.5");
+  await expect(row.locator(".badge")).toHaveCount(0);
+  await expect(row).not.toContainText("非推奨");
+  await page.getByRole("button", { name: "モデルを変更" }).click();
+  await expect(rows).toHaveCount(2);
+  await expect(rows.filter({ hasText: "DeepSeek V4" })).toHaveCount(0);
+  await expect(dialog.locator(".badge")).toHaveCount(0);
+});
+
+test("マイ設定 offers a deprecated model only when it is the personal selection", async ({ page }) => {
+  await mockApi(page);
+  await mockSettings(page, "/api/me/settings", emptyUserOverride());
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/me");
+  const card = page.locator('[data-row="me-preset"] .model-card');
+  const dialog = page.getByRole("dialog", { name: "モデルを選ぶ" });
+  const rows = dialog.locator(".picker-row");
+  // Following the server selects nothing here: デフォルト and the two Anthropic presets.
+  await expect(card).toContainText("デフォルト");
+  await page.getByRole("button", { name: "モデルを変更" }).click();
+  await expect(rows).toHaveCount(3);
+  await expect(dialog.getByRole("button", { name: /^デフォルト/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog.locator(".badge")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  // A personal model saved before the deprecation.
+  const writes = await mockSettings(page, "/api/me/settings", {
+    ...emptyUserOverride(), selection: { provider: "codex_plus", model: "GPT", effort: "max" }, effort: "max",
+  });
+  await page.reload();
+  await expect(card).toContainText("GPT");
+  await expect(card.locator(".badge")).toHaveText("非推奨");
+  await page.getByRole("button", { name: "モデルを変更" }).click();
+  await expect(rows).toHaveCount(4);
+  await expect(rows.filter({ hasText: "GPT" })).toHaveAttribute("aria-pressed", "true");
+  await expect(rows.filter({ hasText: "GPT" }).locator(".badge")).toHaveText("非推奨");
+  await expect(rows.filter({ hasText: "DeepSeek V4" })).toHaveCount(0);
+  await expect(rows.filter({ hasText: "Claude Opus" })).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  // Going back to the server's model is still one click.
+  await dialog.getByRole("button", { name: /^デフォルト/ }).click();
+  await expect.poll(() => writes.at(-1)?.preset).toBe("reset");
+  await expect(card).toContainText("デフォルト");
+  await expect(card.locator(".badge")).toHaveCount(0);
+});
+
+test("subagent pickers keep a saved deprecated model, and a new 固定 starts on one that can be chosen", async ({ page }) => {
+  await mockApi(page);
+  const roles = {
+    explorer: { model: { mode: "default" }, effort: { mode: "default" } },
+    worker: { model: { mode: "default" }, effort: { mode: "default" } },
+    reviewer: { model: { mode: "fixed", preset: "claude" }, effort: { mode: "default" } },
+  };
+  const writes = await mockSettings(page, "/api/guilds/100/settings", {
+    ...emptyGuild(), selection: onDeepseek, ...subagentModePatch("multi"),
+    subagent_model: { mode: "fixed", preset: "gpt" }, multi_agent_roles: roles,
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/g/100");
+  const rows = page.getByRole("dialog").locator(".picker-row");
+
+  const common = page.getByRole("button", { name: /^固定モデル:/ });
+  await expect(common).toContainText("GPT");
+  await expect(common.locator(".badge")).toHaveText("非推奨");
+  await common.click();
+  // What stays is this picker's own value, not the server's model (DeepSeek V4).
+  await expect(rows).toHaveCount(3);
+  await expect(rows.filter({ hasText: "GPT" })).toHaveAttribute("aria-pressed", "true");
+  await expect(rows.filter({ hasText: "GPT" }).locator(".badge")).toHaveText("非推奨");
+  await expect(rows.filter({ hasText: "DeepSeek V4" })).toHaveCount(0);
+  await expect(rows.filter({ hasText: "Claude Opus" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  const reviewer = page.getByRole("button", { name: /^検証の固定モデル:/ });
+  await expect(reviewer).toContainText("Claude Opus");
+  await expect(reviewer.locator(".badge")).toHaveText("非推奨");
+  await reviewer.click();
+  await expect(rows).toHaveCount(3);
+  await expect(rows.filter({ hasText: "Claude Opus" })).toHaveAttribute("aria-pressed", "true");
+  await expect(rows.filter({ hasText: "GPT" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  // A role newly set to 固定 starts on the first preset that can be chosen, not on the first in the catalog.
+  await page.getByRole("combobox", { name: "作成のモデル" }).click();
+  await page.getByRole("option", { name: "固定", exact: true }).click();
+  // The whole table is sent: the reviewer's saved value goes along unchanged, which the API accepts.
+  await expect.poll(() => writes.at(-1)?.multi_agent_roles).toEqual({
+    ...roles, worker: { model: { mode: "fixed", preset: "opus" }, effort: { mode: "default" } },
+  });
+  const worker = page.getByRole("button", { name: /^作成の固定モデル:/ });
+  await expect(worker).toContainText("Opus 5.5");
+  await expect(worker.locator(".badge")).toHaveCount(0);
+  await expect(reviewer).toContainText("Claude Opus");
+});
+
+test("a plan that can pick none of the remaining models still gets a working page", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await mockApi(page);
+  // Strongest role first, as the API lists them; the Anthropic presets need Premium.
+  const gated = {
+    ...catalog,
+    roles: ["admin", "premium", "user"],
+    presets: catalog.presets.map((p) => (p.deprecated ? p : { ...p, min_role: "premium" })),
+  };
+  await page.route("**/api/catalog", (route) => route.fulfill({ json: gated }));
+  await page.route("**/api/me", (route) => route.fulfill({ json: {
+    id: "2", username: "member", avatar: null, role: "user", can_manage_users: false,
+  } }));
+  const writes = await mockSettings(page, "/api/guilds/100/settings", { ...emptyGuild(), selection: onDeepseek });
+  const dialog = page.getByRole("dialog", { name: "モデルを選ぶ" });
+  const rows = dialog.locator(".picker-row");
+  for (const [width, label, mode] of [
+    [1440, "同一（親エージェントと同じ）", "same"],
+    [390, "任意（エージェントが選択）", "auto"],
+  ] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/g/100");
+    await expect(page.locator('[data-row="g-preset"] .model-card')).toContainText("DeepSeek V4");
+    await page.getByRole("button", { name: "モデルを変更" }).click();
+    // The model in use, and the two that this plan may not pick.
+    await expect(rows).toHaveCount(3);
+    await expect(rows.filter({ hasText: "DeepSeek V4" })).toBeEnabled();
+    for (const name of ["Opus 5.5", "Haiku 5.5"]) {
+      await expect(rows.filter({ hasText: name })).toBeDisabled();
+      await expect(rows.filter({ hasText: name }).locator(".badge")).toHaveText("Premium");
+    }
+    await page.keyboard.press("Escape");
+    // There is no model to fix a subagent on, so 固定 cannot be chosen; the other modes still save.
+    await page.getByRole("combobox", { name: "サブエージェントのモデル選択方式" }).click();
+    await expect(page.getByRole("option", { name: "固定（指定したモデル）", exact: true })).toBeDisabled();
+    await page.getByRole("option", { name: label, exact: true }).click();
+    await expect.poll(() => (writes.at(-1)?.subagent_model as { mode?: string } | undefined)?.mode).toBe(mode);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  }
+
+  // An account that is offered nothing at all (say the Anthropic presets are unpublished): デフォルト is what is left.
+  await page.route("**/api/catalog", (route) => route.fulfill({ json: {
+    ...gated, presets: catalog.presets.filter((p) => p.deprecated),
+  } }));
+  await mockSettings(page, "/api/me/settings", emptyUserOverride());
+  await page.goto("/me");
+  await page.getByRole("button", { name: "モデルを変更" }).click();
+  await expect(rows).toHaveCount(1);
+  await expect(dialog.getByRole("button", { name: /^デフォルト/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog.getByText("選べるモデルがありません。")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test("the model list, Service Tier and the ChatGPT accounts say what is deprecated", async ({ page }) => {
+  await mockApi(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/models");
+  await expect(page.locator(".counts")).toContainText("非推奨 3 / 5");
+  const row = (id: string) =>
+    page.locator("tbody tr").filter({ has: page.getByRole("cell", { name: id, exact: true }) });
+  for (const id of ["deepseek", "claude", "gpt"]) await expect(row(id).locator(".badge")).toHaveText("非推奨");
+  for (const id of ["opus", "haiku"]) await expect(row(id).locator(".badge")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "ChatGPT マスターアカウント" }))
+    .toContainText("ChatGPT は非推奨のプロバイダで、新しくは選べません。");
+  for (const [url, key] of [["/g/100", "g-tier"], ["/me", "me-tier"]] as const) {
+    await page.goto(url);
+    await expect(page.locator(`[data-row="${key}"]`))
+      .toContainText("これらは非推奨のプロバイダで、Anthropic のモデルには効きません。");
+  }
+});
 
 /* ============================================================
    Layout introduced with the redesign (#61): five pages per server,

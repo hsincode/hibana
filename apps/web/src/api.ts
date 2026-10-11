@@ -97,6 +97,11 @@ export type Preset = {
   min_role?: string;
   /** false = 未公開。Admin/Mod の /models 以外では出さない。未指定 = 公開。 */
   published?: boolean;
+  /**
+   * true = 非推奨のプロバイダ（Anthropic 以外。判断記録 #67）。新しくは選べず、
+   * API も断る。現在の選択としてだけ表示する。旧 API は返さないので、無ければ非推奨として扱わない。
+   */
+  deprecated?: boolean;
 };
 
 export type Catalog = {

@@ -3,6 +3,7 @@ import {
   REASONING_EFFORTS,
 } from "@hibana/shared/catalog";
 import type { Runtime } from "./runtime";
+import { deprecationLine, refuseDeprecatedPreset } from "./deprecation";
 import type { ToolRegistry } from "./tools";
 import type { History } from "./history";
 import type { Voice } from "./voice";
@@ -164,14 +165,19 @@ export async function handleCommand(
   try {
     let result: unknown;
     let patch: Json = {};
+    // Shown above the JSON, which is cut at 1850 characters.
+    let note: string | undefined;
     const guild = () => {
       if (!i.guildId) throw new Error("サーバー内で使用してください。");
       return i.guildId;
     };
     switch (i.commandName) {
-      case "info":
-        result = runtime.resolve(ctx.guildId, ctx.userId);
+      case "info": {
+        const settings = runtime.resolve(ctx.guildId, ctx.userId);
+        result = settings;
+        note = deprecationLine(settings.selection);
         break;
+      }
       case "context":
         result = history.info(ctx.channelId);
         break;
@@ -202,6 +208,9 @@ export async function handleCommand(
         };
         if (!Object.keys(patch).length)
           result = runtime.resolve(ctx.guildId, ctx.userId).selection;
+        // A new choice of a deprecated provider stops here (#67). Typing an
+        // id that autocomplete no longer offers reaches this line too.
+        else refuseDeprecatedPreset(runtime, guild(), i.user.id, patch.preset);
         break;
       case "temperature":
         patch = { temperature: i.options.getNumber("value") };
@@ -299,7 +308,8 @@ export async function handleCommand(
     if (Object.keys(patch).length)
       result = await runtime.patch(guild(), patch, i.user.id);
     await i.editReply(
-      "```json\n" +
+      (note ? `${note}\n` : "") +
+        "```json\n" +
         JSON.stringify(result ?? { ok: true }, null, 2).slice(0, 1850) +
         "\n```",
     );

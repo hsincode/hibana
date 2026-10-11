@@ -215,3 +215,17 @@ bot は、会話履歴と Auto Routing の経路を `/var/lib/hibana/conversatio
 - bot を前の版に切り戻している間、前の版はこのファイルを使いません。その間の会話は保存されず、新しい版に戻ると、切り戻す前の履歴の続きになります
 
 検証は手元のテスト（`apps/bot/src/__tests__/conversation-store.test.ts`、`sync.test.ts`）までです。本番での動作、実際の会話でのファイルの大きさ、キャッシュのヒット率の変化は、配信後に確かめる必要があります。
+
+## Claude 向けのハーネス（2026-10-11）
+
+Anthropic 公式 API（`provider: anthropic`）のターンは、Claude 向けのハーネスで動きます（[#66](https://github.com/hsincode/hibana/issues/66)、[ADR-0009](adr/0009-split-the-harness-by-provider.md)、[ハーネスの説明](harness.md)）。ほかのプロバイダーは従来のハーネスのままです。
+
+- 配信すると、`anthropic` を使っているチャンネルの会話は 1 回最初からになります（Auto Routing の経路も選び直しになり、「Auto Routing:」の通知が出ます）。従来のハーネスで保存された会話と、進行中だった作業のチェックポイントは引き継ぎません。ほかのプロバイダーの会話は続きます
+- 従来のハーネスに戻すには、`/etc/hibana/bot.env` に `ANTHROPIC_HARNESS=codex` を書いて `systemctl restart hibana` します。API・Web・DB は触りません。戻したときも、`anthropic` のチャンネルの会話は 1 回最初からになります
+- ログで見るもの:
+  - `LLM request completed` の `usage_detail`（キャッシュ書き込みの TTL 別、検索の回数）と `prefix`（直前のリクエストとの先頭の一致）
+  - `Anthropic rejected an optional request feature; continuing without it`（`feature` が `tool_search` か `thinking_updates`）。出ていたら、その機能は再起動まで使われません
+  - `Conversation summarized`（`method` が `api` なら API の要約、`prompt` なら会話の中で頼んだ要約）と、失敗時の `Conversation summary by the API failed`
+  - `Subagent completed` / `Subagent failed`
+- 画像をデータとして会話に保存するので、`conversations.db` は以前より大きくなります（大きさは実測していません）
+- 未確認: 実際の Anthropic API での動作（このハーネスからは、まだ 1 回もリクエストを送っていません）、キャッシュの効き、要約とサブエージェントの費用

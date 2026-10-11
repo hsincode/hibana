@@ -1,42 +1,126 @@
 # ハーネス
 
-bot のハーネスは、システムプロンプト、モデルに見せるツール、ツールを回すループ、会話の表現をまとめたものです。この文書は、ハーネスをプロバイダーで分ける作り直しの現在地を書きます。
-
-**状態（2026-10-11）: 移行中。新しいハーネスはまだ実装されていません。** `main` で動いているのは、全プロバイダー共通の 1 つのハーネス（Codex CLI を参考にしたもの）です。
+bot のハーネスは、システムプロンプト、モデルに見せるツール、ツールを回すループ、会話の持ち方をまとめたものです。ハーネスは 2 つあり、ターンのプロバイダーで決まります。
 
 - 判断記録: #66（構成・対象・出し方）、#67（Anthropic 以外の非推奨化）、#68（Anthropic のサブエージェント）
-- 計測記録: #69（作り直しの前後の比較）
-- ADR: [ADR-0009](adr/0009-split-the-harness-by-provider.md)、[ADR-0010](adr/0010-deprecate-non-anthropic-providers.md)（どちらも「提案」）
+- 計測記録: #69（作り直しの前後の比較。**まだ計測していません**）
+- ADR: [ADR-0009](adr/0009-split-the-harness-by-provider.md)、[ADR-0010](adr/0010-deprecate-non-anthropic-providers.md)
 
-## 2 つのハーネス（計画）
-
-| | `codex` | `claude` |
-|---|---|---|
-| 対象 | `anthropic` 以外のプロバイダー。切り替えるまでは `anthropic` も | `provider === "anthropic"`（公式 API）だけ |
-| 状態 | 現行。凍結する（#67） | 未実装 |
-| システムプロンプト | `apps/bot/prompts/harness/codex.md` と `apps/bot/prompt.md` | 公開ドキュメントを出所に自作する |
-| ツール | `shell_command`、`apply_patch`、`update_plan` と、`mcp__` 名の統合ツール | Claude Code と同じ名前と入力の形（`Bash`、`Read`、`Edit` など）。統合ツールは遅延読み込み |
-| 会話の表現 | Chat Completions 形（`apps/bot/src/types.ts`） | 送受信した内容をそのまま持つ、追記専用の形 |
-
-## 選び方（計画）
-
-出し方は #66 で本人が決めます。下の図は AI の提案（環境変数と guild の許可リスト）を、手で描いたものです。
+## どちらで動くか
 
 ```mermaid
 flowchart TD
   T[ターンの開始] --> P{provider は anthropic か}
   P -- いいえ --> C[codex ハーネス]
-  P -- はい --> F{ANTHROPIC_HARNESS が claude か<br>または guild が ANTHROPIC_HARNESS_GUILDS にあるか}
-  F -- いいえ --> C
-  F -- はい --> N[claude ハーネス]
+  P -- はい --> F{ANTHROPIC_HARNESS は codex か}
+  F -- はい --> C
+  F -- いいえ（既定）--> N[claude ハーネス]
 ```
 
-## プロンプトの出所（規則）
+（手で描いた図です。判定は `apps/bot/src/claude/select.ts` の `harnessFor`。）
 
-`claude` ハーネスのシステムプロンプトとツールの説明は、Claude Code の文面を写しません。公開されているドキュメントを出所として自作し、節ごとに、参照した URL・取得日・「自作 / 文書の例文を改変」の別をこの文書に表で残します。表は、プロンプトを追加する PR で足します。
+| | `codex` | `claude` |
+|---|---|---|
+| 対象 | `anthropic` 以外の全プロバイダー（`claude_max`・`claude_kiro` を含む） | `provider` が `anthropic`（公式 API）のターン |
+| 位置づけ | 非推奨の側。今のまま変えない（#67） | Claude Code の設計に寄せた新しい側（#66） |
+| システムプロンプト | `apps/bot/prompts/harness/codex.md` と `apps/bot/prompt.md` | `apps/bot/prompts/harness/claude.md` と `apps/bot/prompt.claude.md` |
+| ツール | `shell_command`・`apply_patch`・`update_plan` と、`mcp__` 名の統合ツール全件 | `Bash`・`Read`・`Edit`・`Write`・`Glob`・`Grep`・`AskUserQuestion`・`Skill`・`Agent` と、`mcp__` 名の統合ツール（必要なときに読み込む） |
+| 会話の縮め方 | 古いターンを落とす。スレッドは古い側を要約する | 会話全体を API に要約させて置き換える |
+| サブエージェント | off / on / ultra / multi（`docs/multi-agent.md`、`docs/ultracode.md`）。`anthropic` をこのハーネスに戻したときは off（#35） | `Agent` ツール（off / on だけ。保存値の ultra / multi は on として動く） |
 
-参照する予定の公開ドキュメント:
+`codex` 側のファイルと、そこから送るリクエストは、`apps/bot/src/__tests__/harness-freeze.test.ts` が固定しています。
 
-- プロンプトの書き方: <https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices>
-- Claude Code のツールと挙動: <https://code.claude.com/docs/en/tools-reference>
-- ループと context の扱い: <https://code.claude.com/docs/en/agent-sdk/agent-loop>
+### 切り替えと切り戻し
+
+- bot の環境変数 `ANTHROPIC_HARNESS=codex` で、`anthropic` のターンも `codex` ハーネスで動きます。VPS の `bot.env` を変えて `systemctl restart hibana` するだけで、API・Web・DB は触りません
+- 会話とチェックポイントは、ハーネスごとに別のキーで保存します。切り替えると、`anthropic` を使っているチャンネルの会話は 1 回最初からになります（Auto Routing の経路も選び直しになり、通知が出ます）。`codex` 側のキーは、`claude` ハーネスを入れる前と同じ文字列です
+- 別のハーネスで保存されたチェックポイントは再開しません（`/retry` は「再開できる作業はありません」と答えます）
+
+## claude ハーネス
+
+Claude Code から再現しているのは設計です。文面は写していません（下の「出所」）。
+
+### プロンプト
+
+- **システムプロンプト**は 2 つのファイルをつないだものだけです。サーバー・利用者・モデルによらず同じ文字列なので、キャッシュが効き、会話の途中で変わりません
+- **`<hibana_context>`**（人格、サーバーや個人の指示、作業領域の範囲、スキルの一覧）は、会話の中の user メッセージとして送ります。会話にまだ無いときと、内容が変わったときだけ、新しいメッセージとして足します
+- 利用者のメッセージの末尾に `[date: YYYY-MM-DD]` を足します（UTC）
+
+### ツール
+
+| ツール | 中身 | Claude Code との違い |
+|---|---|---|
+| `Bash` | 既存のサンドボックス（呼び出しごとに新しいコンテナ、512 MiB、1 CPU） | タイムアウトは既定 120 秒・最長 360 秒。バックグラウンド実行は無い。30,000 字を超える出力は `/workspace/.hibana/tool-output/` に保存し、先頭と末尾を返す |
+| `Read` | 行番号つきで返す。1 回 2,000 行・60,000 字まで | PDF とノートブックは読まない（シェルで変換する）。画像は 8 MiB まで |
+| `Edit` | 完全一致の置換。1 か所だけ、または `replace_all` | 事前の `Read` は要求しない。UTF-8 でないファイルは断る |
+| `Write` | 作成と上書き | — |
+| `Glob` | 更新の新しい順に 200 件まで | 50,000 ファイルで探索を打ち切り、その旨を返す |
+| `Grep` | コンテナ内の ripgrep。20 秒まで | — |
+| `AskUserQuestion` | Discord のボタンで質問する | 1〜3 問、選択肢は 2〜3 個。複数選択は無い。5 分で打ち切り |
+| `Skill` | スキルの本文とファイル一覧を返す | — |
+| `Agent` | 下の「サブエージェント」 | — |
+| 統合ツール | Discord・設定・サイト・メディアなど。`mcp__<group>__<name>` | 配信と読み取りの 4 つ以外は、Anthropic の tool search で必要なときに読み込む |
+
+- 出していないもの: TodoWrite / Task 系、NotebookEdit、LSP、Monitor、Cron、Plan mode、Worktree、Workflow
+- **一覧は会話の全員で同じです。** 話す人によって一覧が変わると、リクエストの先頭が変わるためです。その人が呼べるかどうかは、呼び出しのときに判定します
+- Jev の行動選択モード（`run_jev_task`）は、このハーネスでは設定にかかわらず使いません。設定でツールの一覧を書き換える仕組みで、一覧を固定する方針と両立しないためです
+
+### ループ
+
+- ツールの結果は、ツールが書いた文字列のまま返します。失敗は `is_error`、画像は結果の中に入れます
+- 同じ呼び出しは、**連続** 3 回目を断ります。間に別の呼び出しが入れば数え直します
+- 読み取り系と `Agent` は同時に 6 件まで並行し、それ以外は 1 件ずつ実行します（`codex` 側と同じ決まり）
+- 進捗表示は、モデルがツール呼び出しと一緒に書いた文、無ければ Opus 5.5 / Sonnet 5.5 が thinking ブロックに書いたメモ、それも無ければツール呼び出しから作った 1 行です
+
+### 会話の持ち方
+
+- 一度送った内容は変えません。Opus 5.5・Sonnet 5.5・Haiku 5.5 は、`system`・`tools`・過去のメッセージが変わると、それ以降の thinking ブロックを受け付けないためです
+- 画像は、受け取ったときに取得して、データとして会話に保存します（Discord の URL は期限が切れるため）。1 枚 3.7 MB を超える画像と、png / jpeg / gif / webp 以外は渡しません
+- 直前のリクエストが予算（既定 150,000 トークン。Haiku 5.5 は 80,000）を超えていたら、次のターンの前に、会話全体を API の要約（`compaction`）に置き換えます。API の要約が使えないときは、会話の中で要約を頼みます。どちらも失敗したら、要約せずにそのまま続けます
+- thinking ブロックが拒否されたとき（デプロイでプロンプトやツール定義が変わった後に起きます）は、thinking ブロックを外して 1 回だけ送り直し、保存済みの会話からも外します
+
+### Anthropic の機能への依存
+
+| 機能 | 使う場面 | 拒否されたとき |
+|---|---|---|
+| tool search（`defer_loading`） | 統合ツールの遅延読み込み | 以後は全件を先に送る |
+| `thinking.display: "updates"`（beta） | Opus 5.5 / Sonnet 5.5 の進捗表示 | 以後は要求しない。進捗表示はツール呼び出しから作る |
+| on-demand compaction（beta） | 会話の要約 | 会話の中で要約を頼む |
+| 会話途中の `role: "system"` | 途中で足す指示 | （現在、このハーネスは途中の指示を送っていません） |
+
+`CLAUDE_TOOL_SEARCH=false` で、tool search を最初から使わないようにできます。
+
+### サブエージェント
+
+`Agent` ツールで、子に仕事を渡します。子は親の会話を見ず、最後の文章だけを親に返します。
+
+| 種類 | モデル | できること |
+|---|---|---|
+| `Explore` | Haiku 5.5（medium） | 作業領域の読み取りと検索、メッセージの読み取り、web 検索。書き込みと実行はできない |
+| `general-purpose` | そのターンと同じモデル | シェルとファイルの操作。配信・投稿・設定の変更・利用者への質問・子の起動はできない |
+
+上限（環境変数で変えられます）: 1 ターンに 6 回、同時に 3 体（bot 全体で 6 体）、子 1 体は 32 往復まで。金額の上限はまだありません（#68）。
+
+## 出所
+
+`claude` ハーネスのシステムプロンプトとツールの説明は、公開文書に書かれた挙動をもとに、このリポジトリのために書いたものです。Claude Code のプロンプトやツール説明の文面は転記していません。書いたのは AI（Claude Code の上で動く Claude）で、持ち主による文面の確認はまだです。設計と数値の根拠にした公開文書は次のとおりです（取得日はすべて 2026-10-11）。
+
+| 対象 | 参照した公開文書 | 文面 |
+|---|---|---|
+| `prompts/harness/claude.md` の全体の書き方（理由を添える、強い言い回しを使わない、ツール名を挙げない） | <https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices> | 自作 |
+| 同「How a turn works」「Doing the work」（最後までやり切る、実行して確かめる、検索してから答える） | 同上の「Tool usage」「Minimizing hallucinations in agentic coding」と、Haiku 5.5 / Opus 5.5 のモデル別の節 | 自作。文書の例文と同じ趣旨の文を、自分の言葉で書いている |
+| 同「並列のツール呼び出し」 | 同上の「Optimize parallel tool calling」 | 自作 |
+| 同「Actions that affect others」 | 同上の「Balancing autonomy and safety」 | 自作 |
+| 同「Delegating」、`claude-explore.md`、`claude-agent.md` | 同上の「Subagent orchestration」、<https://code.claude.com/docs/en/tools-reference>（Agent tool behavior） | 自作 |
+| ツールの名前と入力の形（`Bash`・`Read`・`Edit` など） | <https://code.claude.com/docs/en/tools-reference>、<https://code.claude.com/docs/en/agent-sdk/agent-loop> | 名前と入力の項目名は Claude Code に合わせた。説明文は自作 |
+| ツールの挙動の数値（タイムアウト、出力の上限、行数） | 同上（Bash tool behavior、Read tool behavior、Edit tool behavior） | 数値は Hibana のサンドボックスに合わせて決めた。上の「ツール」の表のとおり、Claude Code と違うところがある |
+| 遅延読み込み | <https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool> | — |
+| 会話の要約 | <https://platform.claude.com/docs/en/build-with-claude/compaction-on-demand> | 要約を頼む文（`claude/context.ts`）は自作 |
+
+`codex` 側の `apps/bot/src/workflow/prompts.ts` は、ファイル冒頭のコメントのとおり Claude Code 2.1.282 の文面に沿っています。`claude` ハーネスは Workflow を出していないので、この文面は `claude` ハーネスからは送られません。この文面の扱いは #68 で決めます。
+
+## 検証していない範囲
+
+- **実際の Anthropic API には、このハーネスからまだ 1 回もリクエストを送っていません。** リクエストの形は公開文書と自動テスト（模擬の応答）で確かめただけです。tool search・`display: "updates"`・compaction が実際に受け付けられるか、キャッシュが効くか、thinking ブロックの検査に掛からないかは、実 API で確かめる必要があります
+- 作り直しの前後の比較（#69）は未実施です
+- 本番での動作、サブエージェントの費用、要約にかかる費用と品質

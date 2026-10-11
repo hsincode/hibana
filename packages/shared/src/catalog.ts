@@ -368,6 +368,25 @@ export function catalogPremium(id: string): boolean {
   return minRoleForPreset(id) === "premium";
 }
 
+/** Every provider except Anthropic's own API is deprecated (#67, ADR-0010),
+ *  `claude_max` and `claude_kiro` included. A deprecated provider keeps
+ *  working for whoever already selected it; it only stops being offered as a
+ *  new choice. This is a function, not `published: false`: that flag can be
+ *  flipped back on the admin screen, and it would also stop `canUse`, so a
+ *  child agent could no longer inherit a deprecated parent. */
+export function deprecatedProvider(provider: string): boolean {
+  return provider !== "anthropic";
+}
+
+/** Whether a catalog preset belongs to a deprecated provider. An id the
+ *  catalog does not know is not a preset, so it is not a deprecated one
+ *  either; the PATCH schemas already reject it. */
+export function deprecatedPreset(id: string): boolean {
+  const canonical = canonicalPresetId(id);
+  const p = MODEL_PRESETS.find((x) => x.id === canonical);
+  return p ? deprecatedProvider(p.provider) : false;
+}
+
 function parseBooleanOverrides(raw: string | null): Record<string, boolean> {
   if (!raw) return {};
   try {

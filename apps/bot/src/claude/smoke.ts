@@ -1,10 +1,11 @@
 // Manual check of the Claude harness against the real Anthropic API (#66):
 //   cd apps/bot && bun run claude-smoke            Haiku 5.5
 //   cd apps/bot && bun run claude-smoke --opus     also Opus 5.5 (thinking notes)
-// It needs ANTHROPIC_API_KEY and sends about a dozen small requests, which are
+// It needs ANTHROPIC_API_KEY and sends about fifteen small requests, which are
 // billed, so it is not part of `make ci`. It prints what each step observed and
 // the tokens it used; message text is not printed. Tools are not executed:
 // their results are supplied here, so no sandbox or Discord access is needed.
+import { deflateSync } from "node:zlib";
 import { anthropicCost } from "@hibana/shared/catalog";
 import { Agent, type AgentOptions } from "../agent";
 import { loadConfig, type Selection } from "../config";
@@ -12,6 +13,7 @@ import { LlmClient, type RequestRecord } from "../llm";
 import { Runtime } from "../runtime";
 import definitions from "../tools/definitions.json";
 import { ToolOutput, type Context, type Message, type ToolDef } from "../types";
+import { userMessage } from "./context";
 import { claudeSystem, contextBlock, contextMessage } from "./prompt";
 import { claudeSurface } from "./tools";
 
@@ -40,11 +42,33 @@ const step = (name: string, ok: boolean, detail: string) => {
 };
 const user = (content: string): Message => ({ role: "user", content: `${content}\n[date: ${new Date().toISOString().slice(0, 10)}]`, turnStart: true });
 
-async function turn(selection: Selection, messages: Message[], execute: AgentOptions["execute"]) {
+// A solid-colour PNG, so that the image steps have a known answer.
+function png(r: number, g: number, b: number, size = 64): string {
+  const chunk = (type: string, data: Buffer) => {
+    const body = Buffer.concat([Buffer.from(type, "latin1"), data]);
+    const out = Buffer.alloc(12 + data.length);
+    out.writeUInt32BE(data.length, 0);
+    body.copy(out, 4);
+    out.writeUInt32BE(Number(Bun.hash.crc32(body)) >>> 0, 8 + data.length);
+    return out;
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(size, 0);
+  header.writeUInt32BE(size, 4);
+  header.set([8, 2, 0, 0, 0], 8); // 8-bit RGB
+  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(size * 3).map((_, i) => [r, g, b][i % 3]!)]);
+  const file = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", header), chunk("IDAT", deflateSync(Buffer.concat(Array<Buffer>(size).fill(row)))), chunk("IEND", Buffer.alloc(0)),
+  ]);
+  return `data:image/png;base64,${file.toString("base64")}`;
+}
+
+async function turn(selection: Selection, messages: Message[], execute: AgentOptions["execute"], nativeSearch = false) {
   if (records.length >= MAX_REQUESTS) throw new Error("request budget exceeded");
   const called: string[] = [];
   const result = await new Agent(client).run({
-    selection, messages, tools, context: { ...ctx }, maxRounds: 8, temperature: 1, nativeSearch: false,
+    selection, messages, tools, context: { ...ctx }, maxRounds: 8, temperature: 1, nativeSearch,
     execute: (name, args, c) => { called.push(name); return execute(name, args, c); },
   });
   return { ...result, called };
@@ -87,6 +111,21 @@ async function check(selection: Selection) {
       async () => new ToolOutput("     1\tThe number is 42."));
     step(`${label} continue from summary`, after.text.includes("42"), after.called.length ? `re-read the file (${after.called.join(", ")})` : "answered from the summary");
   }
+  // 6. Images: one a person attached and one a tool returned, both sent as data.
+  // The persona may answer in Japanese, so either name of the colour counts.
+  const red = /\bred\b|赤/i, blue = /\bblue\b|青/i;
+  const named = (text: string, colour: RegExp) => (colour.test(text) ? "named the colour" : "did not name the colour");
+  const seen = await turn(selection, [system, block, await userMessage("What is the main colour of the attached image? Answer with one word.", [png(210, 30, 30)])], async () => null);
+  step(`${label} attached image`, red.test(seen.text), named(seen.text, red));
+  const shown = await turn(selection, [system, block, user("Open the image swatch.png in the workspace and tell me its main colour in one word.")],
+    async (name) => (name === "Read" ? new ToolOutput("Image swatch.png (188 bytes)", { images: [png(30, 60, 210)] }) : new ToolOutput("unexpected tool", { isError: true })));
+  step(`${label} image in a tool result`, shown.called.includes("Read") && blue.test(shown.text), `called ${shown.called.join(", ") || "nothing"}, ${named(shown.text, blue)}`);
+
+  // 7. The provider's web tools next to tool search and the deferred tools, as a
+  // turn with web search on sends them. The prompt needs no search.
+  const web = await turn(selection, [system, block, user("Reply with the single word: ok")], async () => null, true);
+  step(`${label} web tools accepted`, web.text.length > 0, `${web.text.length} characters`);
+
   const mine = records.slice(from);
   const sum = (pick: (r: RequestRecord) => number) => mine.reduce((total, r) => total + pick(r), 0);
   const cost = mine.reduce((total, r) => total + (anthropicCost(r.model, {

@@ -50,7 +50,8 @@
   - Anthropic 以外に送るリクエストと、`codex` ハーネスの出力が変わらない: `harness-freeze.test.ts`（スナップショットは変更なし）
   - `ANTHROPIC_HARNESS=codex` で従来どおりに動く: `claude-harness.test.ts`、`auto-route.test.ts`、`harness-freeze.test.ts`
 - 実際の運用・CI/CD の実行記録: 未配信
-- 検証していない範囲: 実際の Anthropic API への送信（1 回もしていない）、前後の比較（#69）、本番での動作、費用、切り戻しの手順の実施
+- 実 API での確認: 2026-10-11 に AI が Haiku 5.5 だけで手動のスクリプト（`bun run claude-smoke`）を実行し、10 項目とも成功した（[docs/harness.md](../harness.md) の「実 API での確認」。持ち主による再実行はまだ）
+- 検証していない範囲: Opus 5.5 / Sonnet 5.5 での実 API への送信（1 回もしていない）、前後の比較（#69）、本番での動作、費用、切り戻しの手順の実施
 
 ## 見直す条件
 - この判断を見直す事象・数値:

@@ -92,7 +92,12 @@ const tag = (value: string) => createHash("sha256").update(value).digest("hex").
 const text = (m: Stored) => (typeof m.content === "string" ? m.content : "");
 // The line the bot appends to a message names the author's, the channel's and
 // the message's Discord ids. The exported text keeps its shape without them.
-const anonymous = (value: string) => value.replace(/user_id: \d+; channel_id: \d+; message_id: \d+\]/g, "user_id: 0; channel_id: 0; message_id: 0]");
+// An attachment's entry names the file's id and its CDN link, which has the
+// channel id and a signed query in it; the name and size are kept.
+const anonymous = (value: string) => value
+  .replace(/user_id: \d+; channel_id: \d+; message_id: \d+\]/g, "user_id: 0; channel_id: 0; message_id: 0]")
+  .replace(/"id":"\d+","filename":/g, '"id":"0","filename":')
+  .replace(/"url":"https?:[^"]*"/g, '"url":""');
 const routes = new Map((db.query("SELECT channel_id, selection FROM routes").all() as { channel_id: string; selection: string }[])
   .map((r) => [r.channel_id, r.selection]));
 let cases = 0;
@@ -114,13 +119,23 @@ for (const channel of db.query("SELECT channel_id, guild_id, key FROM history_ch
   let earlierTools = false;
   const turns = db.query("SELECT seq, at, summary, messages FROM history_turns WHERE channel_id = ? ORDER BY seq")
     .all(channel.channel_id) as { seq: number; at: number; summary: number; messages: string }[];
-  for (const [index, turn] of turns.entries()) {
+  // The conversation's oldest turns were dropped: every turn that is left was
+  // answered with more before it than is stored now.
+  const trimmed = turns.length > 0 && turns[0]!.seq > 0 && !turns[0]!.summary;
+  for (const turn of turns) {
     let messages: Stored[];
     try { messages = JSON.parse(turn.messages); } catch { continue; }
     if (turn.summary) {
       // A thread's older turns were replaced by this summary.
       summarized = true;
       history = messages.filter((m) => text(m)).map((m) => ({ role: m.role === "assistant" ? "assistant" as const : "user" as const, content: text(m) }));
+      continue;
+    }
+    // `/image <prompt>` is answered by the image worker without the model. It
+    // is stored as a turn, has no author line, and leaves a file behind.
+    if (messages[0]?.role === "user" && text(messages[0]).startsWith("/image ") && !text(messages[0]).includes("[author: ")) {
+      earlierTools = true;
+      bump("turns skipped: /image shortcut");
       continue;
     }
     const asked = messages.filter((m) => m.role === "user" && !m.internal && text(m));
@@ -136,7 +151,7 @@ for (const channel of db.query("SELECT channel_id, guild_id, key FROM history_ch
         provider: seen?.completed?.provider ?? seen?.provider ?? key.provider ?? null, model, effort, auto,
         // "log": the bot's log names this turn's model. Otherwise it is the conversation's current one.
         source: seen ? "log" : auto ? "route" : "key",
-        history, summarized, trimmed: !summarized && index === 0 && turn.seq > 0, earlier_tools: earlierTools,
+        history, summarized, trimmed, earlier_tools: earlierTools,
         prompt: anonymous(prompt), extra_messages: asked.length - 1, reply,
         tools: [...new Set(messages.flatMap((m) => m.tool_calls ?? []).map((call) => call.function?.name ?? "?"))],
         production: seen?.completed ? { latency_ms: seen.completed.latency_ms ?? null, usage: seen.completed.usage ?? null } : null,

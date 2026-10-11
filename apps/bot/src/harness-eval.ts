@@ -60,18 +60,25 @@ export type ArmResult = {
   searches: number; fetches: number;
   cost: number; models: string[];
   tools: Record<string, number>; blocked: string[]; asked: boolean; status_messages: number;
-  /** Names of the files the turn delivered. Copies are kept beside the results. */
-  files: string[];
+  /** Posts and edits the turn waited for. Discord answers each in a fraction
+   *  of a second; the replay's channel answers at once, so `ms` has none of it. */
+  channel_writes: number;
+  /** Names of the files the turn delivered, and the text sent with each.
+   *  Copies of the files are kept beside the results. */
+  files: string[]; file_texts: string[];
   /** Requests that were sent again after the provider had started answering:
    *  the lost attempt may have been billed and is not in `cost`. */
   retries: number;
   /** Optional request features the API refused during this turn. */
   rejected: string[];
   error: string | null; reply: string;
+  /** This tool ended the turn at its cost or time cap; the harness did not fail. */
+  stopped: boolean;
   /** The failure happened before the turn began (configuration, sandbox). */
   setup_failed: boolean;
-  /** Written by `run`: the code and the invocation that produced the row. */
-  commit?: string; invoked?: string;
+  /** Written by `run`: the code and the invocation that produced the row, and
+   *  whether the turn was measured after a warm-up. */
+  commit?: string; invoked?: string; warm?: boolean;
 };
 export type Verdict = "left" | "right" | "same" | "skip";
 
@@ -103,6 +110,7 @@ export function exclusion(c: Case): string | null {
   if (!c.prompt.replace(META, "").trim()) return "no message text";
   // The files are on Discord under the real message, out of the replay's reach.
   if (/\nAttachments: \{/.test(c.prompt)) return "has attachments";
+  if (c.history.some((h) => /\nAttachments: \{/.test(h.content))) return "an earlier message had attachments";
   if (!c.model || !ANTHROPIC_PRICES[c.model]) return "model is unknown or not on Anthropic's API";
   // A message sent into a running turn steered it; one question cannot stand for both.
   if (c.extra_messages > 0) return "more than one message in the turn";
@@ -206,8 +214,9 @@ export const SEARCH_USD = 0.01;
 /** What a turn cost: its tokens and its searches. */
 export const billed = (r: ArmResult) => r.cost + r.searches * SEARCH_USD;
 
-/** Time and cost are compared over the cases both arms finished; a failure is
- *  counted and left out of them, so one arm failing fast does not look fast. */
+/** Time and cost are compared over the cases both arms finished under the
+ *  same conditions; a failure is counted and left out of them, so one arm
+ *  failing fast does not look fast. */
 export function summarize(
   results: ArmResult[],
   review?: { key: { id: string; left: Arm }[]; verdicts: Record<string, Verdict> },
@@ -215,8 +224,12 @@ export function summarize(
 ) {
   const by = new Map<string, Partial<Record<Arm, ArmResult>>>();
   for (const r of results) by.set(r.case, { ...by.get(r.case), [r.arm]: r });
-  const pairs = [...by.values()].filter((p): p is Record<Arm, ArmResult> => Boolean(p.codex && p.claude));
-  const both = pairs.filter((p) => !p.codex.error && !p.claude.error);
+  const pairs = [...by].filter((entry): entry is [string, Record<Arm, ArmResult>] => Boolean(entry[1].codex && entry[1].claude));
+  // Rows of one pair written by different code, or one warm and one not, are
+  // two measurements of different things.
+  const mixed = pairs.filter(([, p]) => p.codex.commit !== p.claude.commit || p.codex.warm !== p.claude.warm);
+  const same = pairs.filter((entry) => !mixed.includes(entry)).map(([, p]) => p);
+  const both = same.filter((p) => !p.codex.error && !p.claude.error);
   const arm = (name: Arm) => {
     const done = both.map((p) => p[name]);
     // A warm-up is one request made of the shared part and a few words, so its
@@ -227,18 +240,25 @@ export function summarize(
       shared[w.model] = { tokens: w.input, cold_write_cost: price ? (w.input * price.cache_write_1h) / 1_000_000 : null };
     }
     return {
-      failed: pairs.filter((p) => p[name].error).length,
+      failed: same.filter((p) => p[name].error && !p[name].stopped).length,
+      // Ended by this tool's cost or time cap, which the production bot does not have.
+      stopped: same.filter((p) => p[name].stopped).length,
       seconds: { median: quantile(done.map((r) => r.ms / 1000), 0.5), mean: mean(done.map((r) => r.ms / 1000)), p90: quantile(done.map((r) => r.ms / 1000), 0.9) },
       // Tokens and web searches together.
       cost: { total: done.reduce((t, r) => t + billed(r), 0), mean: mean(done.map(billed)), median: quantile(done.map(billed), 0.5) },
       requests: mean(done.map((r) => r.requests)), searches: done.reduce((t, r) => t + r.searches, 0),
+      // Rows written before this was counted have no number, which is not zero.
+      channel_writes: mean(done.flatMap((r) => (typeof r.channel_writes === "number" ? [r.channel_writes] : []))),
       shared_prefix: shared,
     };
   };
   const quality = review && { claude: 0, codex: 0, same: 0, skipped: 0, unjudged: 0 };
-  for (const { id, left } of review?.key ?? []) {
-    const verdict = review!.verdicts[id];
-    if (!verdict) quality!.unjudged++;
+  const dealt = new Map(review?.key.map((k) => [k.id, k.left]));
+  // Every replayed pair, whether or not it was ever put on a page.
+  for (const [id] of review ? pairs : []) {
+    const left = dealt.get(id);
+    const verdict = left && review!.verdicts[id];
+    if (!left || !verdict) quality!.unjudged++;
     else if (verdict === "skip") quality!.skipped++;
     else if (verdict === "same") quality!.same++;
     else quality![verdict === "left" ? left : left === "claude" ? "codex" : "claude"]++;
@@ -251,15 +271,18 @@ export function summarize(
     claude_faster: both.filter((p) => p.claude.ms < p.codex.ms).length,
     claude_cheaper: both.filter((p) => billed(p.claude) < billed(p.codex)).length,
   };
+  // A pair dropped because one side reached the cap is the pair where that
+  // side was slowest or dearest: without it the ratios say nothing reliable.
+  const capped = codex.stopped + claude.stopped > 0;
   return {
-    pairs: pairs.length, both_finished: both.length, codex, claude, ratio,
+    pairs: pairs.length, both_finished: both.length, mixed_conditions: mixed.length, codex, claude, ratio,
     ...(quality && {
       quality,
       criteria: {
-        // Judged only once every pair has a verdict.
-        quality: quality.unjudged ? null : quality.claude + quality.same >= quality.codex,
-        cost: ratio.cost_median === null ? null : ratio.cost_median <= LIMIT,
-        time: ratio.seconds_median === null ? null : ratio.seconds_median <= LIMIT,
+        // Judged once every pair has a verdict and at least one could be compared.
+        quality: quality.unjudged || quality.claude + quality.codex + quality.same === 0 ? null : quality.claude + quality.same >= quality.codex,
+        cost: capped || ratio.cost_median === null ? null : ratio.cost_median <= LIMIT,
+        time: capped || ratio.seconds_median === null ? null : ratio.seconds_median <= LIMIT,
         failures: claude.failed <= codex.failed,
       },
     }),
@@ -298,14 +321,17 @@ export const dryReply = (messages: Message[]) =>
 /** One question through one harness: a new bot with its own data directory,
  *  so nothing carries over from another case or the other arm. */
 export async function replay(c: Case, arm: Arm, first: boolean, o: ReplayOptions): Promise<ArmResult> {
-  await mkdir(TMP, { recursive: true, mode: 0o700 });
-  const data = await mkdtemp(join(TMP, `${c.id}-${arm}-`));
+  // One directory per process: another invocation may be clearing its own.
+  const scratch = join(TMP, String(process.pid));
+  await mkdir(scratch, { recursive: true, mode: 0o700 });
+  const data = await mkdtemp(join(scratch, `${c.id}-${arm}-`));
   const records: RequestRecord[] = [];
   const tools: Record<string, number> = {};
   const blocked = new Set<string>();
   const files: string[] = [];
+  const fileTexts: string[] = [];
   const rejected: string[] = [];
-  let asked = false, sends = 0, reply = "", stopped = "", failure = "", ms = 0, retries = 0, setup = true;
+  let asked = false, sends = 0, writes = 0, reply = "", stopped = "", failure = "", ms = 0, retries = 0, setup = true;
   let effort = c.effort;
   let error: string | null = null;
   let bot: Hibana | undefined;
@@ -369,6 +395,8 @@ export async function replay(c: Case, arm: Arm, first: boolean, o: ReplayOptions
         await copyFile(path, join(dir, `${files.length + 1}-${name}`));
       }
       files.push(name);
+      // The message that carries the file is part of what the person reads.
+      fileTexts.push(typeof args.content === "string" ? args.content : "");
       ctx.delivered = true;
       return { id: String(900 + files.length), channel_id: ctx.channelId, attachments: [{ filename: name, size: stat.size }] };
     };
@@ -385,7 +413,10 @@ export async function replay(c: Case, arm: Arm, first: boolean, o: ReplayOptions
     // in the turn's server and that the author can read it before it sends.
     bot.client.channels.fetch = (async () => ({
       id: IDS.channel, isSendable: () => true, sendTyping: async () => {},
-      send: async () => { sends++; return { id: String(100 + sends), edit: async () => {}, delete: async () => {} }; },
+      send: async () => {
+        sends++; writes++;
+        return { id: String(100 + sends), edit: async () => { writes++; }, delete: async () => {} };
+      },
       ...(c.scope === "guild" && {
         guildId: IDS.guild, guild: { members: { fetch: async () => ({}) } }, permissionsFor: () => ({ has: () => true }),
       }),
@@ -431,8 +462,8 @@ export async function replay(c: Case, arm: Arm, first: boolean, o: ReplayOptions
     ...totals(records), tools, blocked: [...blocked], asked,
     // What the channel was sent besides the reply (which goes out in pieces of
     // 1,900 characters) and besides the notice of a failed turn.
-    status_messages: Math.max(0, sends - (reply ? splitMessage(reply).length : setup ? 0 : 1)),
-    files, retries, rejected, error, reply, setup_failed: Boolean(error) && setup,
+    status_messages: Math.max(0, sends - (reply ? splitMessage(reply).length : setup ? 0 : 1)), channel_writes: writes,
+    files, file_texts: fileTexts, retries, rejected, error, stopped: Boolean(stopped), reply, setup_failed: Boolean(error) && setup,
   };
 }
 
@@ -479,14 +510,24 @@ async function run() {
   for (const [reason, n] of Object.entries(excluded)) console.log(`  left out ${n}: ${reason}`);
   const dir = join(ROOT, "runs", name);
   await mkdir(dir, { recursive: true, mode: 0o700 });
-  // What an interrupted run left behind holds conversations.
-  await rm(TMP, { recursive: true, force: true });
+  // What an interrupted run left behind holds conversations. A directory whose
+  // process is still alive belongs to a replay in progress.
+  for (const pid of await readdir(TMP).catch(() => [] as string[])) {
+    let alive = true;
+    try { process.kill(Number(pid), 0); } catch { alive = false; }
+    if (!alive || Number(pid) === process.pid) await rm(join(TMP, pid), { recursive: true, force: true });
+  }
   const file = join(dir, "results.jsonl");
   const done = await lines<ArmResult & { dry?: boolean }>(file);
   if (done.some((r) => Boolean(r.dry) !== dry)) throw new Error(`Run "${name}" holds ${dry ? "real" : "dry"} rows; give this one another --run name`);
   // The cases are people's messages, whatever the shell's umask made the file.
   await chmod(join(ROOT, "cases.jsonl"), 0o600);
-  const stamp = { commit: (await Bun.$`git rev-parse --short HEAD`.text()).trim(), invoked: new Date().toISOString(), ...(dry && { dry }) };
+  const stamp = { commit: (await Bun.$`git rev-parse --short HEAD`.text()).trim(), invoked: new Date().toISOString(), warm: o.warm, ...(dry && { dry }) };
+  // The cases as they were when replayed. An id is a channel and a turn
+  // number, and a conversation that starts over uses the same numbers again:
+  // a later export may give this id to another question.
+  const kept = new Set((await lines<Case>(join(dir, "cases.jsonl"))).map((c) => c.id));
+  for (const c of chosen) if (!kept.has(c.id)) await appendFile(join(dir, "cases.jsonl"), JSON.stringify(c) + "\n", { mode: 0o600 });
   const image = o.image ?? loadConfig({ PROVIDER: "anthropic", ANTHROPIC_API_KEY: "-", LOG_DIR: "", RUNTIME_STATE_PATH: "" }).sandboxImage;
   await appendFile(join(dir, "meta.jsonl"), JSON.stringify({
     ...stamp,
@@ -499,7 +540,9 @@ async function run() {
     prices: ANTHROPIC_PRICES, ...o, fake: Boolean(o.fake),
     image, image_id: (await Bun.$`docker image inspect ${image} --format {{.Id}}`.nothrow().quiet().text()).trim() || null,
   }) + "\n");
-  let spent = done.reduce((total, r) => total + billed(r), 0);
+  // A warm-up is one short request; a cold one writes the shared part once.
+  const warmCap = Math.min(o.perArm, 0.5);
+  let spent = [...done, ...await lines<ArmResult>(join(dir, "warmups.jsonl"))].reduce((total, r) => total + billed(r), 0);
   for (const [i, c] of chosen.entries()) {
     // Alternate which harness goes first, so neither always runs second.
     const order: Arm[] = i % 2 ? ["claude", "codex"] : ["codex", "claude"];
@@ -508,13 +551,13 @@ async function run() {
     // Checked per case, with room for both of its turns at the cap: the
     // budget is then a ceiling, and a pair is never left with one arm, or
     // with one arm held to a smaller cap than the other.
-    if (o.budget - spent < todo.length * o.perArm) {
-      console.log(`Stopped: ${usd(o.budget - spent)} is left of $${o.budget}, less than ${todo.length} turns at the per-turn cap of $${o.perArm}`);
+    if (o.budget - spent < todo.length * (o.perArm + (o.warm ? warmCap : 0))) {
+      console.log(`Stopped: ${usd(o.budget - spent)} is left of $${o.budget}, less than ${todo.length} turns at the per-turn cap of $${o.perArm}${o.warm ? " and their warm-ups" : ""}`);
       return;
     }
     for (const arm of todo) {
       if (o.warm) {
-        const warmed = await replay(warmUp(c), arm, false, o);
+        const warmed = await replay(warmUp(c), arm, false, { ...o, perArm: warmCap });
         // Measuring after a warm-up that did not happen would be a cold turn in disguise.
         if (warmed.error) throw new Error(`The warm-up before case ${c.id} (${arm}) failed: ${warmed.error}`);
         await appendFile(join(dir, "warmups.jsonl"), JSON.stringify({ ...warmed, reply: "", ...stamp }) + "\n", { mode: 0o600 });
@@ -531,17 +574,19 @@ async function run() {
         ` input ${result.input} (read ${result.cache_read}, written ${result.cache_write}) output ${result.output}` +
         `${result.searches ? ` ${result.searches} searches` : ""}${used ? ` [${used}]` : ""}${result.blocked.length ? ` blocked:${result.blocked.length}` : ""}` +
         `${result.files.length ? ` files:${result.files.length}` : ""}${result.retries ? ` retries:${result.retries}` : ""}${result.rejected.length ? ` rejected:${result.rejected.join(",")}` : ""}` +
-        `${result.asked ? " asked" : ""}${result.error ? ` FAILED (${result.error.slice(0, 80)})` : ""}`);
+        `${result.asked ? " asked" : ""}${result.stopped ? ` STOPPED (${result.error})` : result.error ? ` FAILED (${result.error.slice(0, 80)})` : ""}`);
     }
   }
   console.log(`Done: ${usd(spent)} in total for run "${name}", warm-ups and web searches included`);
 }
 
 type Deal = { id: string; pairs: { id: string; left: Arm }[] };
-type Shown = { href: string; name: string };
+type Shown = { href: string; name: string; text: string };
+/** `left` / `right` are null for a turn without a reply; `...Ended` says why. */
 type Pair = {
   id: string; history: Case["history"]; incomplete: boolean; prompt: string; unavailable: string[]; production: string | null;
-  left: string | null; right: string | null; leftFiles: Shown[]; rightFiles: Shown[];
+  left: string | null; right: string | null; leftEnded: "failed" | "stopped" | null; rightEnded: "failed" | "stopped" | null;
+  leftFiles: Shown[]; rightFiles: Shown[];
 };
 
 /** The judging page: one local file, no network. Text is escaped before it is
@@ -591,10 +636,10 @@ const render = (s) => esc(s).split(/(\`\`\`[\\s\\S]*?\`\`\`)/).map((part) => par
   ? "<pre>" + part.slice(3, -3).replace(/^[a-z]*\\n/, "") + "</pre>"
   : part.replace(/\`([^\`\\n]+)\`/g, "<code>$1</code>").replace(/\\*\\*([^*\\n]+)\\*\\*/g, "<strong>$1</strong>").replace(/^(#{1,3}) (.+)$/gm, "<strong>$2</strong>")).join("");
 // The files a turn delivered. Their paths are made by the review command, not taken from the turn.
-const shown = (files) => files.length ? "<div class='files'>" + files.map((f) =>
+const shown = (files) => files.length ? "<div class='files'>" + files.map((f) => (f.text ? "<div>" + render(f.text) + "</div>" : "") + (
   /\\.(png|jpe?g|gif|webp)$/.test(f.href) ? "<a href='" + f.href + "' target='_blank'><img src='" + f.href + "' alt=''></a><small>" + esc(f.name) + "</small>"
   : /\\.(mp4|webm|mov)$/.test(f.href) ? "<video controls src='" + f.href + "'></video><small>" + esc(f.name) + "</small>"
-  : "<a href='" + f.href + "' target='_blank'>" + esc(f.name) + "</a>").join("") + "</div>" : "";
+  : "<a href='" + f.href + "' target='_blank'>" + esc(f.name) + "</a>")).join("") + "</div>" : "";
 const labels = { left: "左がよい", same: "同じくらい", right: "右がよい", skip: "比較できない" };
 function progress() {
   document.getElementById("progress").textContent = Object.keys(state.verdicts).length + " / " + DATA.pairs.length + " 件";
@@ -602,16 +647,17 @@ function progress() {
 const list = document.getElementById("list");
 DATA.pairs.forEach((p, i) => {
   const el = document.createElement("section");
-  const earlier = p.history.length
-    ? "<details><summary>それまでの会話（" + p.history.length + " 件。新旧どちらにも同じ文章を渡しています" + (p.incomplete ? "。保存されていた会話は途中からです" : "") + "）</summary>" +
+  const earlier = (p.history.length
+    ? "<details><summary>それまでの会話（" + p.history.length + " 件。新旧どちらにも同じ文章を渡しています）</summary>" +
       p.history.map((h) => "<div class='q'><small>" + (h.role === "user" ? "利用者" : "bot") + "</small><br>" + esc(h.content) + "</div>").join("") + "</details>"
-    : "";
+    : "") + (p.incomplete ? "<small>保存されていた会話は途中からでした。本番の bot が見ていた前の部分は、新旧どちらにも渡っていません。</small>" : "");
+  const ended = { failed: "（返答なし。このターンは失敗しました）", stopped: "（返答なし。比較の道具が、費用か時間の上限で止めました）" };
   const note = p.unavailable.length
     ? "<small>本番のこのターンは、この再現では使えないツールも使っていました（新旧どちらにも同じエラーを返しています）: " + esc(p.unavailable.join("、")) + "</small>"
     : "";
-  el.innerHTML = "<h2>" + (i + 1) + " 件目 <small>#" + esc(p.id) + "</small></h2>" + earlier + "<div class='q'>" + esc(p.prompt) + "</div>" + note +
+  el.innerHTML = "<h2>" + (i + 1) + " 件目</h2>" + earlier + "<div class='q'>" + esc(p.prompt) + "</div>" + note +
     "<div class='pair'>" + ["left", "right"].map((side) => "<div><h3>" + (side === "left" ? "左" : "右") + "</h3><div class='a'>" +
-      (p[side] === null ? "<small>（返答なし。このターンは失敗しました）</small>" : render(p[side])) + shown(p[side + "Files"]) + "</div></div>").join("") + "</div>" +
+      (p[side] === null ? "<small>" + ended[p[side + "Ended"] || "failed"] + "</small>" : render(p[side])) + shown(p[side + "Files"]) + "</div></div>").join("") + "</div>" +
     "<div class='pick'>" + Object.entries(labels).map(([v, text]) => "<button data-v='" + v + "'>" + text + "</button>").join("") + "</div>" +
     "<textarea rows='1' placeholder='メモ（任意）'></textarea>" +
     (p.production ? "<details class='production'><summary>本番での返答（参考。実際のツールと会話で返したもの）</summary><div class='a'>" + render(p.production) + "</div></details>" : "");
@@ -643,7 +689,8 @@ progress();
 async function review(name: string) {
   const dir = join(ROOT, "runs", name);
   const results = await lines<ArmResult>(join(dir, "results.jsonl"));
-  const cases = new Map((await lines<Case>(join(ROOT, "cases.jsonl"))).map((c) => [c.id, c]));
+  // The run's own copy of its cases first: the export may have been redone since.
+  const cases = new Map([...await lines<Case>(join(ROOT, "cases.jsonl")), ...await lines<Case>(join(dir, "cases.jsonl"))].map((c) => [c.id, c]));
   // Sides once dealt are kept: the page and an exported file say "left" and "right".
   const saved = JSON.parse(await readFile(join(dir, "key.json"), "utf8").catch(() => "null")) as Deal | null;
   const deal: Deal = { id: saved?.id ?? crypto.randomUUID().slice(0, 8), pairs: blind(results, Number(flag("seed") ?? Date.now() % 2 ** 31), saved?.pairs) };
@@ -661,15 +708,15 @@ async function review(name: string) {
         const href = `review-files/${id}/${where}/${n + 1}${extension ? `.${extension}` : ""}`;
         await mkdir(join(dir, "review-files", id, where), { recursive: true, mode: 0o700 });
         await cp(join(from, stored), join(dir, href));
-        files.push({ href, name: result.files[n] ?? stored });
+        files.push({ href, name: result.files[n] ?? stored, text: result.file_texts?.[n] ?? "" });
       }
-      return { text: result.error ? null : result.reply, files };
+      return { text: result.error ? null : result.reply, ended: result.error ? (result.stopped ? "stopped" as const : "failed" as const) : null, files };
     };
     const [l, r] = [await side(left, "left"), await side(left === "claude" ? "codex" : "claude", "right")];
     pairs.push({
       id, history: c?.history ?? [], incomplete: Boolean(c?.summarized || c?.trimmed), prompt: c?.prompt ?? "", production: c?.reply ?? null,
       unavailable: [...new Set((c?.tools ?? []).map((tool) => tool.replace(/^mcp__[^_]+__/, "")).filter((tool) => !REAL.has(tool) && !ASKS.has(tool) && tool !== "send_file"))],
-      left: l.text, right: r.text, leftFiles: l.files, rightFiles: r.files,
+      left: l.text, right: r.text, leftEnded: l.ended, rightEnded: r.ended, leftFiles: l.files, rightFiles: r.files,
     });
   }
   await writeFile(join(dir, "review.html"), reviewPage({ run: name, deal: deal.id, pairs }), { mode: 0o600 });

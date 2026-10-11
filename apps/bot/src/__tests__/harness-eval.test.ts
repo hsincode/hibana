@@ -16,7 +16,8 @@ const turn = (extra: Partial<Case> = {}): Case => ({
 const result = (extra: Partial<ArmResult>): ArmResult => ({
   case: "c1-0", arm: "codex", first: true, model: "claude-haiku-5-5", effort: "medium", scope: "guild", ms: 1000,
   requests: 1, input: 100, cache_read: 0, cache_write: 0, output: 10, searches: 0, fetches: 0, cost: 0.01, models: ["claude-haiku-5-5"],
-  tools: {}, blocked: [], asked: false, status_messages: 0, files: [], retries: 0, rejected: [], error: null, reply: "ok", setup_failed: false, ...extra,
+  tools: {}, blocked: [], asked: false, status_messages: 0, channel_writes: 0, files: [], file_texts: [], retries: 0, rejected: [],
+  error: null, stopped: false, reply: "ok", setup_failed: false, ...extra,
 });
 
 describe("which production turns are replayed", () => {
@@ -25,6 +26,8 @@ describe("which production turns are replayed", () => {
     expect(exclusion(turn({ prompt: meta }))).toBe("no message text");
     expect(exclusion(turn({ prompt: `これ見て${meta}\nAttachments: {"id":"1","filename":"a.png","url":"https://example.test/a.png","bytes":3}` })))
       .toBe("has attachments");
+    expect(exclusion(turn({ history: [{ role: "user", content: `この図は？${meta}\nAttachments: {"id":"0","filename":"a.png","url":"","bytes":3}` }, { role: "assistant", content: "犬です" }] })))
+      .toBe("an earlier message had attachments");
     expect(exclusion(turn({ model: "gpt-5.5" }))).toBe("model is unknown or not on Anthropic's API");
     // An auto-routed conversation whose route is not known any more.
     expect(exclusion(turn({ model: "auto" }))).toBe("model is unknown or not on Anthropic's API");
@@ -224,6 +227,47 @@ describe("measuring warm, and the owner's criteria", () => {
   });
 });
 
+describe("what the summary may conclude", () => {
+  const pair = (id: string, codex: Partial<ArmResult> = {}, claude: Partial<ArmResult> = {}) => [result({ case: id, arm: "codex", ...codex }), result({ case: id, arm: "claude", ...claude })];
+  const key = (...ids: string[]) => ids.map((id) => ({ id, left: "claude" as const }));
+
+  test("quality waits for every replayed pair, not only the ones that were dealt", () => {
+    // Two pairs were judged; three more were replayed afterwards and never put on a page.
+    const results = ["a", "b", "c", "d", "e"].flatMap((id) => pair(id));
+    const out = summarize(results, { key: key("a", "b"), verdicts: { a: "left", b: "left" } });
+    expect(out.quality).toMatchObject({ claude: 2, unjudged: 3 });
+    expect(out.criteria!.quality).toBeNull();
+  });
+
+  test("quality is not met by pairs that could not be compared", () => {
+    const out = summarize(["a", "b"].flatMap((id) => pair(id)), { key: key("a", "b"), verdicts: { a: "skip", b: "skip" } });
+    expect(out.quality).toMatchObject({ skipped: 2, unjudged: 0 });
+    expect(out.criteria!.quality).toBeNull();
+  });
+
+  test("a turn this tool stopped at its own cap is not a failure of the harness, and leaves cost and time open", () => {
+    const results = [
+      ...pair("a", {}, { error: "stopped: over $1 for one turn", stopped: true, reply: "", ms: 600_000, cost: 1.02 }),
+      ...pair("b"), ...pair("c"),
+    ];
+    const out = summarize(results, { key: key("a", "b", "c"), verdicts: { a: "skip", b: "same", c: "same" } });
+    expect(out.claude).toMatchObject({ failed: 0, stopped: 1 });
+    expect(out.codex).toMatchObject({ failed: 0, stopped: 0 });
+    // The dropped pair is the one where one side was far more expensive.
+    expect(out.criteria).toMatchObject({ cost: null, time: null, failures: true });
+  });
+
+  test("a pair measured under two conditions is left out and counted", () => {
+    const results = [
+      ...pair("a", { commit: "aaa", warm: true }, { commit: "aaa", warm: true }),
+      ...pair("b", { commit: "aaa", warm: true }, { commit: "aaa", warm: false }),
+      ...pair("c", { commit: "aaa", warm: true }, { commit: "bbb", warm: true }),
+    ];
+    const out = summarize(results);
+    expect(out).toMatchObject({ pairs: 3, both_finished: 1, mixed_conditions: 2 });
+  });
+});
+
 describe("the spending limits on the command line", () => {
   test("a missing or mistyped number is an error, not a limit that never applies", () => {
     expect(amount("budget", undefined, 5)).toBe(5);
@@ -238,7 +282,8 @@ describe("the spending limits on the command line", () => {
 describe("the judging page", () => {
   const pair = {
     id: "a-0", history: [{ role: "user" as const, content: "前の質問" }], incomplete: false, prompt: "質問", unavailable: ["publish_site"], production: "本番の返答",
-    left: "左の返答 </script><img src=x onerror=alert(1)>", right: null, leftFiles: [{ href: "review-files/a-0/left/1.png", name: "図 'x'.png" }], rightFiles: [],
+    left: "左の返答 </script><img src=x onerror=alert(1)>", right: null, leftEnded: null, rightEnded: "stopped" as const,
+    leftFiles: [{ href: "review-files/a-0/left/1.png", name: "図 'x'.png", text: "要点は **3 つ** です" }], rightFiles: [],
   };
   const page = reviewPage({ run: "trial", deal: "d1", pairs: [pair] });
   const script = /<script>([\s\S]*)<\/script>/.exec(page)![1]!;
@@ -274,7 +319,11 @@ describe("the judging page", () => {
     expect(section).toContain("<img src='review-files/a-0/left/1.png'");
     expect(section).toContain("図 &#39;x&#39;.png");
     expect(section).toContain("publish_site");
-    expect(section).toContain("返答なし");
+    expect(section).toContain("要点は <strong>3 つ</strong> です");
+    expect(section).toContain("上限で止めました");
+    // The record of the run names each case's harness and sizes, so the page must not name the case.
+    expect(section).not.toContain("a-0</");
+    expect(section).not.toContain("#a-0");
     expect(production.hidden).toBe(true);
   });
 });

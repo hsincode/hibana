@@ -11,6 +11,8 @@ Discord AI bot・設定API・WebダッシュボードをまとめたBun / TypeSc
 
 Advisor、旧来の自動モデルRouter、品質検証（verify）、速度優先（fast）は削除済みです。モデルは明示的な選択（ユーザー → サーバー → 移行済み既定値 / 環境変数）で決まります。例外は Anthropic プロバイダーの「Anthropic / Auto (Jev)」プリセットで、これを選んだときだけ Jev が難易度に応じて Haiku 5.5 / Sonnet 5.5 / Opus 5.5 と effort を決めます（[docs/jev.md](docs/jev.md#anthropic-の-auto-routing)）。OpenRouterプロバイダー、サブエージェント、Reactの画面遷移は引き続き利用できます。
 
+**移行中（2026-10-11〜）**: ハーネスを Anthropic のモデル向けに作り直しています。Anthropic 以外のプロバイダーは非推奨にし、今のハーネスのまま残す方針です（判断記録 #66・#67・#68、計測記録 #69、[docs/harness.md](docs/harness.md)）。新しいハーネスはまだ実装されておらず、この README は `main` の現状を書いています。各段階の PR で更新します。
+
 ## 開発
 
 Bun 1.4以降、Docker（sandboxを使う場合）が必要です。

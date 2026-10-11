@@ -48,6 +48,7 @@ Bun + TypeScript monorepo: `apps/bot` (Discord agent), `apps/api` (Elysia settin
 - Preserve guild / DM isolation, permission checks, bounded Docker sandboxes and independent provider credentials.
 - Advisor, the old automatic model router, answer verification (`verify`), the Jev completion check at the end of a turn (decision record: #50), and Codex fast mode (`fast`) are intentionally removed. OpenRouter provider and React navigation remain supported.
 - The one automatic routing that exists is the `anthropic-auto` preset: Jev picks an Anthropic model and effort per conversation, never `max`, and Anthropic turns run without subagents (decision record: #35, `docs/jev.md`). Do not extend it to other providers without a new decision.
+- Migration in progress: the harness is being rebuilt for Anthropic models, and the other providers are being deprecated and kept on the current Codex-style harness (decision records: #66, #67, #68; measurement: #69; `docs/harness.md`). The two lines above describe `main` until each step lands. Prompt text for the new harness is written from public documentation with its source recorded, not copied from Claude Code.
 - Bot API and dashboard share the settings and model catalog in `packages/shared`.
 - Explain non-obvious behavior in comments. Keep migration documentation honest about validation limits.
 

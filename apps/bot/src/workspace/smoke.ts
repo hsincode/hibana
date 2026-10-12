@@ -3,7 +3,7 @@
 //   cd apps/bot && bun run workspace-smoke               Haiku 5.5, a plain session
 //   cd apps/bot && bun run workspace-smoke --ultra       also a Haiku Ultra session (workflow runs)
 //   cd apps/bot && bun run workspace-smoke --bot         also turns of the bot itself, with its tools run by its registry
-//   cd apps/bot && bun run workspace-smoke --bot-only    those turns alone
+//   cd apps/bot && bun run workspace-smoke --bot-only    those turns alone (with --ultra: and one of them on Haiku Ultra)
 //   cd apps/bot && bun run workspace-smoke --budget 0.5  each session's budget in US dollars (default 1)
 //   cd apps/bot && bun run workspace-smoke --keep        leave what it created (sessions are still brought to rest)
 //   cd apps/bot && bun run workspace-smoke --cleanup     only remove what earlier runs left behind
@@ -28,7 +28,10 @@
 // its checks. Discord is answered from memory there: the bot's Discord client
 // is never logged in, its REST calls are kept in a list instead of being
 // sent, and while that part runs anything else that asks for the network is
-// refused. Of a tool call the registry refused, its reason is printed.
+// refused. Of a tool call the registry refused, its reason is printed. With
+// `--ultra` that part ends with a turn on Haiku Ultra: Ultra is stored the way
+// the dashboard stores it, and the agents of the workflow run call the bot's
+// tools, which the registry runs for them as workers.
 //
 // Nothing of the bot's is touched. The data directory is a temporary one. The
 // environment, the agents and the sessions are created by the bot's own
@@ -68,6 +71,8 @@ const MODEL = WORKSPACE_ULTRA_MODEL;
 const RUN_LIMIT_MS = 15 * 60_000;
 const TURN_MS = 3 * 60_000;
 const WORKFLOW_TURN_MS = 6 * 60_000;
+// What a turn that starts a workflow run may add to its session, in cents.
+const WORKFLOW_TURN_CENTS = 40;
 // What an ordinary step may add to its session, in cents. Every turn is also
 // held to what is left of the session's budget.
 const TURN_CENTS = 20;
@@ -87,7 +92,7 @@ for (let i = 0; i < argv.length; i++) {
 }
 const option = (name: string) => argv.includes(name);
 if (option("--cleanup") && argv.length > 1) usage("--cleanup takes no other option");
-if (option("--bot-only") && (option("--ultra") || option("--bot"))) usage("--bot-only runs the bot's turns alone");
+if (option("--bot-only") && option("--bot")) usage("--bot-only runs the bot's turns alone");
 const budgetUsd = option("--budget") ? Number(argv[argv.indexOf("--budget") + 1]) : 1;
 if (!(budgetUsd >= 0.2 && budgetUsd <= 10)) usage("--budget takes US dollars between 0.2 and 10");
 const budgetCents = Math.round(budgetUsd * 100);
@@ -1019,7 +1024,7 @@ async function ultra() {
       "Start one workflow run with two agents that work at the same time. The first agent calls the list_sites tool once and returns how many sites it lists. " +
       `The second agent runs this with the bash tool and returns what it printed: echo ${codes.echo}\n` +
       "When the run has ended, reply with both results.",
-      { timeoutMs: WORKFLOW_TURN_MS, allowCents: 40, answer: (call) => (call.name === "list_sites" ? { sites: [] } : undefined) });
+      { timeoutMs: WORKFLOW_TURN_MS, allowCents: WORKFLOW_TURN_CENTS, answer: (call) => (call.name === "list_sites" ? { sites: [] } : undefined) });
     const runs = [...result.seen.runs.values()];
     step("a workflow run from created to ended",
       runs.length > 0 && runs.every((run) => run.result === "completed") && result.stop === "end_turn" && !result.openRuns.length,
@@ -1104,9 +1109,11 @@ function botConfig(dir: string) {
     HIBANA_DATA_DIR: dir, RUNTIME_STATE_PATH: "", LOG_DIR: "", SANDBOX_ENABLED: "false", SKILLS_ENABLED: "false",
     // The bot's own limits hold this part to `--budget`.
     ANTHROPIC_WORKSPACE_TURN_BUDGET_USD: String(Math.min(TURN_CENTS, budgetCents) / 100),
+    ANTHROPIC_WORKSPACE_ULTRA_TURN_BUDGET_USD: String(Math.min(WORKFLOW_TURN_CENTS, budgetCents) / 100),
     ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD: String(budgetUsd),
     ANTHROPIC_WORKSPACE_MONTHLY_BUDGET_USD: String(budgetUsd),
     ANTHROPIC_WORKSPACE_TURN_TIMEOUT_MS: String(TURN_MS),
+    ANTHROPIC_WORKSPACE_ULTRA_TURN_TIMEOUT_MS: String(WORKFLOW_TURN_MS),
   });
 }
 
@@ -1160,7 +1167,7 @@ function fakeDiscord(hibana: Hibana, messages: Json[]) {
  *  the bot's own registry. What the tools did is read from the fake Discord. */
 async function bot() {
   const dir = join(dataDir, "bot");
-  const codes = { read: code(), sent: code(), file: code(), written: code() };
+  const codes = { read: code(), sent: code(), file: code(), written: code(), worker: code() };
   const FILE = `smoke-${RUN}-bot.txt`, WRITTEN = `smoke-${RUN}-bot-written.txt`;
   const at = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
   const author = { id: DISCORD.user, username: "smoke", bot: false };
@@ -1195,15 +1202,16 @@ async function bot() {
   }) as typeof hibana.llm.complete;
   hibana.tools.web.remote = (async () => ({ tools: [] })) as never;
   // Every custom tool call the registry was asked to run, and how it went.
-  const ran: { name: string; ok: boolean; error?: string }[] = [];
+  // `role`: set on a call the registry ran for an agent of a workflow run.
+  const ran: { name: string; ok: boolean; error?: string; role?: string }[] = [];
   const execute = hibana.tools.execute.bind(hibana.tools);
   hibana.tools.execute = (async (name: string, args: Json, toolCtx: Context) => {
     try {
       const result = await execute(name, args, toolCtx);
-      ran.push({ name, ok: !(result instanceof ToolOutput && result.options.isError) });
+      ran.push({ name, ok: !(result instanceof ToolOutput && result.options.isError), role: toolCtx.agentRole });
       return result;
     } catch (error) {
-      ran.push({ name, ok: false, error: error instanceof Error ? error.message : String(error) });
+      ran.push({ name, ok: false, error: error instanceof Error ? error.message : String(error), role: toolCtx.agentRole });
       throw error;
     }
   }) as typeof hibana.tools.execute;
@@ -1223,7 +1231,8 @@ async function bot() {
     };
   };
   type Said = Awaited<ReturnType<typeof say>>;
-  const ranText = (turn: Said) => turn.ran.map((call) => `${printable(call.name, 40)} ${call.ok ? "ran" : `failed (${printable(call.error, 120)})`}`).join(", ") || "no custom tool call";
+  const ranText = (turn: Said) => turn.ran.map((call) =>
+    `${printable(call.name, 40)}${call.role ? ` as a ${printable(call.role, 16)}` : ""} ${call.ok ? "ran" : `failed (${printable(call.error, 120)})`}`).join(", ") || "no custom tool call";
   const ok = (turn: Said, ...names: string[]) => names.every((name) => turn.ran.some((call) => call.name === name && call.ok));
   const ended = (turn: Said) => (limited(turn.reply) ? "the bot refused the turn at its own limit" : `a reply of ${turn.reply.length} characters`);
 
@@ -1354,6 +1363,50 @@ async function bot() {
       step("the bot removes a cleared conversation's session", status === 404 && !hibana.workspace.sessions.get(DISCORD.channel),
         status === 404 ? "deleted: the session is gone from the API and from the bot's table"
           : status ? `the session could not be read (HTTP ${status})` : `the session is still there${archived ? ", archived" : ""}`);
+    });
+
+    // 8. Haiku Ultra as the bot runs it. Ultra is stored the way the
+    // dashboard stores it, so the next message is a new conversation with a
+    // session of the other variant. The agents of a workflow run work for the
+    // run: the registry runs their calls as workers, who may read Discord and
+    // may not post to it.
+    if (option("--ultra")) await attempt("the bot's Haiku Ultra turn", async () => {
+      await hibana.runtime.patch(DISCORD.guild, { ultra_mode: true }, DISCORD.user);
+      const count = (type: string) => wire.events.get(type) ?? 0;
+      const before = {
+        day: hibana.workspace.usage.limitCents("day"),
+        created: count("workflow_run.created"), ended: count("workflow_run.status_ended"),
+      };
+      const turn = await say(
+        "This is a connection test of workflow runs, so start one although the work is small. " +
+        "Start one workflow run with two agents that work at the same time. The first agent calls the read_messages tool with limit 1 for this channel and returns the content of the message it got. " +
+        `The second agent calls the send_message tool once with the content ${codes.worker} for this channel, and returns the single word POSTED if the tool worked or REFUSED if it returned an error. ` +
+        "Do not call send_message yourself. When the run has ended, reply on one line with what the two agents returned.");
+      const second = hibana.workspace.sessions.get(DISCORD.channel);
+      if (!second || second.sessionId === row.sessionId)
+        return step("the bot's Haiku Ultra turn", false, `${ended(turn)}; the bot has no new session for the channel`);
+      made.sessions.set(second.sessionId, "the bot's, Ultra");
+      console.log(`created session ${second.sessionId} (the bot's, Ultra)`);
+      const session = await client.beta.sessions.retrieve(second.sessionId, {}, abortable);
+      track(session.environment_id, session.agent.id, "ultra");
+      const mismatch = multiagentMismatch(session.agent.multiagent, "ultra");
+      const runs = { created: count("workflow_run.created") - before.created, ended: count("workflow_run.status_ended") - before.ended };
+      const open = second.state?.openRuns?.length ?? 0;
+      const read = turn.ran.find((call) => call.name === "read_messages"), post = turn.ran.find((call) => call.name === "send_message");
+      const asked = turn.rest.find((call) => call.method === "get" && call.path === `/channels/${DISCORD.channel}/messages`);
+      const posted = turn.rest.some((call) => call.method === "post");
+      const own = sessionTotals(session.usage);
+      const day = hibana.workspace.usage.limitCents("day") - before.day;
+      step("the bot's Haiku Ultra turn",
+        second.variant === "ultra" && !mismatch && runs.created > 0 && runs.ended > 0 && !open &&
+        !!read?.ok && read.role === "worker" && asked?.query === "limit=1" && turn.reply.includes(codes.read) &&
+        !!post && !post.ok && post.role === "worker" && !posted && /REFUSED/.test(turn.reply) &&
+        !limited(turn.reply) && own.cost && day >= own.totals.list_cost_cents,
+        `${ended(turn)} from a session of the ${printable(second.variant, 16)} variant, ${multiagentText(session.agent.multiagent)}${mismatch ? ` (${mismatch})` : ""}; ` +
+        `${runs.created} workflow run(s) created and ${runs.ended} ended on the stream, ${open} left open; ${ranText(turn)}; ` +
+        `read_messages asked Discord for ${asked ? printable(asked.query, 40) || "no limit" : "nothing"} and the reply ${turn.reply.includes(codes.read) ? "has" : "does not have"} the message's content; ` +
+        `${posted ? "something was posted to Discord" : "nothing was posted to Discord"} and the reply ${/REFUSED/.test(turn.reply) ? "says the post was refused" : "does not say the post was refused"}; ` +
+        `the session reports ${own.cost ? `a list cost of ${own.totals.list_cost_cents} cents` : "no list cost"}, and the bot holds ${day} more cents against the day's limit`);
     });
   } finally {
     await hibana.close().catch(() => {});
@@ -1498,8 +1551,10 @@ async function cleanup() {
 try {
   if (option("--cleanup")) await leftovers();
   else {
-    if (!option("--bot-only")) await plain();
-    if (option("--ultra")) await ultra();
+    if (!option("--bot-only")) {
+      await plain();
+      if (option("--ultra")) await ultra();
+    }
     if (option("--bot") || option("--bot-only")) await bot();
   }
 } catch (error) {

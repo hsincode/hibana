@@ -2,6 +2,7 @@ import {
   defaultMultiAgentRoles,
   MULTI_AGENT_ROLES,
   SERVICE_TIERS,
+  effectiveSubagentMode,
   subagentMode,
   subagentModePatch,
   type MultiAgentRole,
@@ -13,6 +14,7 @@ import {
 import {
   AUTO_ROUTE_FALLBACK,
   REASONING_EFFORTS,
+  WORKSPACE_PROVIDER,
   agentToolOnly,
   isAutoRoute,
 } from "@hibana/shared/catalog";
@@ -55,14 +57,25 @@ function interplay(s: OverlaySettings) {
   // モードは off か on で、保存値の ultra / multi は on として動く。保存値は残り、他のプロバイダで使われる。
   const agentTool = agentToolOnly(selection?.provider);
   const mode = subagentMode(s);
+  // Anthropic Workspace のターンは Anthropic のクラウドのセッションで動き、Hibana 自身の委譲を持たない（#76）。
+  // 効くのは Claude Haiku 5.5 の ultra（Managed Agents の dynamic workflows）だけで、ほかは委譲なしで動く。
+  // ここでも保存値は残る。effort は ultra でも保存値のまま。
+  const workspace = selection?.provider === WORKSPACE_PROVIDER;
+  const workspaceMode = workspace
+    ? effectiveSubagentMode(s, { provider: WORKSPACE_PROVIDER, model: selection?.model ?? "" })
+    : mode;
   return {
     auto,
     agentTool,
+    workspace,
     mode,
     // Anthropic で「on として動く」保存値。
     reduced: agentTool && (mode === "ultra" || mode === "multi"),
-    ultraActive: mode === "ultra" && !agentTool,
-    multiActive: mode === "multi" && !agentTool,
+    // Workspace で ultra として動く組み合わせと、「委譲なしで動く」保存値。
+    workspaceUltra: workspace && workspaceMode === "ultra",
+    workspaceReduced: workspace && workspaceMode !== mode,
+    ultraActive: mode === "ultra" && !agentTool && !workspace,
+    multiActive: mode === "multi" && !agentTool && !workspace,
   };
 }
 
@@ -72,7 +85,8 @@ function interplay(s: OverlaySettings) {
  * bot の環境変数や接続の状態までは分からないので、見出しの説明でそう断る。
  */
 export function guildEffective(s: OverlaySettings): EffectiveItem[] {
-  const { auto, agentTool, reduced, mode, ultraActive, multiActive } = interplay(s);
+  const { auto, agentTool, workspace, reduced, workspaceUltra, workspaceReduced, mode, ultraActive, multiActive } =
+    interplay(s);
   const selection = s.selection;
   const savedEffort = s.effort ?? selection?.effort ?? "max";
   const jev = s.jev_enabled === true;
@@ -122,7 +136,18 @@ export function guildEffective(s: OverlaySettings): EffectiveItem[] {
     items.push({ label: "effort", value: savedEffort });
   }
 
-  if (agentTool) {
+  if (workspace) {
+    items.push({
+      label: "サブエージェント",
+      value: workspaceUltra ? "ultra" : "off",
+      note: workspaceUltra
+        ? "Managed Agents の dynamic workflows"
+        : workspaceReduced
+          ? `Anthropic Workspace では委譲なしで動きます。保存値 ${mode} は他のモデルに切り替えると使われます。`
+          : undefined,
+      unused: workspaceReduced,
+    });
+  } else if (agentTool) {
     items.push({
       label: "サブエージェント",
       value: mode === "off" ? "off" : "on",
@@ -140,7 +165,14 @@ export function guildEffective(s: OverlaySettings): EffectiveItem[] {
   }
 
   items.push({ label: "Jev 判定", value: onOff(s.jev_enabled) });
-  if (agentTool && s.jev_task_enabled === true) {
+  if (workspace && s.jev_task_enabled === true) {
+    items.push({
+      label: "Jev 行動選択",
+      value: "使わない",
+      note: "Anthropic Workspace では使いません。保存値は ON。",
+      unused: true,
+    });
+  } else if (agentTool && s.jev_task_enabled === true) {
     items.push({
       label: "Jev 行動選択",
       value: "使わない",
@@ -183,8 +215,17 @@ const EFFORT_UNDER_AUTO =
   "Anthropic / Auto では Jev の判定でモデルと effort（max は使いません）が決まり、この値は使われません。";
 const JEV_TASK_UNDER_MULTI =
   "サブエージェントが multi のときは並列の分担を優先するため使用しません。";
+// Anthropic Workspace（判断記録 #76）。モードは off と、Claude Haiku 5.5 のときの ultra だけが効く。
+const WORKSPACE_MODES =
+  "Anthropic Workspace で効くのは off と ultra で、ultra は Claude Haiku 5.5 のときだけです。それ以外は委譲なしで動きます。保存した値は他のモデルに切り替えると使われます。";
+// Workspace の ultra は Hibana の Ultracode ではないので、カードの説明を差し替える。上限の値は bot の環境変数で決まる。
+const WORKSPACE_ULTRA_BODY =
+  "Anthropic Workspace では、Managed Agents の dynamic workflows で複数のエージェントを編成します。効くのは Claude Haiku 5.5 のときだけで、effort は変えません。1 回の応答ごとに、費用と時間の上限があります。";
+const WORKSPACE_NO_JEV_TASK = "Anthropic Workspace では、保存した値を保ったまま実行しません。";
+const WORKSPACE_MODEL =
+  "作業領域（ファイルとコマンドの実行環境）は Anthropic のクラウドにあり、チャンネルごとに別です。bot のサンドボックスのファイルは引き継ぎません。サブエージェント・スキル・サイトの公開など、一部のツールは使えません。トークンのほかに、稼働時間にも料金がかかります。";
 const SERVER_DEFAULT = "デフォルト（サーバー設定）";
-// Anthropic 以外のプロバイダは非推奨（判断記録 #67）。選択中の人はそのまま使える。
+// Anthropic と Anthropic Workspace 以外のプロバイダは非推奨（判断記録 #67、#76）。選択中の人はそのまま使える。
 const DEPRECATED_MODEL =
   "選択中のモデルは非推奨のプロバイダのものです。このまま使えますが、別のモデルに変えると一覧からは選び直せません。";
 // bot が service_tier を送るのは openai / codex_plus / codex_pro / chatgpt だけで、どれも非推奨。
@@ -225,22 +266,28 @@ export function AgentSections({
   // pickers must not list them — leftover guilds already on one still show
   // as selected via provider+model, they just cannot newly pick it.
   const pickable = c.presets.filter((p) => p.published !== false);
+  // サブエージェントと役割の「固定」には Workspace のプリセットを出さない。Hibana が動かす子は
+  // Workspace のセッションでは動かず、API も断る（#76）。
+  const childPickable = pickable.filter((p) => p.provider !== WORKSPACE_PROVIDER);
   const current = c.presets.find((p) => matchesSelection(p, s.selection)) ?? null;
-  const { auto, agentTool, reduced, ultraActive, multiActive } = interplay(s);
+  const { auto, agentTool, workspace, reduced, workspaceReduced, ultraActive, multiActive } = interplay(s);
 
   // All three switches null is デフォルト. subagentMode() would otherwise
   // read that as "on", because a missing Ultra flag is not Ultra.
   const modeDefault =
     inherit && s.subagent_enabled == null && s.ultra_mode == null && s.multi_agent == null;
   const mode: SubagentMode | "default" = modeDefault ? "default" : subagentMode(s);
-  const modeChoices: { mode: SubagentMode | "default"; body: string }[] = inherit
-    ? [{ mode: "default", body: "サーバー設定に従います。ここを変えると、このモードだけ上書きします。" }, ...SUBAGENT_MODES]
+  const modes = workspace
+    ? SUBAGENT_MODES.map((o) => (o.mode === "ultra" ? { ...o, body: WORKSPACE_ULTRA_BODY } : o))
     : SUBAGENT_MODES;
+  const modeChoices: { mode: SubagentMode | "default"; body: string }[] = inherit
+    ? [{ mode: "default", body: "サーバー設定に従います。ここを変えると、このモードだけ上書きします。" }, ...modes]
+    : modes;
 
   const efforts = c.efforts.filter((e) => e !== "ultra");
   // 「固定」に切り替えたときの最初の値。非推奨のプリセットは新しく選べないので候補にしない。
   const firstPreset = () =>
-    pickable.find((p) => !p.deprecated && roleAllows(role, p.min_role, c.roles) &&
+    childPickable.find((p) => !p.deprecated && roleAllows(role, p.min_role, c.roles) &&
       (!c.available_presets || c.available_presets.includes(p.id)))?.id;
   // 候補が 1 つも無い人（Anthropic のプリセットを選べないプランなど）は、新しく「固定」にできない。
   // すでに固定にしている行は、その値のまま残す。
@@ -281,7 +328,7 @@ export function AgentSections({
   // 分からないと言い切れないので、今までどおり説明文に書き添える。
   const effortUnused = inherit ? undefined : auto ? EFFORT_UNDER_AUTO : ultraActive ? EFFORT_UNDER_ULTRA : undefined;
   const effortHint = inherit
-    ? `デフォルトはサーバーの effort です。モデルを変えるとそのモデルの推奨値になります。${mode === "ultra" ? ` ${EFFORT_UNDER_ULTRA}` : ""}${auto ? ` ${EFFORT_UNDER_AUTO}` : ""}`
+    ? `デフォルトはサーバーの effort です。モデルを変えるとそのモデルの推奨値になります。${mode === "ultra" && !workspace ? ` ${EFFORT_UNDER_ULTRA}` : ""}${auto ? ` ${EFFORT_UNDER_AUTO}` : ""}`
     : "推論の深さ。モデルを変えるとそのモデルの推奨値になります。";
   const jevMulti = s.multi_agent === true || (!inherit && subagentMode(s) === "multi");
   const serverDefault = inherit ? " デフォルトはサーバー設定です。" : "";
@@ -298,7 +345,7 @@ export function AgentSections({
             k={`${px}-preset`}
             name="モデル"
             block
-            hint={current?.deprecated ? DEPRECATED_MODEL : undefined}
+            hint={current?.deprecated ? DEPRECATED_MODEL : workspace ? WORKSPACE_MODEL : undefined}
             overridden={inherit && !!s.selection}
           >
             <div className="model-card frame">
@@ -452,14 +499,14 @@ export function AgentSections({
       <Section
         id="agents"
         title="サブエージェント"
-        desc={`変更は次のメッセージから反映され、処理中の応答には適用されません。${inherit && agentTool ? ` ${ANTHROPIC_AGENT_TOOL}` : ""}`}
+        desc={`変更は次のメッセージから反映され、処理中の応答には適用されません。${inherit && agentTool ? ` ${ANTHROPIC_AGENT_TOOL}` : ""}${inherit && workspace ? ` ${WORKSPACE_MODES}` : ""}`}
       >
         <div className="rows">
           <Row
             k={`${px}-mode`}
             name="モード"
             block
-            unused={!inherit && reduced ? ANTHROPIC_AGENT_TOOL : undefined}
+            unused={inherit ? undefined : reduced ? ANTHROPIC_AGENT_TOOL : workspaceReduced ? WORKSPACE_MODES : undefined}
             overridden={inherit && !modeDefault}
           >
             <div className={`modes${inherit ? " has-default" : ""}`} role="radiogroup" aria-label="サブエージェント">
@@ -501,7 +548,7 @@ export function AgentSections({
                 after={s.subagent_model?.mode === "fixed" && (
                   <FixedModelButton
                     label="固定モデル" title="サブエージェントの固定モデル"
-                    presets={pickable} available={c.available_presets}
+                    presets={childPickable} available={c.available_presets}
                     value={s.subagent_model.preset} role={role} roles={c.roles}
                     onChange={(preset) => patch({ subagent_model: { mode: "fixed", preset } }, `${px}-sub-model`)}
                   />
@@ -644,7 +691,7 @@ export function AgentSections({
                                 {policy.model.mode === "fixed" && (
                                   <FixedModelButton
                                     label={`${meta.label}の固定モデル`} title={`${meta.label}の固定モデル`}
-                                    presets={pickable} available={c.available_presets}
+                                    presets={childPickable} available={c.available_presets}
                                     value={policy.model.preset} role={role} roles={c.roles}
                                     onChange={(preset) => patchRole(r, { model: { mode: "fixed", preset } })}
                                   />
@@ -738,6 +785,7 @@ export function AgentSections({
             unused={
               inherit || s.jev_task_enabled !== true ? undefined
                 : agentTool ? ANTHROPIC_NO_JEV_TASK
+                : workspace ? WORKSPACE_NO_JEV_TASK
                 : multiActive ? "multi の間は、保存した値を保ったまま実行しません。" : undefined
             }
             overridden={inherit && s.jev_task_enabled != null}

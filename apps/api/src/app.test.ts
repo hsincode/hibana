@@ -364,6 +364,7 @@ describe("authz", () => {
     ).toEqual([
       "fable-5", "max-opus-5-5",
       "anthropic-auto", "anthropic-haiku-5-5", "anthropic-sonnet-5-5", "anthropic-opus-5-5",
+      "anthropic-workspace-haiku-5-5", "anthropic-workspace-sonnet-5-5", "anthropic-workspace-opus-5-5",
     ]);
 
     const denied = await app.handle(
@@ -568,11 +569,52 @@ describe("authz", () => {
   });
 });
 
+// Decision record #76: Anthropic Workspace offers the models `anthropic` has
+// under a provider of its own. Its presets ship unpublished.
+describe("anthropic workspace", () => {
+  test("a published preset is an ordinary choice, and the guild list names the provider beside the model", async () => {
+    const { app, store } = await setup();
+    const patch = (path: string, body: unknown) =>
+      app.handle(req(path, { cookie: "sess-admin", method: "PATCH", body: JSON.stringify(body) }));
+    // The free member's list comes from the test hook, without Discord.
+    const guilds = async () =>
+      ((await (await app.handle(req("/api/guilds", { cookie: "sess-free" }))).json()) as { guilds: unknown[] }).guilds;
+    expect(await guilds()).toEqual([
+      { id: "g1", name: "One", icon: null, preset: "gpt-6-luna", provider: "codex_plus", bot_disabled: false, member: true },
+    ]);
+
+    const hidden = await patch("/api/guilds/g1/settings", { preset: "anthropic-workspace-haiku-5-5" });
+    expect(hidden.status).toBe(403);
+    expect(((await hidden.json()) as { error: string }).error).toContain("unpublished");
+    expect((await patch("/api/catalog/presets/anthropic-workspace-haiku-5-5", { published: true })).status).toBe(200);
+    // Not deprecated: once published it is selected like an `anthropic` preset.
+    expect((await patch("/api/guilds/g1/settings", { preset: "anthropic-workspace-haiku-5-5" })).status).toBe(200);
+    expect((await store.getGuild("g1")).selection)
+      .toEqual({ provider: "anthropic_workspace", model: "claude-haiku-5-5", effort: "high" });
+    // `claude-haiku-5-5` alone would read as the `anthropic` preset.
+    expect(await guilds()).toEqual([
+      { id: "g1", name: "One", icon: null, preset: "claude-haiku-5-5", provider: "anthropic_workspace", bot_disabled: false, member: true },
+    ]);
+
+    // It is the main model only: never a subagent's or a role's.
+    for (const path of ["/api/guilds/g1/settings", "/api/me/settings"]) {
+      for (const body of [
+        { subagent_model: { mode: "fixed", preset: "anthropic-workspace-haiku-5-5" } },
+        { multi_agent_roles: { reviewer: { model: { mode: "fixed", preset: "anthropic-workspace-haiku-5-5" } } } },
+      ])
+        expect((await patch(path, body)).status).toBe(400);
+    }
+    expect((await store.getGuild("g1")).subagent_model).toEqual({ mode: "auto" });
+  });
+});
+
 // Decision record #67, ADR-0010: every provider except `anthropic` is
 // deprecated. The dashboard routes refuse a new choice of one; whatever is
-// already saved keeps working and is never rewritten.
+// already saved keeps working and is never rewritten. `anthropic_workspace`
+// (#76) is not deprecated either; its presets start unpublished.
 describe("deprecated providers", () => {
   const ANTHROPIC = ["anthropic-auto", "anthropic-haiku-5-5", "anthropic-sonnet-5-5", "anthropic-opus-5-5"];
+  const WORKSPACE = ["anthropic-workspace-haiku-5-5", "anthropic-workspace-sonnet-5-5", "anthropic-workspace-opus-5-5"];
   const ROUTES = ["/api/guilds/g1/settings", "/api/me/settings"] as const;
   type App = Awaited<ReturnType<typeof setup>>["app"];
   const patcher = (app: App, path: string, cookie = "sess-admin") => (body: unknown) =>
@@ -587,8 +629,10 @@ describe("deprecated providers", () => {
       const { presets } = (await res.json()) as {
         presets: { id: string; provider: string; deprecated?: boolean }[];
       };
-      for (const p of presets) expect(p.deprecated).toBe(p.provider !== "anthropic");
-      expect(presets.filter((p) => !p.deprecated).map((p) => p.id)).toEqual(ANTHROPIC);
+      for (const p of presets) expect(p.deprecated).toBe(!["anthropic", "anthropic_workspace"].includes(p.provider));
+      // Staff are also sent the unpublished presets, for the /models page.
+      expect(presets.filter((p) => !p.deprecated).map((p) => p.id))
+        .toEqual(cookie === "sess-admin" ? [...ANTHROPIC, ...WORKSPACE] : ANTHROPIC);
       // Still in the list, so a server that is on one can show what it is on.
       for (const id of ["sol", "plus-luna", "opus-5", "fable-5", "ds-deepseek-flash"])
         expect(presets.find((p) => p.id === id)?.deprecated).toBe(true);

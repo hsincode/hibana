@@ -137,6 +137,40 @@ export const MODEL_PRESETS = [
     min_role: "premium",
     server_shared: true,
   },
+  // Anthropic Workspace (`ANTHROPIC_WORKSPACE_API_KEY`, decision record: #76):
+  // the same three models as Claude Managed Agents sessions, whose files and
+  // commands live in Anthropic's cloud container instead of the bot's sandbox.
+  // Unpublished until the owner has set the key and publishes them on the
+  // admin screen. Haiku comes first because `PROVIDER=anthropic_workspace`
+  // seeds a provider's first preset. There is no auto preset: Jev's routing
+  // stays on `anthropic` (#35).
+  {
+    id: "anthropic-workspace-haiku-5-5",
+    provider: "anthropic_workspace",
+    model: "claude-haiku-5-5",
+    label: "Anthropic Workspace / Claude Haiku 5.5",
+    min_role: "premium",
+    server_shared: true,
+    published: false,
+  },
+  {
+    id: "anthropic-workspace-sonnet-5-5",
+    provider: "anthropic_workspace",
+    model: "claude-sonnet-5-5",
+    label: "Anthropic Workspace / Claude Sonnet 5.5",
+    min_role: "premium",
+    server_shared: true,
+    published: false,
+  },
+  {
+    id: "anthropic-workspace-opus-5-5",
+    provider: "anthropic_workspace",
+    model: "claude-opus-5-5",
+    label: "Anthropic Workspace / Claude Opus 5.5",
+    min_role: "premium",
+    server_shared: true,
+    published: false,
+  },
   {
     id: "gemini-3.7-flash",
     provider: "codex_gemini",
@@ -291,9 +325,28 @@ export function subagentsUnsupported(provider: string | undefined): boolean {
 /** Anthropic turns run on the Claude harness, which delegates through its own
  *  Agent tool (#68): there the stored mode is off or on, and a stored Ultra or
  *  Multi-Agent choice counts as on. Jev's action-selection mode is not used
- *  either. The dashboard says so with this; the bot decides in `resolve`. */
+ *  either. The dashboard says so with this; the bot decides in `resolve`.
+ *  Anthropic Workspace is not this case: see `ultraSupported`. */
 export function agentToolOnly(provider: string | undefined): boolean {
   return provider === AUTO_ROUTE_PROVIDER;
+}
+
+/** Anthropic Workspace (#76): a turn is a Claude Managed Agents session in
+ *  Anthropic's cloud container. None of Hibana's own delegation (the Agent
+ *  tool, the Workflow tool, the collaboration tools) is offered there. */
+export const WORKSPACE_PROVIDER = "anthropic_workspace";
+/** The one Workspace model a stored Ultra applies to ("Haiku Ultra"): its
+ *  session runs with Managed Agents' dynamic workflows enabled. */
+export const WORKSPACE_ULTRA_MODEL = "claude-haiku-5-5";
+
+/** Whether a stored Ultra takes effect as Ultra for this provider and model.
+ *  On Workspace only Haiku 5.5 does, and every other mode runs without
+ *  delegation; under `agentToolOnly` Ultra counts as on. The dashboard and
+ *  the bot's `resolve` both ask this, through `effectiveSubagentMode`. */
+export function ultraSupported(selection: { provider: string; model: string }): boolean {
+  return selection.provider === WORKSPACE_PROVIDER
+    ? selection.model === WORKSPACE_ULTRA_MODEL
+    : !agentToolOnly(selection.provider);
 }
 
 export function isAutoRoute(selection: { provider: string; model: string }): boolean {
@@ -349,6 +402,15 @@ export function isPresetId(raw: string): boolean {
   return SELECTABLE_PRESETS.some((p) => p.id === canonicalPresetId(raw));
 }
 
+/** A preset that one of Hibana's own children (spawn_agent, a workflow
+ *  agent, a Multi-Agent role) may be fixed to. A Workspace preset is not: a
+ *  child is a single model request, and that provider only runs as a session
+ *  (#76). Its models are the ones `anthropic` already offers to a child. */
+export function isChildPresetId(raw: string): boolean {
+  const id = canonicalPresetId(raw);
+  return SELECTABLE_PRESETS.some((p) => p.id === id && p.provider !== WORKSPACE_PROVIDER);
+}
+
 /** Catalog floor role. `null` = anyone may pick it. Dashboard overlay is `isPremium`. */
 export function minRoleForPreset(id: string): string | null {
   const p = MODEL_PRESETS.find((x) => x.id === id) as
@@ -378,6 +440,11 @@ export function catalogPremium(id: string): boolean {
   return minRoleForPreset(id) === "premium";
 }
 
+/** The providers that are still offered as a new choice: Anthropic's own
+ *  API, as plain requests (`anthropic`) and as Managed Agents sessions
+ *  (`anthropic_workspace`, #76). */
+const CURRENT_PROVIDERS: readonly string[] = ["anthropic", WORKSPACE_PROVIDER];
+
 /** Every provider except Anthropic's own API is deprecated (#67, ADR-0010),
  *  `claude_max` and `claude_kiro` included. A deprecated provider keeps
  *  working for whoever already selected it; it only stops being offered as a
@@ -385,7 +452,7 @@ export function catalogPremium(id: string): boolean {
  *  flipped back on the admin screen, and it would also stop `canUse`, so a
  *  child agent could no longer inherit a deprecated parent. */
 export function deprecatedProvider(provider: string): boolean {
-  return provider !== "anthropic";
+  return !CURRENT_PROVIDERS.includes(provider);
 }
 
 /** Whether a catalog preset belongs to a deprecated provider. An id the
@@ -477,7 +544,9 @@ export function effectiveMinRole(
  *  Source: https://platform.claude.com/docs/en/about-claude/pricing, read
  *  2026-10-09 (#44). Hibana only sets 1-hour cache breakpoints and sends no
  *  server tools, so 5-minute writes and per-search fees are not priced. Update
- *  this table by hand when Anthropic changes its prices. */
+ *  this table by hand when Anthropic changes its prices. Anthropic Workspace
+ *  turns are not priced from this table: the bot records the list cost each
+ *  session reports (#76). */
 export type AnthropicPrice = {
   input: number;
   cache_write_1h: number;

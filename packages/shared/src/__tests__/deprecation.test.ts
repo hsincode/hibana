@@ -27,20 +27,23 @@ import {
   type UserOverrideRow,
 } from "../settings";
 
-// Decision record: #67, ADR-0010.
+// Decision record: #67, ADR-0010. `anthropic_workspace` is Anthropic's own
+// API too and is not deprecated (#76).
 
 /** Typed as the PATCH body the API and the bot pass in. */
 const refused = (saved: SavedPresets | null, patch: GuildPatch) => newlyDeprecatedPresetIds(saved, patch);
 
-test("every provider except anthropic is deprecated, and presets follow their provider", () => {
+test("every provider except anthropic and anthropic_workspace is deprecated, and presets follow their provider", () => {
   expect(deprecatedProvider("anthropic")).toBe(false);
+  expect(deprecatedProvider("anthropic_workspace")).toBe(false);
   for (const provider of ["codex_plus", "codex_pro", "chatgpt", "claude_max", "claude_kiro", "deepseek",
     "grok_free", "grok_heavy", "codex_gemini", "openai", "xai", "openrouter", "orca_router", "custom"])
     expect(deprecatedProvider(provider)).toBe(true);
   for (const p of MODEL_PRESETS)
-    expect(deprecatedPreset(p.id)).toBe(p.provider !== "anthropic");
+    expect(deprecatedPreset(p.id)).toBe(!["anthropic", "anthropic_workspace"].includes(p.provider));
   expect(MODEL_PRESETS.filter((p) => !deprecatedPreset(p.id)).map((p) => p.id))
-    .toEqual(["anthropic-auto", "anthropic-haiku-5-5", "anthropic-sonnet-5-5", "anthropic-opus-5-5"]);
+    .toEqual(["anthropic-auto", "anthropic-haiku-5-5", "anthropic-sonnet-5-5", "anthropic-opus-5-5",
+      "anthropic-workspace-haiku-5-5", "anthropic-workspace-sonnet-5-5", "anthropic-workspace-opus-5-5"]);
   // A retired alias is judged as the preset it now points at.
   expect(deprecatedPreset("plus-6-luna")).toBe(true);
   // Not a preset at all: the PATCH schemas reject it before this is asked.

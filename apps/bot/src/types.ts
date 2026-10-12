@@ -1,5 +1,6 @@
 import type { Selection } from "./config";
 import type { MultiAgentSession } from "./multi-agent";
+import type { WorkspaceMark } from "./workspace/types";
 export type Json = Record<string, unknown>;
 export type ToolCall = {
   id: string;
@@ -72,9 +73,14 @@ export type Context = {
   /** Names one user turn in the logs, so its model requests (children's
    *  included) can be grouped. Never sent to a provider. */
   turnId?: string;
-  /** Set for a turn that runs on the Claude harness (#66); a child keeps its
-   *  root's. Absent means the Codex-style harness. */
-  harness?: "claude";
+  /** Set for a turn that runs on the Claude harness (#66) or as an Anthropic
+   *  Workspace session (#76); a child keeps its root's. Absent means the
+   *  Codex-style harness. */
+  harness?: "claude" | "workspace";
+  /** Workspace: set once the session accepted this turn's message, and saved
+   *  with the checkpoint, so a resumed turn continues that message under the
+   *  same spending ceiling instead of sending it again. */
+  workspaceMark?: WorkspaceMark;
   /** Claude harness: subagents started in this turn, shared with children so
    *  the per-turn limit counts the whole tree. */
   agentCalls?: { count: number };

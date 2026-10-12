@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { Client } from "discord.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { MODEL_PRESETS } from "@hibana/shared/catalog";
+import { MODEL_PRESETS, deprecatedProvider } from "@hibana/shared/catalog";
 import { emptyUserOverride, SUBAGENT_MODES, subagentModePatch } from "@hibana/shared/settings";
 import { Agent } from "../agent";
 import { loadConfig, type Selection } from "../config";
@@ -169,7 +169,9 @@ async function requestFor(selection: Selection, options: Parameters<LlmClient["c
 
 test("every deprecated provider receives the same request as before", async () => {
   const selections: Selection[] = [
-    ...MODEL_PRESETS.filter((p) => p.provider !== "anthropic").map((p) => ({ provider: p.provider, model: p.model })),
+    // The frozen side is the deprecated providers. `anthropic_workspace` is
+    // not one of them and never sends a request through this client (#76).
+    ...MODEL_PRESETS.filter((p) => deprecatedProvider(p.provider)).map((p) => ({ provider: p.provider, model: p.model })),
     // Providers that are configured by environment only and have no preset.
     { provider: "openai", model: "gpt-4o-mini" },
     { provider: "openai", model: "gpt-6-luna" },

@@ -1384,3 +1384,194 @@ test("the two typefaces are served by the app itself", async ({ page, baseURL })
   // No font host, no CDN: every request went to the dashboard's own origin.
   expect([...hosts]).toEqual([new URL(baseURL!).host]);
 });
+
+/* ============================================================
+   Anthropic Workspace (#76). The models Anthropic has, run in a
+   session in Anthropic's cloud. Of the subagent modes only Ultra on
+   Haiku 5.5 applies there; any other stored mode is kept and shown
+   as not in use.
+   ============================================================ */
+
+const workspacePresets = [
+  {
+    id: "anthropic-workspace-haiku-5-5",
+    provider: "anthropic_workspace",
+    model: "claude-haiku-5-5",
+    label: "Anthropic Workspace / Claude Haiku 5.5",
+    deprecated: false,
+  },
+  {
+    id: "anthropic-workspace-sonnet-5-5",
+    provider: "anthropic_workspace",
+    model: "claude-sonnet-5-5",
+    label: "Anthropic Workspace / Claude Sonnet 5.5",
+    deprecated: false,
+  },
+];
+const onWorkspace = (model: string) =>
+  ({ selection: { provider: "anthropic_workspace", model, effort: "high" }, effort: "high" });
+
+test("Anthropic Workspace: Haiku with Ultra runs as ultra; other models and modes are marked as not used", async ({ page }) => {
+  await mockApi(page);
+  await page.route("**/api/catalog", (route) =>
+    route.fulfill({ json: { ...catalog, presets: [...catalog.presets, ...workspacePresets] } }));
+  let custom: Record<string, unknown> = {};
+  const writes: Record<string, unknown>[] = [];
+  await page.route("**/api/guilds/100/settings", (route) => {
+    if (route.request().method() === "PATCH") writes.push(route.request().postDataJSON());
+    return route.fulfill({ json: { settings: { ...emptyGuild(), ...custom } } });
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const strip = page.getByRole("region", { name: "実際の動作" });
+  const item = (label: string) =>
+    strip.locator(".eff-item").filter({ has: page.locator("dt", { hasText: new RegExp(`^${label}$`) }) });
+  const unused = (row: string) => page.locator(`[data-row="${row}"]`).getByText("いまは使われません。");
+  const mode = page.getByRole("radiogroup", { name: "サブエージェント", exact: true });
+  const model = page.locator('[data-row="g-preset"]');
+
+  // Haiku 5.5 with a saved Ultra: Ultra is what runs, and at the saved effort.
+  custom = { ...onWorkspace("claude-haiku-5-5"), ...subagentModePatch("ultra") };
+  await page.goto("/g/100");
+  await expect(item("モデル")).toContainText("claude-haiku-5-5");
+  await expect(item("モデル")).toContainText("Anthropic Workspace");
+  await expect(item("サブエージェント")).toHaveText(/^サブエージェント\s*ultra/);
+  await expect(item("サブエージェント")).toContainText("Managed Agents の dynamic workflows");
+  await expect(item("effort")).toHaveText(/^effort\s*high$/);
+  await expect(page.getByText("いまは使われません。")).toHaveCount(0);
+  // The model row says where the work happens; a Workspace model is not a deprecated one.
+  await expect(model.locator(".model-card")).toContainText("Anthropic Workspace");
+  await expect(model.locator(".badge")).toHaveCount(0);
+  await expect(model).toContainText("作業領域（ファイルとコマンドの実行環境）は Anthropic のクラウドにあり、チャンネルごとに別です。");
+  // The Ultra card describes what Ultra is here, not Hibana's Ultracode.
+  await expect(mode.getByRole("radio", { checked: true })).toHaveText(/^ultra/);
+  await expect(mode.getByRole("radio", { checked: true })).toContainText("Managed Agents の dynamic workflows");
+  await expect(mode).not.toContainText("xhigh");
+
+  // Another model keeps the saved Ultra and runs without delegation. Nothing is forced to xhigh.
+  custom = { ...onWorkspace("claude-sonnet-5-5"), ...subagentModePatch("ultra") };
+  await page.reload();
+  await expect(item("サブエージェント")).toHaveText(/^サブエージェント\s*off/);
+  await expect(item("サブエージェント")).toContainText("保存値 ultra は他のモデルに切り替えると使われます。");
+  await expect(unused("g-mode")).toBeVisible();
+  await expect(page.locator('[data-row="g-mode"]')).toContainText("ultra は Claude Haiku 5.5 のときだけです。");
+  await expect(mode.getByRole("radio", { checked: true })).toHaveText(/^ultra/);
+  await expect(item("effort")).toHaveText(/^effort\s*high$/);
+  await expect(unused("g-effort")).toHaveCount(0);
+
+  // On Haiku, a saved on or multi is not Ultra either. The Jev task loop is not run in a Workspace session.
+  for (const saved of ["on", "multi"] as const) {
+    custom = { ...onWorkspace("claude-haiku-5-5"), ...subagentModePatch(saved), jev_task_enabled: true };
+    await page.reload();
+    await expect(item("サブエージェント")).toHaveText(/^サブエージェント\s*off/);
+    await expect(item("サブエージェント")).toContainText(`保存値 ${saved} は他のモデルに切り替えると使われます。`);
+    await expect(unused("g-mode")).toBeVisible();
+    await expect(item("Jev 行動選択")).toContainText("Anthropic Workspace では使いません。");
+    await expect(unused("g-jev-task")).toBeVisible();
+    await expect(unused("g-effort")).toHaveCount(0);
+  }
+  // The cards stay usable: the saved mode applies again under another model.
+  await expect(mode.getByRole("radio")).toHaveCount(4);
+  for (const card of await mode.getByRole("radio").all()) await expect(card).toBeEnabled();
+  await mode.getByRole("radio", { name: /^ultra/ }).click();
+  await expect.poll(() => writes.at(-1)).toMatchObject(subagentModePatch("ultra"));
+
+  // A plain off is what runs, so nothing is marked. The long notes fit a narrow screen.
+  custom = { ...onWorkspace("claude-sonnet-5-5"), ...subagentModePatch("off") };
+  await page.reload();
+  await expect(item("サブエージェント")).toHaveText(/^サブエージェント\s*off$/);
+  await expect(page.getByText("いまは使われません。")).toHaveCount(0);
+  custom = { ...onWorkspace("claude-sonnet-5-5"), ...subagentModePatch("multi"), jev_task_enabled: true };
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.reload();
+  await expect(unused("g-mode")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+
+  // マイ設定 cannot tell the server's model, so it marks nothing. With a
+  // Workspace model as the personal one, the section says the rule instead.
+  await mockSettings(page, "/api/me/settings", {
+    ...emptyUserOverride(), ...onWorkspace("claude-sonnet-5-5"), ...subagentModePatch("ultra"),
+  });
+  await page.goto("/me");
+  await expect(page.locator("#agents .sec-desc")).toContainText("Anthropic Workspace で効くのは off と ultra で、ultra は Claude Haiku 5.5 のときだけです。");
+  await expect(page.locator('[data-row="me-preset"]')).toContainText("チャンネルごとに別です。");
+  await expect(mode.getByRole("radio", { checked: true })).toContainText("Managed Agents の dynamic workflows");
+  await expect(page.locator('[data-row="me-effort"]')).not.toContainText("xhigh");
+  await expect(page.getByText("いまは使われません。")).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("an Anthropic Workspace preset is offered as the main model, never as a subagent's fixed model", async ({ page }) => {
+  await mockApi(page);
+  // First in the catalog, so a picker that took the first preset there would take a Workspace one.
+  const presets = [...workspacePresets, ...catalog.presets];
+  await page.route("**/api/catalog", (route) => route.fulfill({ json: { ...catalog, presets } }));
+  const writes = await mockSettings(page, "/api/guilds/100/settings", {
+    ...emptyGuild(), ...onWorkspace("claude-haiku-5-5"), ...subagentModePatch("on"),
+  }, presets);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/g/100");
+  const rows = page.getByRole("dialog").locator(".picker-row");
+
+  // The main model: both providers are listed, each under its own name.
+  await page.getByRole("button", { name: "モデルを変更" }).click();
+  const dialog = page.getByRole("dialog", { name: "モデルを選ぶ" });
+  await expect(rows).toHaveCount(4);
+  await expect(dialog.getByRole("group", { name: "プロバイダで絞り込み" }).getByRole("button"))
+    .toHaveText([/^すべて\s*4$/, /^Anthropic Workspace\s*2$/, /^Anthropic\s*2$/]);
+  const haiku = rows.filter({ hasText: "anthropic-workspace-haiku-5-5" });
+  await expect(haiku).toHaveAttribute("aria-pressed", "true");
+  await expect(haiku.locator(".p-prov")).toHaveText("Anthropic Workspace");
+  await expect(dialog.locator(".badge")).toHaveCount(0);
+  await rows.filter({ hasText: "anthropic-workspace-sonnet-5-5" }).click();
+  await expect.poll(() => writes.at(-1)?.preset).toBe("anthropic-workspace-sonnet-5-5");
+  await expect(page.locator('[data-row="g-preset"] .model-card')).toContainText("claude-sonnet-5-5");
+
+  // A subagent Hibana runs itself cannot be on one (the API refuses it): a new
+  // 固定 starts on the first preset that can be, and its picker lists only those.
+  await page.getByRole("combobox", { name: "サブエージェントのモデル選択方式" }).click();
+  await page.getByRole("option", { name: "固定（指定したモデル）", exact: true }).click();
+  await expect.poll(() => writes.at(-1)?.subagent_model).toEqual({ mode: "fixed", preset: "opus" });
+  await page.getByRole("button", { name: /^固定モデル:/ }).click();
+  await expect(rows).toHaveCount(2);
+  await expect(rows.filter({ hasText: "Anthropic Workspace" })).toHaveCount(0);
+  await expect(rows.filter({ hasText: "Opus 5.5" })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("the server list and the model list tell Anthropic Workspace from Anthropic", async ({ page }) => {
+  await mockApi(page);
+  // As in the real catalog: both providers carry a model of the same name, and
+  // the Workspace presets start out unpublished.
+  const direct = { id: "anthropic-haiku-5-5", provider: "anthropic", model: "claude-haiku-5-5", label: "Anthropic / Claude Haiku 5.5", deprecated: false };
+  const presets = [...catalog.presets, direct, ...workspacePresets.map((p) => ({ ...p, published: false }))];
+  await page.route("**/api/catalog", (route) => route.fulfill({ json: { ...catalog, presets } }));
+  await page.route("**/api/guilds", (route) => route.fulfill({ json: { guilds: [
+    { id: "100", name: "Cloud", icon: null, preset: "claude-haiku-5-5", provider: "anthropic_workspace" },
+    { id: "200", name: "Direct", icon: null, preset: "claude-haiku-5-5", provider: "anthropic" },
+    // An API from before #76 names no provider: the catalog decides, where only one provider has the model.
+    { id: "300", name: "Older", icon: null, preset: "DeepSeek V4" },
+    { id: "400", name: "Unnamed", icon: null, preset: "claude-haiku-5-5" },
+  ] } }));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  const shapes = (name: string) =>
+    page.locator(".guild-card").filter({ hasText: name }).locator(".mono-tile svg")
+      .evaluate((svg) => [...svg.querySelectorAll("rect, circle, path")].map((el) => el.tagName).join(" "));
+  await expect(page.locator(".guild-card")).toHaveCount(4);
+  // Workspace is the asterisk in a rounded frame, Anthropic the asterisk in a ring.
+  expect(await shapes("Cloud")).toBe("rect path");
+  expect(await shapes("Direct")).toBe("circle path");
+  // DeepSeek's mark from the catalog, and the plain hexagon when the name alone cannot tell.
+  await expect(page.locator(".guild-card").filter({ hasText: "Older" }).locator('.mono-tile path[fill="currentColor"]')).toHaveCount(1);
+  await expect(page.locator(".guild-card").filter({ hasText: "Unnamed" }).locator('.mono-tile path[stroke="currentColor"]')).toHaveCount(1);
+  expect(await shapes("Unnamed")).toBe("path");
+
+  await page.goto("/models");
+  await expect(page.locator(".lead")).toContainText("「非推奨」は Anthropic と Anthropic Workspace 以外のプロバイダのプリセットです。");
+  await expect(page.locator(".lead")).toContainText("Anthropic Workspace のプリセットは最初は非公開です。");
+  await expect(page.locator(".counts")).toContainText("非公開 2 / 8");
+  await expect(page.locator(".counts")).toContainText("非推奨 3 / 8");
+  const row = page.locator("tbody tr").filter({ has: page.getByRole("cell", { name: "anthropic-workspace-haiku-5-5", exact: true }) });
+  await expect(row.locator(".cell-sub")).toHaveText("Anthropic Workspace");
+  await expect(row.locator(".badge")).toHaveCount(0);
+  await expect(row.getByRole("button", { name: "非公開", exact: true })).toHaveAttribute("aria-pressed", "true");
+});

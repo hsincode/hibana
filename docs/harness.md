@@ -112,7 +112,7 @@ Claude Code から再現しているのは設計です。文面は写してい�
 
 プロバイダー `anthropic_workspace` のターンは、Claude Managed Agents のセッションへの 1 回の発言です（判断記録 #76、[ADR-0011](adr/0011-add-anthropic-workspace-provider.md)）。bot は発言を送り、イベントを読み、Hibana のツールが呼ばれたら実行して結果を返します。モデルを呼ぶループ、会話の保存、シェルとファイルの操作は Anthropic 側で動きます。
 
-- **実 API で動かしたのは、Haiku 5.5・effort medium の、Ultra なしのセッションだけです**（2026-10-12、持ち主の承認のもとで AI が実行。「workspace 経路の実 API での確認」）。smoke の全項目と、bot 自身のターン（Discord は偽）が通りました。Haiku Ultra（workflow run）、Sonnet 5.5・Opus 5.5、実際の Discord を通したターンは、実 API では動かしていません。下に書く挙動のうち、その実行で観測していないものは、公開文書と SDK の型定義をもとに実装し、偽の応答でテストしたものです（「検証していない範囲」）
+- **実 API で動かしたのは、Haiku 5.5・effort medium のセッションだけです**（2026-10-12、持ち主の承認のもとで AI が実行。「workspace 経路の実 API での確認」）。Ultra なしでは、smoke の全項目と、bot 自身のターン（Discord は偽）が通りました。Haiku Ultra は、bot 自身のターン 1 回（workflow run が 1 つ始まって終わり、run のエージェントが bot のツールを呼ぶ）が通りました。Haiku Ultra のうち、budget で止まった run の扱い、run を止める発言、run が開いたままのセッションの削除は、実 API では動かしていません（smoke の `--ultra` の区間。実行を Claude Code の権限の仕組みが止めました）。Sonnet 5.5・Opus 5.5、実際の Discord を通したターンも、動かしていません。下に書く挙動のうち、その実行で観測していないものは、公開文書と SDK の型定義をもとに実装し、偽の応答でテストしたものです（「検証していない範囲」）
 - 持ち主が決めたのは #76 の原文の 4 項目（プロバイダーとして足す、クラウドの作業領域を前提にする、既存のツールは入れられるものだけ入れる、Haiku Ultra に対応しモデルはほかは同じ）です。それ以外は、上限の既定値を含めて AI の案のまま実装しており、本人未確認です
 - プリセットは 3 件です（`anthropic-workspace-haiku-5-5`・`-sonnet-5-5`・`-opus-5-5`。モデル名は `anthropic` と同じ）。Premium 以上が設定でき、最初は非公開です。Auto（Jev が選ぶ）のプリセットはありません。Auto Routing は `anthropic` だけのままです（#35）
 - 公開するのは Web の `/models` です。設定 API を使わない bot（`WEB_API_URL` なし）には公開する手段が無いので、この 3 件は常に非公開・Premium 以上として扱います。Workspace より前の版が書いた `runtime_state.json`（一覧にこの 3 件の ID が無い）を読んだときも、起動のたびに 2 つの一覧へ足し直します。ほかのプリセットの一覧には触れません（`workspace-settings.test.ts`）。その構成で Workspace を使えるのは、`PROVIDER=anthropic_workspace` を bot の既定にしたときだけです（AI の案、本人未確認）
@@ -224,7 +224,7 @@ Claude Code から再現しているのは設計です。文面は写してい�
 8. どの終わり方でも、budget を「消費済み + 1 セント」に下げる。budget に達して止まったセッションの budget は変えない（変えると、止まっていたスレッドが 1 リクエストずつ進むため）
 9. セッションの累積 usage の差分を、利用額の台帳に足す。額を報告しないセッションの枠をどこで数えるかと、ターンの後に lease を残す場合は、「上限と費用」にある
 
-下の各項は、公開文書と SDK の型定義から組んだものです。実 API で通ったのは、Haiku 5.5 の Ultra なしのセッションで smoke が見た範囲です（「workspace 経路の実 API での確認」の「2026-10-12 の実行」）。workflow run にかかわる項は、実 API では確かめていません。挙動の選び方は AI の案で、本人未確認です。
+下の各項は、公開文書と SDK の型定義から組んだものです。実 API で通ったのは、Haiku 5.5 のセッションで smoke が見た範囲です（「workspace 経路の実 API での確認」の「2026-10-12 の実行」）。workflow run にかかわる項のうち、実 API で通ったのは、bot 自身の Haiku Ultra のターン 1 回が通った範囲（run の開始から終了まで、run のエージェントからのツール呼び出しとその結果）だけです。挙動の選び方は AI の案で、本人未確認です。
 
 **どこからがこのターンか**
 
@@ -475,20 +475,20 @@ Claude Code に同梱の claude-api スキルの資料は、workspace 経路の�
 
 ### workspace 経路の実 API での確認
 
-**2026-10-12 に、持ち主の承認のもとで AI が実行しました**（#76 の 11）。smoke スクリプト（`apps/bot/src/workspace/smoke.ts`）を、Haiku 5.5・effort medium で流しています。Haiku Ultra（`--ultra`）は流していません。上限（合計 $1）と鍵（`ANTHROPIC_API_KEY` の値を、その実行のプロセスにだけ渡す）は、持ち主が選びました。結果は、この節の最後の「2026-10-12 の実行」にあります。課金されるので、次に流すときも、そのつど持ち主の承認が要ります。
+**2026-10-12 に、持ち主の承認のもとで AI が実行しました**（#76 の 11）。smoke スクリプト（`apps/bot/src/workspace/smoke.ts`）を、Haiku 5.5・effort medium で流しています。Haiku Ultra は、bot 自身のターンの区間の 1 ターン（`--bot-only --ultra`）だけを流しました。スクリプト側の Ultra の区間（`--ultra`）は流していません。上限（合計 $1）と鍵（`ANTHROPIC_API_KEY` の値を、その実行のプロセスにだけ渡す）は、持ち主が選びました。結果は、この節の最後の「2026-10-12 の実行」にあります。課金されるので、次に流すときも、そのつど持ち主の承認が要ります。
 
 ```sh
 cd apps/bot
 bun run workspace-smoke                # Haiku 5.5、plain のセッション 1 つ
 bun run workspace-smoke --ultra        # 加えて Haiku Ultra のセッション（workflow run）
 bun run workspace-smoke --bot          # 加えて bot 自身のターン（ツールは bot の registry が実行する。Discord は偽）
-bun run workspace-smoke --bot-only     # bot 自身のターンだけ
+bun run workspace-smoke --bot-only     # bot 自身のターンだけ（--ultra を付けると、最後に Haiku Ultra のターンを 1 回）
 bun run workspace-smoke --budget 0.5   # セッションごとの budget（USD。0.2〜10、既定 1）
 bun run workspace-smoke --keep         # 作ったものを残す（budget は下げる）
 bun run workspace-smoke --cleanup      # 以前の実行が残したものを消すだけ
 ```
 
-- `ANTHROPIC_WORKSPACE_API_KEY` が要ります。課金されるのは、モデルのトークン、セッションが動いていた時間、web 検索です。`--budget` はセッションごとの上限なので、`--ultra` を付けると 2 セッションぶんになります。`--bot` の区間は、bot 自身の上限で止めます（1 日と月の上限を `--budget` に、1 ターンの上限を 20 セントにした設定で bot を組み立てます）。これも `--budget` ぶんなので、3 つの区間を全部流すと、最大で `--budget` の 3 倍です。ほかに、発言を送らない budget 1 セントのセッションを 3 つ作ります（effort の `xhigh`・`max` が受け付けられるかの確認と、archive を 2 回送る確認）。全体は 15 分で打ち切ります
+- `ANTHROPIC_WORKSPACE_API_KEY` が要ります。課金されるのは、モデルのトークン、セッションが動いていた時間、web 検索です。`--budget` はセッションごとの上限なので、`--ultra` を付けると 2 セッションぶんになります。`--bot` の区間は、bot 自身の上限で止めます（1 日と月の上限を `--budget` に、1 ターンの上限を 20 セント、Haiku Ultra のターンの上限を 40 セントにした設定で bot を組み立てます）。これも `--budget` ぶんなので、3 つの区間を全部流すと、最大で `--budget` の 3 倍です。ほかに、発言を送らない budget 1 セントのセッションを 3 つ作ります（effort の `xhigh`・`max` が受け付けられるかの確認と、archive を 2 回送る確認）。全体は 15 分で打ち切ります
 - **`--budget` を超えて budget を引き上げません。** 各ターンの前にセッションを読み、実際に使われた額を合わせてから、そのターンの枠を「`--budget` の残り」以下にします（途中のステップが失敗しても、手元の額がずれないようにするため）。読んだ後に額が増えていて、引き上げ先が `--budget` を超えるステップは、budget を上げる前に失敗にします（わずかに超えてでも観測する、という選び方もあります。AI の案、本人未確認）
 - environment・エージェント・セッションは、bot と同じ `WorkspaceResources` で作ります（名前で探す → 無ければ作る → セッションを作る → 作ったセッションを検査する）。bot の最初のターンが通る作成の経路を、そのまま実 API に当てるためです。名前は実行ごとの `hibana-smoke-<実行ごとの文字列>-…`、`metadata.app` は `hibana-smoke` で、データディレクトリは一時的なものです。bot のもの（名前が `hibana-workspace-…`、`metadata.app` が `hibana`）は採用しません。名前が同じでも、`metadata.app` が違うものは採用しません（`workspace-resources.test.ts`）
 - 後片付けは、セッションを止めて budget を下げてから delete し、environment とエージェントは 1 つずつ読んで、`metadata.app` が `hibana-smoke` であることを確かめてから消します。**途中で落ちたら `--cleanup` を実行**してください（`metadata.app` で探します）
@@ -504,6 +504,7 @@ bun run workspace-smoke --cleanup      # 以前の実行が残したものを消
   - bot の設定は、デプロイのものではなく、最小のものです。Jev・公開サイト・スキル・sandbox は無効で、セッションの作り方を決めるもの（`ANTHROPIC_WORKSPACE_*`、`WEB_SEARCH_ENABLED`、`PERSONA_FILE`）だけを引き継ぎます。その設定でのツールは 72 個です（plain の区間は、全部を有効にした 76 個で作ります）
   - 作るものの名前とラベルは、ほかの区間と同じ `hibana-smoke-…` です。bot に名前とラベルを渡す口（`WorkspaceDeps.identity`）は、このスクリプトとテストだけが使います（`workspace-turn.test.ts`）
   - registry が断ったツール呼び出しは、bot 自身の理由の文を出します（「You cannot read this channel」など）
+  - `--ultra` を付けると、この区間の最後に Haiku Ultra のターンを 1 回流します（`--bot-only --ultra` なら、bot のターンだけで、スクリプト側の Ultra の区間は流しません）。Ultra は、ダッシュボードと同じ経路（`runtime.patch`）で保存します。次の発言は新しい会話になり、ultra の variant のセッションで始まります。workflow run のエージェント 2 つに、`read_messages` と `send_message` を 1 回ずつ呼ばせます。run のエージェントからの呼び出しは、registry が worker として実行するので、読むほうは実行され、投稿するほうは断られます
 - 確かめる項目:
   - 作成: environment とエージェント、76 個のツール定義つきのセッション、同じ名前のエージェントをもう 1 つ作れるか、保存したファイルを消した後に名前から採用できるか、effort の `xhigh`・`max`、同じセッションを 2 回 archive したときの応答
   - 1 ターン: 応答、最初の発言を送った直後のセッションの読み（下の「最初の発言の直後の観測」。判定なし）、発言が処理済みになる時点（ターンの始まりか終わりか）、送ったばかりの発言が、発言の一覧（新しい順）の先頭に、送信が返した id で載っているか、ストリームが発言を処理済みとして届けるか、usage の報告、添付画像、組み込みツール、custom tool の往復
@@ -511,6 +512,7 @@ bun run workspace-smoke --cleanup      # 以前の実行が残したものを消
   - 続き: 2 ターン目が同じセッションで続くこと、ターンの途中でストリームを開き直すこと（無音の上限を 6 秒にして、20 秒かかるコマンドを実行させます。コマンドの出力が返信に 1 回だけ出ることを見ます）、イベントの一覧の並び、idle のセッションへの interrupt、実行中の interrupt
   - budget: budget での停止、消費済み以下の budget への更新が断られる形、budget で止まった後のターン（budget を上げた後に前の作業が進んだか、そのとき送った発言が一覧のどこに載り、ストリームにどう届いたかも出します）
   - `--bot`: bot 自身のターンの返信、bot が作ったセッション（モデル、effort が medium、ツールの数、ラベル）、読むだけのツール 2 つ（`read_messages`・`get_bot_settings`）、変更するツール 2 つを順に（`send_message` の後に `add_reaction`。メンションが無効で送られること）、コンテナのファイルを `send_file` で渡すこと（Files API から取り出したバイト列が、書いたものと同じこと）、本人が読めないチャンネルへの `read_messages` が断られ、Discord には問い合わせず、失敗の結果として API に受け付けられること、コンテナのファイルのツールと `web_fetch`（bot には来ないこと）、bot の台帳が持つ額がセッションの報告以上であること、Messages API のクライアントを使わないこと、`/clear` でセッションが削除されること
+  - `--bot` と `--ultra`: 保存した Ultra で ultra の variant のセッションが作られること（workflows が有効なエージェント）、workflow run が始まって終わり、開いたまま残らないこと、run のエージェントからの `read_messages` が worker として実行され、返信にその内容が出ること、run のエージェントからの `send_message` が断られ、Discord には何も投稿されないこと、bot の台帳が持つ額がセッションの報告以上であること
   - `--ultra`: Haiku 5.5 で workflows を有効にしたエージェントが作れること、workflow run の開始から終了まで、run の中からの custom tool の呼び出し、budget で止めて interrupt した run が、budget を上げても止まったままか、開いた run を発言で止められるか
 - **最初の発言の直後の観測**（判定なし。PASS / FAIL の数にも、終了コードにも入りません）。plain のセッションの最初のターン（「reply」）で、発言を送った直後に、セッションを 1 回読み（1 回の実行で GET が 1 件増えます）、続けて、前からある発言の一覧の読み取りを行って、結果を 1 行の INFO にします。行は、ターンの途中（`PASS reply` より前）に出ます。その後でターンが失敗しても出ます
 
@@ -543,18 +545,20 @@ bun run workspace-smoke --cleanup      # 以前の実行が残したものを消
 AI が手元から実行しました。**持ち主は再実行していないので、確定した結果ではありません。** 実行のログは Issue #76 のコメントにあります。
 
 - 条件: bun 1.4.3、`@anthropic-ai/sdk` 0.133.0、モデルは `claude-haiku-5-5`、effort は medium、networking は `unrestricted`、web 検索は有効。鍵は、`apps/bot/.env` の `ANTHROPIC_API_KEY` の値を、実行のプロセスにだけ `ANTHROPIC_WORKSPACE_API_KEY` として渡しました（持ち主の選択。ファイルには書いていません。bot のコードの「互いにフォールバックしない」は変えていません）
-- 上限は合計 $1（持ち主の選択）。使ったのは、セッションが報告した list cost の合計で **$0.12** です（請求額は確かめていません）
+- 上限は合計 $1（持ち主の選択）。使ったのは、セッションが報告した list cost の合計で **$0.22** です（請求額は確かめていません）
 
 | 回 | 引数 | 結果 | セッションの list cost | 時刻（UTC） |
 |---|---|---|---|---|
 | 1 | `--budget 0.6` | 22/22 が PASS | $0.05 | 05:39:01〜05:40:32 |
 | 2 | `--bot-only --budget 0.4` | 11/11 が PASS | $0.03（6 ターン） | 05:42:00〜05:42:47 |
 | 3 | `--budget 0.5` | 23/23 が PASS | $0.04 | 05:43:50〜05:45:49 |
+| 4 | `--bot-only --ultra --budget 0.3` | 12/12 が PASS | $0.10（Ultra なしの 6 ターンが $0.03、Haiku Ultra の 1 ターンが $0.07） | 07:17:21〜07:18:37 |
 
 - 1 回目と 2 回目は、コミットする前の作業ツリーで流しました。3 回目は、開き直しの項目を足し、下の観測の誤りを直した版です
-- 4 回目（最終版での `--bot-only` の取り直し）は、Claude Code の権限の仕組みが実行を止めたので、流していません。bot の区間の実 API での結果は、2 回目のものです。2 回目の後にスクリプトへ足したのは、判定に入らない INFO の 1 行（チャンネルに出した文の数）と、ストリームを開いた回数の数え上げだけで、127.0.0.1 の偽のサーバーでは通っています
+- 4 回目は、bot 自身のターンの区間の取り直しです（コミット `6f4b8fd`）。最初に試みたとき（`--bot-only`）は、Claude Code の権限の仕組みが実行を止めたので、流していません。その後、持ち主がその実行を許可し（上限 $0.3）、あわせて Haiku Ultra の確認を指示したので、同じ区間の最後に Haiku Ultra のターンを 1 回足して、同じ上限で流しました
+- **スクリプト側の Ultra の区間（`--ultra --budget 0.38`）は、権限の仕組みが実行を止めたので、流していません。** budget で止めて interrupt した run が、budget を上げても止まったままか、開いた run を発言で止められるか、run の中の組み込みツール（`bash`）は、実 API では見ていません。この区間は、127.0.0.1 の偽のサーバーに向けて通しただけです（7/7。偽の応答は AI が書いたものです）
 - **1 回目の実行には、スクリプトの観測の誤りが 1 つありました。** ストリームのイベントを SSE のイベント名で見分けていましたが、実 API のフレームの名前はすべて `message` で、種類はデータの `type` にだけあります。「the turn's message on the stream」が 2 行とも「0 回」と出たのは、このためです。データの `type` で数えるように直し、3 回目で取り直しました（bot の runner は、初めからデータの `type` で見ています）
-- 作ったものは、セッションと environment をすべて削除し、エージェントは archive しました（API にエージェントの削除は無いので、`hibana-smoke-…` という名前の archive 済みのエージェントが 5 つ、その鍵の workspace に残っています）
+- 作ったものは、セッションと environment をすべて削除し、エージェントは archive しました（API にエージェントの削除は無いので、`hibana-smoke-…` という名前の archive 済みのエージェントが 7 つ、その鍵の workspace に残っています。うち 1 つは workflows を有効にしたものです）
 
 観測したこと（「検証していない範囲」で前提として書いていたものを含みます）:
 
@@ -579,9 +583,13 @@ AI が手元から実行しました。**持ち主は再実行していないの
 | budget | 枠 1 セントのターンは、web 検索 1 回の後、budget で止まった。消費済み以下の budget への更新は HTTP 400 `invalid_request_error` で、`details` も `error_code` も無く、メッセージが `budget.max_list_cost` に触れる。runner は文面で見分けた |
 | budget で止まった後 | budget を上げると、前の作業が再開した（モデルへのリクエスト 1 回）。発言と一緒に送った interrupt の後には進まず、発言はその後で取り上げられた |
 | archive | 1 回目で `archived_at` が付き、`status` は `terminated` になる。2 回目も受け付けられ、`archived_at` が変わる。archive 済みのセッションの delete は受け付けられた |
-| bot 自身のターン | 6 ターンとも返信した。registry を通ったのは `read_messages`・`get_bot_settings`・`send_message`・`add_reaction`・`send_file`・断られた `read_messages`。bot の台帳は 4 セント（セッションの報告 3 セント + 新しいセッションの 1 セント）。`/clear` でセッションは削除された |
+| bot 自身のターン | 6 ターンとも返信した（2 回目と 4 回目で同じ結果）。registry を通ったのは `read_messages`・`get_bot_settings`・`send_message`・`add_reaction`・`send_file`・断られた `read_messages`。bot の台帳は 4 セント（セッションの報告 3 セント + 新しいセッションの 1 セント）。`/clear` でセッションは削除された |
+| Haiku Ultra のセッション（4 回目） | Ultra を保存した後の発言で、bot は ultra の variant のセッションを新しく作った。Haiku 5.5 のエージェントで workflows は有効にでき、作成時の上書きの後も、セッションのエージェントに `multiagent_20261001`（workflows が有効、subagents と advisor は無効）が残った |
+| workflow run（4 回目） | 「エージェント 2 つの run を 1 つ」と頼んだ発言で、run が 1 つ作られ、終わった（開いたまま残った run は無い）。ストリームには `workflow_run.created`・`workflow_run.status_running`・`workflow_run.phase_started`・`workflow_run.phase_ended`・`workflow_run.status_ended` が 1 回ずつ、`session.thread_created` と `session.thread_status_terminated` が 2 回ずつ届いた。**`workflow_run.error` も 1 回届いた**（`workflow_run.created` より前。種類と文面は記録していない。その後に run が作られて完了した。bot は、このイベントを状況の 1 行として出すだけで、ターンは続ける） |
+| run のエージェントからのツール呼び出し（4 回目） | run のエージェントの `read_messages` は、registry が worker として実行し、返信にその内容が出た。run のエージェントの `send_message` は、registry が断り（「An agent of a workflow run cannot use send_message. …」）、Discord には何も投稿されず、返信は断られたと答えた。呼び出しが届いた時点で、bot はそのスレッドの run と、run を始めた人を知っていた（知らなければ、呼び出しは実行されない）。結果は、スレッドの指定なし（`custom_tool_use_id` だけ）で送って、受け付けられた |
+| Haiku Ultra の 1 ターンの使用量（4 回目） | セッションの報告は 7 セント、稼働 18.61 秒、入力 28 トークン、キャッシュからの読み 251,287、キャッシュへの書き 85,418、出力 2,486 トークン。bot の台帳は 8 セント増えた（セッションの報告 7 セント + 新しいセッションの 1 セント）。1 回の値で、run の大きさで変わる |
 
-その実行で見ていないもの: Haiku Ultra（`--ultra`）、Sonnet 5.5・Opus 5.5、`AskUserQuestion`（人の操作を待つため）、実際の Discord、`limited` の networking、1 日・月の上限に達したときの断り、再起動をまたぐ再開、5 分を超える無音、数十分のターン。
+その実行で見ていないもの: スクリプト側の Ultra の区間（budget で止めた run が、interrupt の後に budget を上げても止まったままか、開いた run を発言で止められるか、run の中の `bash`）、run が開いたままのセッションの delete / archive、ターンをまたいで続く run、run を始めた人と別の人のターンでの呼び出しの断り、Sonnet 5.5・Opus 5.5、`AskUserQuestion`（人の操作を待つため）、実際の Discord、`limited` の networking、1 日・月の上限に達したときの断り、再起動をまたぐ再開、5 分を超える無音、数十分のターン。
 
 ## 本番の質問を使った新旧の比較
 
@@ -628,11 +636,12 @@ cd apps/bot && bun run harness-eval summary <run>       # 時間・費用・判�
 
 ### workspace 経路で検証していない範囲
 
-- **実 API で確かめたのは、Haiku 5.5・effort medium の、Ultra なしのセッションだけです**（2026-10-12、「workspace 経路の実 API での確認」の「2026-10-12 の実行」。AI が実行し、持ち主は再実行していません）。workflow run（Haiku Ultra）、Sonnet 5.5・Opus 5.5、実際の Discord を通したターンは、動かしたのが偽の応答に対してだけです。偽の応答は、公開文書と SDK 0.133.0 の型定義から AI が書いたものです
-- 下の「前提を置いているところ」のうち、その実行で観測できたものには「観測:」を付けました。観測は 2〜3 回の実行のもので、いつもそうだとは言えません
+- **実 API で確かめたのは、Haiku 5.5・effort medium のセッションだけです**（2026-10-12、「workspace 経路の実 API での確認」の「2026-10-12 の実行」。AI が実行し、持ち主は再実行していません）。Haiku Ultra で実 API に当てたのは、bot 自身のターン 1 回（run が 1 つ始まって終わる）だけです。budget で止まった run、ターンをまたぐ run、run が開いたセッションの片付け、Sonnet 5.5・Opus 5.5、実際の Discord を通したターンは、動かしたのが偽の応答に対してだけです。偽の応答は、公開文書と SDK 0.133.0 の型定義から AI が書いたものです
+- 下の「前提を置いているところ」のうち、その実行で観測できたものには「観測:」を付けました。観測は 1〜3 回の実行のもので、いつもそうだとは言えません
 - 公開文書に記述が無く、実装が前提を置いているところ:
-  - Haiku 5.5 のエージェントで workflows を有効にできるか（対応モデルの記述が無い）。できなければ Haiku Ultra は成り立ちません
-  - セッションの作成時の上書き（`agent_with_overrides`）で、エージェントの `multiagent` の設定が引き継がれるか。食い違いはログに警告を出すだけで、失敗にはしていません
+  - Haiku 5.5 のエージェントで workflows を有効にできるか（対応モデルの記述が無い）。できなければ Haiku Ultra は成り立ちません **観測: 有効にでき、run が始まって終わりました（1 回）**
+  - セッションの作成時の上書き（`agent_with_overrides`）で、エージェントの `multiagent` の設定が引き継がれるか。食い違いはログに警告を出すだけで、失敗にはしていません **観測: 引き継がれました（workflows が有効のまま）**
+  - run のスレッドからの custom tool の呼び出しに、スレッドの指定なし（`custom_tool_use_id` だけ）の結果を返して届くか（SDK 0.133.0 の型に、結果のイベントのスレッドの項目が無いため、そう送っています） **観測: 受け付けられ、run は結果を使って完了しました（2 つのスレッドから 1 回ずつ）**
   - `user.message` に `processed_at` が付くのが、処理の開始（取り上げ）か、ターンの終わりか。公開文書は「イベントの処理が終わったときに付く。送ったイベントは、前のイベントの後ろでキューにある間は null」、SDK の型のコメントは「エージェントがこの発言の処理を終えた時点」と書いていて、どちらとも決まりません。実装は「開始」を前提にしています。「終わり」だった場合に起きること（コードの読み取りと、偽のセッションでの再現。リポジトリの自動テストにはありません）: **観測: 取り上げの時点でした。下の 3 つは、その実行では起きていません**
     - 前の作業が残っていたセッションへのターンは、本文の無いまま終わりえます（その場合の返信は「返信の本文がないまま…」の定型文です）。額の報告が無く、取り上げ前の発言が残っていたセッション（今は断らずに始めるようになった状態）でも、同じ形で本文の無いまま終わりました
     - idle から始めたターンは、ストリームを開き直した間のイベントを取りこぼします（前のターンは再生しません）。Hibana のツール呼び出しを取りこぼすと、時間の上限まで待ちます（「限界」）

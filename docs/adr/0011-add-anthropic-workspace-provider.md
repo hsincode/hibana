@@ -1,6 +1,6 @@
 # ADR-0011: プロバイダー「Anthropic Workspace」を足し、Claude Managed Agents のセッションで動かす
 
-- 状態: 提案（実装済み。実 API では、Haiku 5.5 の Ultra なしのセッションだけを 2026-10-12 に確認。持ち主がマージを決めた時点で「採用」に変える）
+- 状態: 採用（2026-10-12、持ち主が PR #77 のマージを指示した。マージ先は #73 のブランチ `feat/claude-harness` で、main に入るのは #73 がマージされたとき。実 API では、Haiku 5.5 のセッションだけを同じ日に確認した: Ultra なしの全項目と、Haiku Ultra の bot 自身のターン 1 回。#76 の未決の点は、AI の案のまま実装してあり、本人未確認）
 - 決定日・判断者: 次の 4 項目は 2026-10-12、持ち主（#76 の原文）。プロバイダー「Anthropic Workspace」として足すこと。既存のサンドボックスではなく、クラウドの作業領域を前提にすること。既存のツールは入れられるものを入れ、入れられないものは無理に入れないこと。モデルは、Haiku Ultra に対応するほかは同じにすること。それ以外（下で「AI の案」と書いた点。上限の値を含む）は AI の案のまま実装しており、本人未確認
 - 判断の過程を残した Issue: #76（本人の原文、AI の解釈、まだ決まっていない 11 点の比較）、#66（Managed Agents を不採用にした比較）、#67（非推奨の線引き）、#68（Anthropic の委譲）、#35（Auto Routing）、#44（利用額）
 - 置き換える／置き換えられた ADR: なし。ADR-0009 が代替案として不採用にした「Managed Agents」を、`anthropic` のターンの置き換えではなく、別のプロバイダーとして足す。ADR-0009（`anthropic` は `claude` ハーネス）と ADR-0010（非推奨の 14 種と凍結）の対象は変えない。ADR-0008 の保存先（`conversations.db`）に、表を 2 つ足す
@@ -85,10 +85,10 @@
   - 画面: `apps/web/tests/design.spec.ts`（`bun run test:ui`）
 - 実装のレビュー（AI による。2026-10-12）で見つかった誤りと、その対応は、この ADR を足した PR に書く。直した挙動は、上の「採用する構成・方式」と [docs/harness.md](../harness.md) に反映した。直しは別の点検（AI による）で反証し、そこで見つかった項目と対応、直さずに残した限界も、同じ PR に書く。対応の選び方は AI の案で、本人未確認
 - 実際の運用・CI/CD の実行記録: 未配信
-- 実 API での確認: **2026-10-12 に、持ち主の承認のもとで AI が実行した**（#76 の 11。上限は合計 $1、鍵は `ANTHROPIC_API_KEY` の値をその実行のプロセスにだけ渡す。どちらも持ち主の選択）。Haiku 5.5・effort medium で、手動のスクリプト（`cd apps/bot && bun run workspace-smoke`）の 23 項目と、bot 自身のターン（`--bot-only`。ツールは bot の registry が実行し、Discord は偽）の 11 項目が通った。セッションが報告した list cost の合計は $0.12。Haiku Ultra（`--ultra`）は流していない。持ち主は再実行していない。結果と観測は [docs/harness.md](../harness.md) の「workspace 経路の実 API での確認」にある
-  - 実装が前提にしていたことのうち、観測できたもの: `processed_at` は取り上げの時点に付く。額（`list_cost`）は作成直後から報告される。取り上げ前の発言は一覧に `processed_at` なしで載る。budget を消費済み以下にしたときの 400 は、文面だけで来る。サブディレクトリのファイルは、ディレクトリなしの名前で一覧に載る
+- 実 API での確認: **2026-10-12 に、持ち主の承認のもとで AI が実行した**（#76 の 11。上限は合計 $1、鍵は `ANTHROPIC_API_KEY` の値をその実行のプロセスにだけ渡す。どちらも持ち主の選択）。Haiku 5.5・effort medium で、手動のスクリプト（`cd apps/bot && bun run workspace-smoke`）の 23 項目と、bot 自身のターン（`--bot-only --ultra`。ツールは bot の registry が実行し、Discord は偽）の 12 項目が通った。12 項目のうち 1 つは Haiku Ultra のターンで、workflow run が 1 つ始まって終わり、run のエージェントからの `read_messages` は worker として実行され、`send_message` は断られた。セッションが報告した list cost の合計は $0.22。スクリプト側の Ultra の区間（`--ultra`。budget で止めた run の扱いなど）は、Claude Code の権限の仕組みが実行を止めたので、流していない。持ち主は再実行していない。結果と観測は [docs/harness.md](../harness.md) の「workspace 経路の実 API での確認」にある
+  - 実装が前提にしていたことのうち、観測できたもの: `processed_at` は取り上げの時点に付く。額（`list_cost`）は作成直後から報告される。取り上げ前の発言は一覧に `processed_at` なしで載る。budget を消費済み以下にしたときの 400 は、文面だけで来る。サブディレクトリのファイルは、ディレクトリなしの名前で一覧に載る。Haiku 5.5 のエージェントで workflows を有効にでき、セッションの作成時の上書きの後も残る。run のスレッドからの custom tool の呼び出しには、スレッドの指定なしの結果が届く
   - 課金されるので、次に流すときも、そのつど持ち主の承認が要る
-- 検証していない範囲: [docs/harness.md](../harness.md) の「検証していない範囲」のとおり。主なものは、Haiku 5.5 で workflows を有効にできるか（Haiku Ultra は実 API で動かしていない）、Sonnet 5.5・Opus 5.5、実際の Discord を通したターン、実際の費用（請求額）、切り戻しの挙動、持ち主による文面の確認
+- 検証していない範囲: [docs/harness.md](../harness.md) の「検証していない範囲」のとおり。主なものは、Haiku Ultra のうち、budget で止まった run の扱い・ターンをまたぐ run・run が開いたセッションの片付け（実 API で動かしたのは、run が 1 つ始まって終わるターン 1 回だけ）、Sonnet 5.5・Opus 5.5、実際の Discord を通したターン、実際の費用（請求額）、切り戻しの挙動、持ち主による文面の確認
 
 ## 見直す条件
 - この判断を見直す事象・数値:

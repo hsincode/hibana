@@ -96,8 +96,17 @@ stateDiagram-v2
 | モデルが Anthropic / Auto で、Jev 判定が ON | モデルは「Jev が会話ごとに選ぶ」、effort は「Jev が決める」 | [Anthropic の auto routing](jev.md#anthropic-の-auto-routing) |
 | モデルが Anthropic / Auto で、Jev 判定が OFF | `AUTO_ROUTE_FALLBACK` のモデルと effort | 同上（「Jev が使えないとき」） |
 | モデルが Anthropic（Auto と固定の 3 モデル） | サブエージェントは off | 同上（「サブエージェントは off です」） |
-| サブエージェントが ultra（Anthropic 以外） | effort は xhigh | [Ultracode](ultracode.md) |
-| サブエージェントが multi（Anthropic 以外）で、Jev 行動選択モードが ON | Jev 行動選択は「使わない」 | [Jev 判定と行動選択モード](jev.md) |
+| モデルが Anthropic Workspace の Haiku 5.5 で、サブエージェントが ultra | サブエージェントは `ultra`（「Managed Agents の dynamic workflows」と添える）。effort は保存値のまま（xhigh にしない） | [Anthropic Workspace](anthropic-workspace.md#haiku-ultra)（#76）。bot の `WORKFLOWS_ENABLED` などで Haiku Ultra が止まっていても、`ultra` と出ます（画面からは分かりません） |
+| モデルが Anthropic Workspace で、上以外 | サブエージェントは `off`。保存値が on / ultra / multi のときは「Anthropic Workspace では委譲なしで動きます。…」と添える。Jev 行動選択が ON のときは「使わない」 | 同上 |
+| サブエージェントが ultra（`anthropic`・`anthropic_workspace` 以外） | effort は xhigh | [Ultracode](ultracode.md) |
+| サブエージェントが multi（`anthropic`・`anthropic_workspace` 以外）で、Jev 行動選択モードが ON | Jev 行動選択は「使わない」 | [Jev 判定と行動選択モード](jev.md) |
+
+Anthropic Workspace を選んでいるときは、ほかにも次の表示が変わります（#76）。
+
+- モデルの行に、作業領域がクラウドにあること、チャンネルごとに別であること、使えないツールがあること、稼働時間にも料金がかかることを出します
+- サブエージェントの ultra のカードの説明を、Haiku Ultra のもの（Haiku 5.5 のときだけ、effort は変えない、1 回の応答ごとに費用と時間の上限がある）に差し替えます
+- サブエージェントと役割の「固定」のモデルの候補に、Anthropic Workspace のプリセットは出しません（API も断ります）
+- サーバー一覧とモデル一覧では、プロバイダーの印が Anthropic と別の形（角丸の枠）になります。同じモデル名が両方にあるためです。マイ設定の「あなたの上書き」の要約はモデル名だけなので、どちらかは区別できません
 
 保存値と違う値で動いている項目は、その設定行にも「いまは使われません。」と理由を出し、部品に斜線の地を敷きます。部品は操作できるままです（保存値は残り、条件が外れると使われるため）。マイ設定では、サーバー側の値が分からないと言い切れないので、この印は出さず、説明文に書き添えるだけにしています。
 

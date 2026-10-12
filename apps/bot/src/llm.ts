@@ -13,8 +13,10 @@ export { retryDelay } from "./llm-request";
 // `budget_tokens`, `thinking.type=disabled` and sampling parameters with HTTP
 // 400. Depth is set only through `output_config.effort`. (Sonnet 5.5's own
 // thinking-off mode, `between_tools`, is not used; effort none maps to low.)
+// Opus 5.6 is unreleased and its rules are not known (#79): it is sent what
+// Opus 5.5 is, which every 5-series model accepts.
 export const adaptiveOnlyClaude = (model: string) =>
-  /claude-(opus-5-5|sonnet-5-5|fable-5|mythos-5)/.test(model);
+  /claude-(opus-5-[56]|sonnet-5-5|fable-5|mythos-5)/.test(model);
 // Every Claude 5-series model rejects `budget_tokens` and sampling parameters;
 // Opus 5 and Sonnet 5 still accept `thinking.type=disabled`.
 const claude5 = (model: string) =>

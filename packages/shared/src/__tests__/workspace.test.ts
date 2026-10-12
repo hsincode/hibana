@@ -37,14 +37,18 @@ import {
 // Decision record: #76. Anthropic Workspace is a provider of its own: the
 // models `anthropic` has, run as Claude Managed Agents sessions.
 
-const WORKSPACE = ["anthropic-workspace-haiku-5-5", "anthropic-workspace-sonnet-5-5", "anthropic-workspace-opus-5-5"];
+const WORKSPACE = [
+  "anthropic-workspace-haiku-5-5", "anthropic-workspace-sonnet-5-5", "anthropic-workspace-opus-5-5",
+  // Unreleased, wired ahead of launch.
+  "anthropic-workspace-opus-5-6", "anthropic-workspace-fable-5-5",
+];
 const workspace = (model: string) => ({ provider: WORKSPACE_PROVIDER, model });
 
-test("the three Workspace presets are unpublished, Premium-floor and server-shared, Haiku first", () => {
+test("the Workspace presets are unpublished, Premium-floor and server-shared, Haiku first", () => {
   const presets = MODEL_PRESETS.filter((p) => p.provider === WORKSPACE_PROVIDER);
   expect(presets.map((p): string => p.id)).toEqual(WORKSPACE);
   // The models are the ones `anthropic` offers, under the same wire ids.
-  expect(presets.map((p): string => p.model)).toEqual(["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"]);
+  expect(presets.map((p): string => p.model)).toEqual(["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-5-6", "claude-fable-5-5"]);
   for (const p of presets)
     expect(MODEL_PRESETS.some((a) => a.provider === "anthropic" && a.model === p.model)).toBe(true);
   // The dashboard finds a provider by the first half of a label.

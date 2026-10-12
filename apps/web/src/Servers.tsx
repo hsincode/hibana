@@ -32,7 +32,10 @@ export function GuildList() {
       .catch(() => undefined);
   }, []);
 
-  /** model 文字列 -> provider。同名 model が複数プロバイダにある場合は特定しない。 */
+  /**
+   * model 文字列 -> provider。同名 model が複数プロバイダにある場合は特定しない。
+   * `provider` を返さない旧 API 用で、返ってきたときはそちらを使う。
+   */
   const providerOf = (model: string): string | undefined => {
     const hits = presets.filter(
       (p) => (p.model ?? p.label.split("/").pop()?.trim()) === model,
@@ -112,7 +115,7 @@ export function GuildList() {
                   <span className="model">
                     {g.preset ? (
                       <>
-                        <ProviderTile provider={providerOf(g.preset)} />
+                        <ProviderTile provider={g.provider ?? providerOf(g.preset)} />
                         {g.preset}
                       </>
                     ) : (

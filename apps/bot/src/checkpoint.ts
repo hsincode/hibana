@@ -79,6 +79,16 @@ export function resumeNote(messages: readonly Message[]): Message | undefined {
     content: "The previous attempt stopped after the answer above was drafted; it may not have reached the user. Continue the authorized task and reply with the complete, self-contained final answer. Do not repeat side effects that already succeeded." };
 }
 
+/** Whether the bot picks this checkpoint up by itself when it starts. Older
+ *  than two hours it is left alone, as `/retry` leaves it. An Anthropic
+ *  Workspace turn (#76) is picked up this way once: its session goes on
+ *  spending while the bot is down, and a bot that restarts in a loop would
+ *  otherwise start the same work again each time. After that it waits for
+ *  `/retry`. */
+export function resumesAtStart(checkpoint: Checkpoint, now = Date.now()): boolean {
+  return now - checkpoint.at <= 7200000 && (checkpoint.ctx.workspaceMark?.resumes ?? 0) < 1;
+}
+
 export function checkpointInScope(checkpoint: Checkpoint, ctx: Context): boolean {
   return checkpoint.ctx.channelId === ctx.channelId && checkpoint.ctx.userId === ctx.userId
     && checkpoint.ctx.guildId === ctx.guildId && checkpoint.ctx.thread === ctx.thread;

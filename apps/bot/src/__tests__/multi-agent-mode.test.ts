@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { Client } from "discord.js";
 import pino from "pino";
-import { MODEL_PRESETS } from "@hibana/shared/catalog";
+import { MODEL_PRESETS, WORKSPACE_PROVIDER } from "@hibana/shared/catalog";
 import {
   emptyGuild,
   emptyUserOverride,
@@ -57,8 +57,9 @@ test("every catalog model keeps the four subagent modes and both Jev switches in
   const ctx = { ...context(), team: {} as Context["team"] };
   runtime.snapshot.user_roles[ctx.userId] = "administrator";
   try {
-    // Anthropic turns always run without subagents (auto-route.test.ts).
-    for (const preset of MODEL_PRESETS.filter((p) => p.provider !== "anthropic"))
+    // Anthropic turns always run without subagents (auto-route.test.ts), and
+    // Anthropic Workspace has no modes of Hibana's own (workspace-settings.test.ts).
+    for (const preset of MODEL_PRESETS.filter((p) => p.provider !== "anthropic" && p.provider !== WORKSPACE_PROVIDER))
       for (const mode of SUBAGENT_MODES) for (const evaluation of [false, true]) for (const actions of [false, true]) {
         runtime.snapshot.user_overrides[ctx.userId] = {
           ...emptyUserOverride(),

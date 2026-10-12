@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { resolve } from "node:path";
-import { MODEL_PRESETS, EFFORTS, canonicalModel } from "@hibana/shared/catalog";
+import { AUTO_ROUTE_MODEL, MODEL_PRESETS, EFFORTS, WORKSPACE_PROVIDER, canonicalModel } from "@hibana/shared/catalog";
 import { SIZE_GUIDELINES, type SizeGuideline } from "./workflow/prompts";
 
 export type Selection = {
@@ -17,6 +17,14 @@ const providers: Record<string, [string, string]> = {
   deepseek: ["https://api.deepseek.com", "deepseek-flash"],
   openai: ["https://api.openai.com/v1", "gpt-4o-mini"],
   anthropic: ["https://api.anthropic.com/v1", "claude-sonnet-5-5"],
+  // Anthropic Workspace (#76) has its own key, `ANTHROPIC_WORKSPACE_API_KEY`,
+  // and never borrows `ANTHROPIC_API_KEY`. The official SDK adds `/v1` to the
+  // path itself, so this base has none. The default model is the catalog's
+  // first preset of the provider, as the settings API seeds it.
+  anthropic_workspace: [
+    "https://api.anthropic.com",
+    MODEL_PRESETS.find((m) => m.provider === WORKSPACE_PROVIDER)!.model,
+  ],
   xai: ["https://api.x.ai/v1", "grok-3-mini"],
   openrouter: ["https://openrouter.ai/api/v1", ""],
   orca_router: ["https://api.orcarouter.ai/v1", "obsidian/Qwen3.8-27B"],
@@ -81,6 +89,34 @@ function availableCpus(): number {
   } catch {}
   return cpus;
 }
+/** The smallest allowance an Anthropic Workspace turn is started with, in
+ *  cents: a single model request can cost more than less. A turn's own limit
+ *  cannot be set below it, or every turn would be refused (#76). */
+export const WORKSPACE_MIN_TURN_CENTS = 5;
+/** A USD amount as whole cents, at least `minCents` (one unless given). The
+ *  Managed Agents API takes money in minor units, so the limits are kept
+ *  that way from the start. */
+function centsEnv(env: NodeJS.ProcessEnv, key: string, fallback: number, max: number, minCents = 1): number {
+  return Math.round(numberEnv(env, key, fallback, minCents / 100, max) * 100);
+}
+/** Network policy of the Workspace container. A host list only means
+ *  something under `limited`, so one given without it stops the start rather
+ *  than look like a restriction that is not applied. */
+function workspaceNetworking(env: NodeJS.ProcessEnv): { networking: "unrestricted" | "limited"; allowedHosts: string[] } {
+  const networking = (env.ANTHROPIC_WORKSPACE_NETWORKING || "unrestricted").trim().toLowerCase();
+  if (networking !== "unrestricted" && networking !== "limited")
+    throw new Error("ANTHROPIC_WORKSPACE_NETWORKING must be unrestricted or limited");
+  const allowedHosts = (env.ANTHROPIC_WORKSPACE_ALLOWED_HOSTS || "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+  if (allowedHosts.length && networking !== "limited")
+    throw new Error("ANTHROPIC_WORKSPACE_ALLOWED_HOSTS requires ANTHROPIC_WORKSPACE_NETWORKING=limited");
+  // Host names only: no scheme, port or path.
+  if (allowedHosts.some((host) => /[\s\/:]/.test(host)))
+    throw new Error("ANTHROPIC_WORKSPACE_ALLOWED_HOSTS must be a comma-separated list of host names");
+  return { networking, allowedHosts };
+}
 function sizeGuideline(env: NodeJS.ProcessEnv): SizeGuideline {
   const value = (env.WORKFLOW_SIZE_GUIDELINE || "medium").trim().toLowerCase();
   if ((SIZE_GUIDELINES as readonly string[]).includes(value)) return value as SizeGuideline;
@@ -136,6 +172,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   }
   const model = canonicalModel(provider, env.LLM_MODEL || providers[provider]![1]);
   if (!model) throw new Error(`LLM_MODEL is required for PROVIDER: ${provider}`);
+  // "auto" is Jev's routing among the `anthropic` models (#35). Anywhere else
+  // it is not a model, and a Workspace session would be created with that id.
+  if (provider === WORKSPACE_PROVIDER && model === AUTO_ROUTE_MODEL)
+    throw new Error("LLM_MODEL=auto is only available with PROVIDER=anthropic");
   const effort = env.LLM_EFFORT || recommendedEffort(model, provider);
   if (effort && !EFFORTS.includes(effort as (typeof EFFORTS)[number]))
     throw new Error("Invalid LLM_EFFORT");
@@ -195,6 +235,30 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
         : resolve(env.CONVERSATION_DB_PATH || `${dataDir}/conversations.db`),
     promptFile: resolve(env.PROMPT_FILE || "prompt.md"),
     personaFile: resolve(env.PERSONA_FILE || "persona.md"),
+    // Anthropic Workspace (#76): limits of the Managed Agents path. The key
+    // and base URL are `endpoints.anthropic_workspace`. The defaults are the
+    // values proposed in #76, which the owner has yet to confirm.
+    anthropicWorkspace: {
+      // List cost one turn may add to its session, and what all Workspace
+      // turns together may add in one UTC day and month, in cents. A turn's
+      // limit below what a turn is started with would refuse every turn, so
+      // it stops the start instead; the day and the month go down to a cent.
+      turnBudgetCents: centsEnv(env, "ANTHROPIC_WORKSPACE_TURN_BUDGET_USD", 1, 100, WORKSPACE_MIN_TURN_CENTS),
+      ultraTurnBudgetCents: centsEnv(env, "ANTHROPIC_WORKSPACE_ULTRA_TURN_BUDGET_USD", 3, 100, WORKSPACE_MIN_TURN_CENTS),
+      dailyBudgetCents: centsEnv(env, "ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD", 5, 10000),
+      monthlyBudgetCents: centsEnv(env, "ANTHROPIC_WORKSPACE_MONTHLY_BUDGET_USD", 50, 100000),
+      // Wall-clock time of one turn, counted from its first start.
+      turnTimeoutMs: numberEnv(env, "ANTHROPIC_WORKSPACE_TURN_TIMEOUT_MS", 1200000, 1, 86400000),
+      ultraTurnTimeoutMs: numberEnv(env, "ANTHROPIC_WORKSPACE_ULTRA_TURN_TIMEOUT_MS", 3600000, 1, 86400000),
+      // Workspace turns running at once in the whole bot, and the longest
+      // user message one of them accepts.
+      concurrency: Math.floor(numberEnv(env, "ANTHROPIC_WORKSPACE_MAX_CONCURRENT", 2, 1, 64)),
+      inputMaxChars: Math.floor(numberEnv(env, "ANTHROPIC_WORKSPACE_INPUT_MAX_CHARS", 60000, 1, 1000000)),
+      ...workspaceNetworking(env),
+      // The container's own web search and fetch. Decided when a session is
+      // created; an existing session keeps what it was created with.
+      web: flag(env, "ANTHROPIC_WORKSPACE_WEB_ENABLED", true),
+    },
     toolsEnabled: flag(env, "TOOLS_ENABLED", true),
     sandboxEnabled: flag(env, "SANDBOX_ENABLED", true),
     sandboxImage: env.SANDBOX_IMAGE || "hibana-sandbox:latest",

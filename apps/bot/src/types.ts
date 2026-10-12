@@ -1,5 +1,6 @@
 import type { Selection } from "./config";
 import type { MultiAgentSession } from "./multi-agent";
+import type { WorkspaceMark } from "./workspace/types";
 export type Json = Record<string, unknown>;
 export type ToolCall = {
   id: string;
@@ -25,6 +26,15 @@ export type ToolDef = {
   type: "function";
   function: { name: string; description: string; parameters: Json };
 };
+/** A tool result that is already text for the model, as the tools of an
+ *  Anthropic Workspace session return it (#76). Other results are objects
+ *  and are sent as JSON. */
+export class ToolOutput {
+  constructor(
+    readonly text: string,
+    readonly options: { isError?: boolean; images?: string[] } = {},
+  ) {}
+}
 export type Usage = {
   prompt_tokens: number;
   completion_tokens: number;
@@ -32,6 +42,10 @@ export type Usage = {
   cached_tokens: number;
   // Optional: usage persisted before cache write tracking lacks it.
   cache_write_tokens?: number;
+  /** Anthropic Workspace (#76): input plus output of the turn's last model
+   *  request, which is how large the session's conversation has grown. The
+   *  totals above add every request of a turn together and cannot tell. */
+  context_tokens?: number;
 };
 export const emptyUsage = (): Usage => ({
   prompt_tokens: 0,
@@ -52,6 +66,15 @@ export type Context = {
   botId: string;
   thread: boolean;
   messageId?: string;
+  /** Names one Anthropic Workspace turn in the logs. Never sent to a provider. */
+  turnId?: string;
+  /** Set for a turn that runs as an Anthropic Workspace session (#76).
+   *  Absent on every other turn. */
+  harness?: "workspace";
+  /** Workspace: set once the session accepted this turn's message, and saved
+   *  with the checkpoint, so a resumed turn continues that message under the
+   *  same spending ceiling instead of sending it again. */
+  workspaceMark?: WorkspaceMark;
   images?: string[];
   pendingImages?: string[];
   depth: number;

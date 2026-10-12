@@ -268,6 +268,26 @@ export const PROVIDERS: Record<string, ProviderMeta> = {
         </g>,
       ),
   },
+  // Anthropic Workspace（#76）: Anthropic と同じアスタリスクを、輪ではなく角丸の枠で囲む。
+  // 同じモデルが両方に載るので、作業領域がクラウドにある側だと形で分かるようにしてある。
+  anthropic_workspace: {
+    label: "Anthropic Workspace",
+    mark: ({ size = 18, className }) =>
+      mark(
+        size,
+        className,
+        <g
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          fill="none"
+        >
+          <rect x="3" y="3" width="18" height="18" rx="4.5" />
+          <path d="M12 6.5v11M7.2 9.25l9.6 5.5M7.2 14.75l9.6-5.5" />
+        </g>,
+      ),
+  },
   // Claude Max: Kiro と同じアスタリスクに芯を足して、課金先が一目で分かるようにしてある。
   claude_max: {
     label: "Claude Max",

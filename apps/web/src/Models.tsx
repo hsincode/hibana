@@ -75,7 +75,9 @@ export function ModelsPage() {
         <p className="lead">
           Administrator / Moderator が /switch
           とダッシュボードに出すモデルを切り替えます。非公開はリリース前にカタログへ載せておき、公開にした瞬間から使えます。プレミアムは
-          Premium / Moderator / Administrator だけが選べます。
+          Premium / Moderator / Administrator だけが選べます。Anthropic Workspace
+          のプリセットは最初は非公開です。対応した版の bot を配信し、専用の API
+          キーを設定してから公開にしてください。
         </p>
       </header>
 

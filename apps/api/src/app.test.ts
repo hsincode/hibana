@@ -345,6 +345,7 @@ describe("authz", () => {
     ).toEqual([
       "fable-5", "max-opus-5-5",
       "anthropic-auto", "anthropic-haiku-5-5", "anthropic-sonnet-5-5", "anthropic-opus-5-5",
+      "anthropic-workspace-haiku-5-5", "anthropic-workspace-sonnet-5-5", "anthropic-workspace-opus-5-5",
     ]);
 
     const denied = await app.handle(
@@ -532,6 +533,44 @@ describe("authz", () => {
   });
 });
 
+// Decision record #76: Anthropic Workspace offers the models `anthropic` has
+// under a provider of its own. Its presets ship unpublished.
+describe("anthropic workspace", () => {
+  test("a published preset is an ordinary choice, and the guild list names the provider beside the model", async () => {
+    const { app, store } = await setup();
+    const patch = (path: string, body: unknown) =>
+      app.handle(req(path, { cookie: "sess-admin", method: "PATCH", body: JSON.stringify(body) }));
+    // The free member's list comes from the test hook, without Discord.
+    const guilds = async () =>
+      ((await (await app.handle(req("/api/guilds", { cookie: "sess-free" }))).json()) as { guilds: unknown[] }).guilds;
+    expect(await guilds()).toEqual([
+      { id: "g1", name: "One", icon: null, preset: "gpt-6-luna", provider: "codex_plus", bot_disabled: false, member: true },
+    ]);
+
+    const hidden = await patch("/api/guilds/g1/settings", { preset: "anthropic-workspace-haiku-5-5" });
+    expect(hidden.status).toBe(403);
+    expect(((await hidden.json()) as { error: string }).error).toContain("unpublished");
+    expect((await patch("/api/catalog/presets/anthropic-workspace-haiku-5-5", { published: true })).status).toBe(200);
+    // Once published it is selected like any other preset.
+    expect((await patch("/api/guilds/g1/settings", { preset: "anthropic-workspace-haiku-5-5" })).status).toBe(200);
+    expect((await store.getGuild("g1")).selection)
+      .toEqual({ provider: "anthropic_workspace", model: "claude-haiku-5-5", effort: "high" });
+    // `claude-haiku-5-5` alone would read as the `anthropic` preset.
+    expect(await guilds()).toEqual([
+      { id: "g1", name: "One", icon: null, preset: "claude-haiku-5-5", provider: "anthropic_workspace", bot_disabled: false, member: true },
+    ]);
+
+    // It is the main model only: never a subagent's or a role's.
+    for (const path of ["/api/guilds/g1/settings", "/api/me/settings"]) {
+      for (const body of [
+        { subagent_model: { mode: "fixed", preset: "anthropic-workspace-haiku-5-5" } },
+        { multi_agent_roles: { reviewer: { model: { mode: "fixed", preset: "anthropic-workspace-haiku-5-5" } } } },
+      ])
+        expect((await patch(path, body)).status).toBe(400);
+    }
+    expect((await store.getGuild("g1")).subagent_model).toEqual({ mode: "auto" });
+  });
+});
 describe("guild settings", () => {
   test("Jev modes persist independently for guilds and users and reach the bot snapshot", async () => {
     const { app, store } = await setup();

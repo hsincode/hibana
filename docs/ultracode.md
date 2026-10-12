@@ -9,6 +9,8 @@ Ultracode は、推論 effort の xhigh と、ワークフローの常時編成�
 - Claude Code 2.1.282 の CLI 本体: 指示文・リマインダー・Workflow ツールの説明とリファレンス・子エージェントの指示文・完了通知の形式・上限値を照合しました。
 - [Dynamic workflows のドキュメント](https://code.claude.com/docs/en/workflows)
 
+プロバイダー「Anthropic Workspace」の **Haiku Ultra** は、この文書の Ultra とは別の仕組みです。設定のスイッチ（サブエージェントの ultra）は同じですが、Workspace の Haiku 5.5 のときだけ働き、Hibana の Workflow ツールではなく、Claude Managed Agents の dynamic workflows（Anthropic 側で動く workflow run）を使います。effort を xhigh にせず、リマインダーも送らず、キーワード `ultracode` も効きません。run を始めるかどうかはモデルが決め、上限は 1 ターンの金額と時間です。この文書の Workflow ツール・スクリプトの API・上限値は、Haiku Ultra には当てはまりません（[Anthropic Workspace](anthropic-workspace.md#haiku-ultra)、#76。実際の API では、`main` に載せ替える前のコードで、bot 自身のターン 1 回だけを確かめました）。
+
 ## 動作の概要
 
 | 項目 | Claude Code | Hibana |

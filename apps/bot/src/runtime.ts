@@ -6,10 +6,12 @@ import {
   subagentsUnsupported,
   unpublishedPresetIds,
   premiumPresetIds,
+  WORKSPACE_PROVIDER,
 } from "@hibana/shared/catalog";
 import {
   applyPatch,
   applyUserOverridePatch,
+  effectiveSubagentMode,
   normalizeGuild,
   normalizeUserOverride,
   patchPresetIds,
@@ -23,7 +25,8 @@ import {
 } from "@hibana/shared/settings";
 import type { Config, Selection } from "./config";
 import { atomicJson, readJson, Serial } from "./io";
-import { ultracodeActive } from "./ultracode";
+import { ultracodeActive, workflowsEnabled } from "./ultracode";
+import { harnessFor } from "./workspace/select";
 export type Snapshot = {
   chatgpt_available?: boolean;
   version?: number;
@@ -67,7 +70,25 @@ export class Runtime {
       // these settings, and reporting every guild here would clear them all
       // on each start (#59).
       this.replace(await readJson(this.config.statePath, this.snapshot), false);
+      if (!this.config.webApiUrl) this.withholdWorkspacePresets();
       await this.persist();
+    }
+  }
+  /** Without the settings API the two preset lists are only ever what the
+   *  state file holds: nothing on the bot publishes a preset or lifts its
+   *  plan floor. A file written before the Anthropic Workspace presets existed
+   *  (#76) names none of them, and would offer them to every member as soon as
+   *  the key is set. They are put back as the catalog ships them; the stored
+   *  state of every other preset is left as it is. */
+  private withholdWorkspacePresets() {
+    const workspace = new Set(MODEL_PRESETS.filter((p) => p.provider === WORKSPACE_PROVIDER).map((p): string => p.id));
+    for (const [list, shipped] of [
+      ["unpublished_presets", unpublishedPresetIds({})],
+      ["premium_presets", premiumPresetIds({})],
+    ] as const) {
+      const stored = this.snapshot[list];
+      const missing = shipped.filter((id) => workspace.has(id) && !stored.includes(id));
+      if (missing.length) this.snapshot[list] = [...stored, ...missing];
     }
   }
   /** `notify: false` adopts a snapshot as the baseline that later ones are
@@ -202,13 +223,29 @@ export class Runtime {
     else selection = { ...selection, effort: effort ?? selection.effort };
     // Resolved Multi still implies Ultra, including when only one of the two
     // switches was stored on the personal row.
-    const multiAgent = pick(user.multi_agent, guild.multi_agent!);
+    // An Anthropic Workspace session (#76) has none of Hibana's own
+    // delegation, so the three switches resolve to off there, and `ultracode`
+    // with them: no Workflow tool, no team, no forced xhigh.
+    const workspace = harnessFor(selection) === "workspace";
+    const storedMulti = pick(user.multi_agent, guild.multi_agent!);
+    const stored = {
+      subagent_enabled: pick(user.subagent_enabled, guild.subagent_enabled!),
+      ultra_mode: storedMulti || pick(user.ultra_mode, guild.ultra_mode!),
+      multi_agent: storedMulti,
+    };
+    const multiAgent = !workspace && storedMulti;
     const context = user.context ??
       (guildId ? guild.context : this.snapshot.user_contexts[userId || ""] ?? null);
     // The stored switches are kept; they apply again under another provider.
-    const subagentEnabled = !subagentsUnsupported(selection.provider) &&
-      pick(user.subagent_enabled, guild.subagent_enabled!);
-    const ultraMode = multiAgent || pick(user.ultra_mode, guild.ultra_mode!);
+    const subagentEnabled = !workspace && !subagentsUnsupported(selection.provider) &&
+      stored.subagent_enabled;
+    const ultraMode = !workspace && stored.ultra_mode;
+    // Haiku Ultra: the session is created with Managed Agents' dynamic
+    // workflows. It takes a stored Ultra on Haiku 5.5 and the same process
+    // switches as Hibana's own workflows, so WORKFLOWS_ENABLED=false (or
+    // tools or subagents off) stops it too.
+    const workspaceUltra = workspace && workflowsEnabled(this.config, stored) &&
+      effectiveSubagentMode(stored, selection) === "ultra";
     return {
       ...guild,
       selection: selection as Selection,
@@ -228,6 +265,9 @@ export class Runtime {
       suppress_embeds: guild.suppress_embeds!,
       temperature: guild.temperature!,
       exa_mode: guild.exa_mode!,
+      // Present for Workspace only, so what `/info` and `get_bot_settings`
+      // print for every other provider is what it was.
+      ...(workspace ? { workspace_ultra: workspaceUltra } : {}),
     };
   }
   async patch(guildId: string, raw: unknown, userId: string) {

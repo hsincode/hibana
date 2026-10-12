@@ -68,7 +68,13 @@ export type GuildSummary = {
   id: string;
   name: string;
   icon: string | null;
+  /** 選択中のモデル名。プロバイダは `provider` で分かる。 */
   preset: string | null;
+  /**
+   * 選択中のプロバイダ。Anthropic と Anthropic Workspace は同じモデル名を持つ（#76）ので、
+   * モデル名からは決まらない。旧 API は返さないので、無ければカタログから逆引きする。
+   */
+  provider?: string | null;
 };
 
 export type Artifact = {

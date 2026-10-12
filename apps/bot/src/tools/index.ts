@@ -30,7 +30,7 @@ type RouteDecision = Awaited<ReturnType<typeof evaluateRoute>>;
 import { evaluateTriage, shouldPrestartExplorer, TRIAGE_TIMEOUT_MS, type Triage } from "../jev-triage";
 import definitions from "./definitions.json";
 import codexDefinitions from "./codex-definitions.json";
-import { collaborationNames, collaborationTools, collaborationValidationSchema, teamTools } from "../multi-agent-policy";
+import { childPresets, collaborationNames, collaborationTools, collaborationValidationSchema, teamTools } from "../multi-agent-policy";
 import { Runtime } from "../runtime";
 import { Agent } from "../agent";
 import { nativeSearchFor } from "../llm";
@@ -55,6 +55,10 @@ import { Vpn } from "./vpn";
 import { WebTools } from "./web";
 import { ImageTools } from "./image";
 import { askQuestions, questionsSchema } from "./questions";
+import {
+  WORKSPACE_TOOLS, isWorkspaceTool, refuseFileArguments, runWorkspaceTool, takeWorkspaceCall, workspaceSurface,
+  type WorkspaceHost,
+} from "../workspace/tools";
 import { downloadPublic } from "../network";
 const sandboxNames = new Set([
   "bash",
@@ -89,6 +93,10 @@ export class ToolRegistry {
   readonly waiting = new Set<string>();
   private subagents: Semaphore;
   private validators = new Map<string, ReturnType<Ajv["compile"]>>();
+  // An Anthropic Workspace session's own definitions (#76): its file and
+  // question tools, which the frozen list does not have under these names.
+  private workspaceValidators = new Map<string, ReturnType<Ajv["compile"]>>();
+  private workspaceHost: WorkspaceHost;
   /** Workflow resume state survives the Discord turn that produced it. */
   readonly workflowJournals = new WorkflowJournals();
   readonly workflowFiles: WorkflowFiles;
@@ -119,6 +127,12 @@ export class ToolRegistry {
       this.validators.set(d.function.name, ajv.compile(d.function.parameters));
     for (const d of collaborationTools)
       this.validators.set(`agents__${d.function.name}`, ajv.compile(collaborationValidationSchema(d)));
+    for (const d of WORKSPACE_TOOLS) this.workspaceValidators.set(d.function.name, ajv.compile(d.function.parameters));
+    this.workspaceHost = {
+      discord: this.discord,
+      integration: (name, args, ctx) => this.runTool(name, args, ctx),
+      ask: (args, ctx) => this.ask(args, ctx),
+    };
   }
   async load() {
     await this.sandbox.probe();
@@ -294,7 +308,7 @@ export class ToolRegistry {
     return {
       concurrency: this.runtime.config.workflowConcurrency,
       modelOption: settings.subagent_model.mode === "auto",
-      presets: MODEL_PRESETS.filter((p) => this.runtime.canSelect(p.id, ctx.userId)).map((p) => p.id),
+      presets: childPresets().filter((p) => this.runtime.canSelect(p.id, ctx.userId)).map((p) => p.id),
     };
   }
   /** Claude Code serves the authoring reference as the workflow-authoring
@@ -331,8 +345,33 @@ export class ToolRegistry {
       { type: "function", function: { name: TASK_STOP_TOOL, description: TASK_STOP_DESCRIPTION, parameters: TASK_STOP_PARAMETERS } },
     ];
   }
+  /** The custom tools of an Anthropic Workspace session (#76), under their
+   *  own names. A session's list is fixed when the session is created and is
+   *  shared by everyone who talks in its channel, so it is built from the
+   *  server's settings alone: no speaker (a personal Jev switch would change
+   *  it), no depth and no role. The only checks of `base()` that look at the
+   *  speaker's role are on tools a session is never offered (the VPN ones).
+   *  Who may run a tool is decided when it is called, in `executeWorkspace`. */
+  workspaceTools(ctx: Context): ToolDef[] {
+    if (!this.runtime.config.toolsEnabled) return [];
+    // `resolve` reads an empty user id as "no user": the server's own row.
+    const server: Context = {
+      guildId: ctx.guildId, channelId: ctx.channelId, thread: ctx.thread, botId: ctx.botId,
+      userId: "", depth: 0, delivered: false, harness: "workspace",
+    };
+    return workspaceSurface(this.base(server));
+  }
+  /** Whether a new Workspace session gets the container's own web search and
+   *  fetch. `exa_mode: off` switches every web tool off (#46), these too. An
+   *  existing session keeps what it was created with. */
+  workspaceWeb(ctx: Context): boolean {
+    const config = this.runtime.config;
+    return config.toolsEnabled && config.webSearch && config.anthropicWorkspace.web &&
+      this.runtime.guild(ctx.guildId).exa_mode !== "off";
+  }
   tools(ctx: Context) {
     if (!this.runtime.config.toolsEnabled) return [];
+    if (ctx.harness === "workspace") return this.workspaceTools(ctx);
     const base = this.base(ctx);
     // Filter the final surface, not base(): harness-native aliases such as
     // shell_command/apply_patch are added later and must obey the role too.
@@ -362,6 +401,10 @@ export class ToolRegistry {
       } : t);
   }
   jevTaskMode(ctx: Context): boolean {
+    // The mode rewrites the tool list from a setting. The list of a
+    // Workspace session is fixed when it is created; its turns ignore the
+    // setting.
+    if (ctx.harness === "workspace") return false;
     const settings = this.runtime.resolve(ctx.guildId, ctx.userId);
     // Multi-Agent parallelizes through role workers; a Jev decision before
     // every root operation serialized exactly the work it is meant to speed up.
@@ -397,6 +440,7 @@ export class ToolRegistry {
       this.runtime.guild(ctx.guildId).bot_disabled
     )
       throw new Error("Bot access disabled");
+    if (ctx.harness === "workspace") return this.executeWorkspace(rawName, rawArgs, ctx);
     const { name, args: a } = normalizeTool(rawName, rawArgs);
     // Checked after normalization so use_tool wrappers and aliases cannot
     // reach a tool that the role's tool list does not expose.
@@ -428,6 +472,31 @@ export class ToolRegistry {
     } finally {
       finishHomeWork();
     }
+  }
+  /** One custom tool call of an Anthropic Workspace session (#76). The
+   *  session's built-in tools run in Anthropic's container and never come
+   *  here. No home connection is opened: none of these tools uses one. */
+  private async executeWorkspace(name: string, args: Json, ctx: Context): Promise<unknown> {
+    // `WorkspaceCalls` is the only way in. It is what makes a call from a
+    // workflow run's thread a worker's call, and what refuses a run that
+    // someone else started; a call that arrives without its mark skipped both.
+    if (!takeWorkspaceCall(ctx)) throw new Error("A Workspace tool call must come through the turn's call queue.");
+    if (!isWorkspaceTool(name)) throw new Error(`${name} is not a tool of this workspace.`);
+    if (!roleAllowsTool(ctx.agentRole, name))
+      throw new Error(`An agent of a workflow run cannot use ${name}. Return what is needed in your result instead.`);
+    // Shown is not the same as allowed: the list is the same for everyone in
+    // the channel, so an integration tool is checked again here against what
+    // this person may run. `send_file` is not taken from `base()`, where it
+    // depends on the Docker sandbox this path does not use.
+    const allowed = this.runtime.config.toolsEnabled && (
+      name === "send_file" ||
+      (name === "AskUserQuestion" ? ctx.depth === 0 : this.base(ctx).some((t) => t.function.name === name)));
+    if (!allowed) throw new Error(`${name} is not available to you in this conversation.`);
+    const validator = this.workspaceValidators.get(name) ?? this.validators.get(name);
+    if (validator && !validator(args))
+      throw new Error(`Invalid arguments for ${name}: ${validator.errors?.map((e) => `${e.instancePath || "input"} ${e.message}`).join("; ")}`);
+    refuseFileArguments(name, args);
+    return runWorkspaceTool(this.workspaceHost, name, args, ctx);
   }
   private async runTool(name: string, a: Json, ctx: Context): Promise<unknown> {
     if (name === "image_generation_status") return this.image.status(ctx);

@@ -15,8 +15,18 @@ function textTokens(text: string): number {
   return Math.ceil((text.length - wide) / 3 + wide);
 }
 const total = (turns: Turn[]) => turns.reduce((sum, t) => sum + t.tokens, 0);
+/** A conversation that ended here. `reset`: `get` found one it could not
+ *  continue (another model or mode, another guild, a thread idle past its
+ *  age). `clear`: `/clear`, or the channel was deleted. `guild`: a settings
+ *  change cleared a guild's conversations; without a guild, all of them. */
+export type HistoryDrop = { channelId: string; cause: "reset" | "clear" } | { guildId?: string; cause: "guild" };
 export class History {
   private channels = new Map<string, Entry>();
+  /** Told about each drop, once it is done here and in the store. An
+   *  Anthropic Workspace conversation is held by a cloud session, which has
+   *  to end with the local record of it (#76). `get` reports only a
+   *  conversation that existed: a channel's first turn drops nothing. */
+  onDrop?: (drop: HistoryDrop) => void;
   /** With a store, each change is also written to disk, and a channel is read
    *  back the first time it is used after a start. A restart, which every
    *  deploy is, then keeps the conversations (#59). Without a store, or while
@@ -45,12 +55,14 @@ export class History {
   clear(channelId: string) {
     this.channels.delete(channelId);
     this.store?.deleteChannel(channelId);
+    this.onDrop?.({ channelId, cause: "clear" });
   }
   clearGuild(guildId?: string) {
     for (const [id, e] of this.channels)
       if (!guildId || e.guildId === guildId) this.channels.delete(id);
     // Also the channels of the guild that this process has not read yet.
     this.store?.deleteGuild(guildId);
+    this.onDrop?.({ guildId, cause: "guild" });
   }
   get(
     channelId: string,
@@ -69,10 +81,12 @@ export class History {
     // A stored conversation is continued only in the guild (or DM) it was
     // written in, whatever a row on disk says.
     if (!entry || entry.key !== key || entry.guildId !== guildId || idle) {
+      const existed = entry !== undefined;
       entry = { guildId, key, turns: [] };
       this.channels.set(channelId, entry);
       // Unconditional: rows can exist that `entry` could not read.
       this.store?.deleteChannel(channelId);
+      if (existed) this.onDrop?.({ channelId, cause: "reset" });
     }
     // A thread is summarized first (compact), which keeps what trimming drops.
     if (!thread) this.trim(channelId, entry);

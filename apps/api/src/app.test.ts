@@ -209,6 +209,8 @@ describe("authz", () => {
     expect(freeIds).not.toContain("opus-5-1");
     expect(freeIds).not.toContain("opus-5-5");
     expect(freeIds).not.toContain("grok-4.7-heavy");
+    for (const id of ["anthropic-opus-5-6", "anthropic-fable-5-5", "anthropic-workspace-opus-5-6", "anthropic-workspace-fable-5-5"])
+      expect(freeIds).not.toContain(id);
     expect(freeIds).not.toContain("gemini-3.8-flash");
     expect(freeIds).not.toContain("gemini-4-pro");
     expect(freeIds).not.toContain("gemini-4-flash");
@@ -236,6 +238,10 @@ describe("authz", () => {
     expect(byId["sonnet-5-5"]?.published).toBe(false);
     expect(byId["sonnet-5-5"]?.model).toBe("claude-sonnet-5-5");
     expect(byId["grok-4.7-heavy"]?.published).toBe(false);
+    expect(byId["anthropic-opus-5-6"]?.published).toBe(false);
+    expect(byId["anthropic-opus-5-6"]?.model).toBe("claude-opus-5-6");
+    expect(byId["anthropic-fable-5-5"]?.published).toBe(false);
+    expect(byId["anthropic-fable-5-5"]?.model).toBe("claude-fable-5-5");
     expect(byId["gemini-3.8-flash"]?.published).toBe(false);
     expect(byId["gemini-4-pro"]?.published).toBe(false);
     expect(byId["gemini-4-flash"]?.published).toBe(false);
@@ -345,7 +351,9 @@ describe("authz", () => {
     ).toEqual([
       "fable-5", "max-opus-5-5",
       "anthropic-auto", "anthropic-haiku-5-5", "anthropic-sonnet-5-5", "anthropic-opus-5-5",
+      "anthropic-opus-5-6", "anthropic-fable-5-5",
       "anthropic-workspace-haiku-5-5", "anthropic-workspace-sonnet-5-5", "anthropic-workspace-opus-5-5",
+      "anthropic-workspace-opus-5-6", "anthropic-workspace-fable-5-5",
     ]);
 
     const denied = await app.handle(

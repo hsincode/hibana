@@ -137,8 +137,31 @@ export const MODEL_PRESETS = [
     min_role: "premium",
     server_shared: true,
   },
+  // Unreleased SKUs (#79). The wire ids follow Anthropic's naming and are not
+  // confirmed: neither model was in the public model list when they were
+  // wired. Unpublished, so flipping `published` on the admin screen is enough
+  // at launch if the ids hold. `ANTHROPIC_PRICES` has no row for them, so
+  // their requests are counted as unpriced until a price is added by hand.
+  {
+    id: "anthropic-opus-5-6",
+    provider: "anthropic",
+    model: "claude-opus-5-6",
+    label: "Anthropic / Claude Opus 5.6",
+    min_role: "premium",
+    server_shared: true,
+    published: false,
+  },
+  {
+    id: "anthropic-fable-5-5",
+    provider: "anthropic",
+    model: "claude-fable-5-5",
+    label: "Anthropic / Claude Fable 5.5",
+    min_role: "premium",
+    server_shared: true,
+    published: false,
+  },
   // Anthropic Workspace (`ANTHROPIC_WORKSPACE_API_KEY`, decision record: #76):
-  // the same three models as Claude Managed Agents sessions, whose files and
+  // the models `anthropic` has, as Claude Managed Agents sessions, whose files and
   // commands live in Anthropic's cloud container instead of the bot's sandbox.
   // Unpublished until the owner has set the key and publishes them on the
   // admin screen. Haiku comes first because `PROVIDER=anthropic_workspace`
@@ -167,6 +190,27 @@ export const MODEL_PRESETS = [
     provider: "anthropic_workspace",
     model: "claude-opus-5-5",
     label: "Anthropic Workspace / Claude Opus 5.5",
+    min_role: "premium",
+    server_shared: true,
+    published: false,
+  },
+  // The same unreleased SKUs as `anthropic-opus-5-6` and `anthropic-fable-5-5`
+  // above (#79), with the same unconfirmed wire ids. They run without
+  // delegation: Ultra stays Haiku 5.5 only.
+  {
+    id: "anthropic-workspace-opus-5-6",
+    provider: "anthropic_workspace",
+    model: "claude-opus-5-6",
+    label: "Anthropic Workspace / Claude Opus 5.6",
+    min_role: "premium",
+    server_shared: true,
+    published: false,
+  },
+  {
+    id: "anthropic-workspace-fable-5-5",
+    provider: "anthropic_workspace",
+    model: "claude-fable-5-5",
+    label: "Anthropic Workspace / Claude Fable 5.5",
     min_role: "premium",
     server_shared: true,
     published: false,

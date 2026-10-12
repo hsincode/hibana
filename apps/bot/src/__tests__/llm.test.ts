@@ -118,6 +118,10 @@ describe("provider adapters", () => {
     expect(wireEffort("grok-4.6", "ultra")).toBe("xhigh");
     expect(wireEffort("muse-spark-1.3-contributor", "none")).toBe("minimal");
     expect(wireEffort("gpt-6.1-sol", "medium")).toBe("medium");
+    // Unreleased ids, sent what Opus 5.5 / Fable 5.1 are: thinking cannot be off.
+    expect(wireEffort("claude-opus-5-6", "none")).toBe("low");
+    expect(wireEffort("claude-fable-5-5", "none")).toBe("low");
+    expect(wireEffort("claude-opus-5", "none")).toBe("none");
     expect(wireEffort("gpt-6.1-sol", "ultra")).toBe("max");
     expect(outputBudget("gemini-3.8-flash", "high", 8192)).toBe(32768);
     expect(outputBudget("gpt-6.1-sol", "max", 100000)).toBe(65536);

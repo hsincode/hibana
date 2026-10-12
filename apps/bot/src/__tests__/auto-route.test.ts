@@ -65,6 +65,8 @@ test("the routing table is the owner's five levels, without Sonnet, and never us
   expect(AUTO_ROUTE_FALLBACK).toEqual({ model: "claude-haiku-5-5", effort: "high" });
   expect(MODEL_PRESETS.filter((p) => p.provider === "anthropic").map((p) => p.model)).toEqual([
     "auto", "claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5",
+    // Unreleased and unpublished (#79); the routing above never picks them.
+    "claude-opus-5-6", "claude-fable-5-5",
   ]);
 });
 

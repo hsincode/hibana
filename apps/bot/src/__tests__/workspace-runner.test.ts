@@ -8,11 +8,14 @@ import {
   abortKind, budgetNotice, openRunsNotice, quiesce, runTurn, timeoutNotice, type TurnInput, type TurnResult,
 } from "../workspace/runner";
 import type { RawEvent, WorkspaceCall, WorkspaceResult } from "../workspace/types";
+import { offline } from "./workspace-offline";
 
 // Decision record: #76. One turn of an Anthropic Workspace session against a
 // session that lives in this file: the requests the runner makes, in what
 // order, and what it does with the events it is given. Nothing is sent, and
 // the waits between reconnects are skipped.
+// Should the client ever turn to the global `fetch`, that reaches no host.
+offline();
 
 type Json = Record<string, any>;
 type Sent = { method: string; path: string; query: URLSearchParams; body?: Json };
@@ -1246,8 +1249,19 @@ describe("the budget", () => {
     fake.onMessage = answers("最初の返事。", 12);
     const result = await runTurn(turn(fake));
     expect(result.text).toBe("最初の返事。");
-    expect(fake.of("POST", SESSION).map((r) => r.body!.budget.max_list_cost.amount)).toEqual(["100", "13"]);
-    // Whether it was used is asked of the list, since the usage cannot say.
+    // Whether it was used is asked of the list, since the usage cannot say:
+    // one request, as the list holds no message. Nothing waits ahead of the
+    // turn's own message either, so no interrupt is sent on its own first.
+    expect(fake.log).toEqual([
+      "GET /",
+      "GET /events",
+      "POST / budget=100",
+      "GET /events/stream",
+      "POST /events user.message",
+      "GET /",
+      "POST / budget=13",
+    ]);
+    expect(fake.events("user.interrupt")).toEqual([]);
     expect(fake.of("GET", `${SESSION}/events`)[0]!.query.getAll("types[]")).toEqual(["user.message"]);
   });
 
@@ -1287,11 +1301,13 @@ describe("the budget", () => {
     expect(fake.events("user.message")).toEqual([{ type: "user.message", content: [{ type: "text", text: "hello" }] }]);
   });
 
+  const message = (id: string, text: string, processed_at: string | null) =>
+    ({ id, type: "user.message", content: [{ type: "text", text }], processed_at }) as RawEvent;
+  const taken = message("sevt_first", "最初の依頼", "2026-10-11T23:00:00.000Z");
+  const queued = (n: number) => message(`sevt_queued_${n}`, `言い直し ${n}`, null);
+
   test("a session that took a message up and reports no cost is not given a ceiling, whatever is queued behind it", async () => {
-    const message = (id: string, text: string, processed_at: string | null) =>
-      ({ id, type: "user.message", content: [{ type: "text", text }], processed_at }) as RawEvent;
-    const taken = message("sevt_first", "最初の依頼", "2026-10-11T23:00:00.000Z");
-    for (const history of [[taken], [taken, message("sevt_second", "言い直し", null)]]) {
+    for (const history of [[taken], [taken, queued(1)]]) {
       const fake = new FakeSession({ used: null, budget: 1 });
       fake.history.push(...history);
       // A turn that went on regardless would end here, not at its time limit.
@@ -1301,6 +1317,124 @@ describe("the budget", () => {
       expect((error as ProviderError).diagnostics.code).toBe("list_cost_missing");
       // Nothing was raised, and nothing was sent.
       expect(fake.log).toEqual(["GET /", "GET /events"]);
+    }
+  });
+
+  test("the message that was taken up is looked for past the first page of the list", async () => {
+    // Where the messages still queued stand in the list, and how many events
+    // a page holds, were not seen on the API: the one that was taken up may
+    // come after a page of queued ones.
+    const lists: [pageSize: number, history: RawEvent[]][] = [
+      [1, [queued(1), taken]],
+      [2, [queued(1), queued(2), taken]],
+      // Found on the second page; the pages behind it are not asked for.
+      [1, [queued(1), taken, queued(2), queued(3)]],
+    ];
+    for (const [pageSize, history] of lists) {
+      const fake = new FakeSession({ used: null, budget: 1 });
+      fake.pageSize = pageSize;
+      fake.history.push(...history);
+      fake.onMessage = answers("始まってはいけないターンの返事。");
+      const error = await failure(runTurn(turn(fake)));
+      expect(error).toMatchObject({ kind: "protocol", retryable: false });
+      expect((error as ProviderError).diagnostics.code).toBe("list_cost_missing");
+      expect(fake.log).toEqual(["GET /", "GET /events", "GET /events"]);
+    }
+  });
+
+  test("messages that are only queued are not use, however many pages of them there are", async () => {
+    const fake = new FakeSession({ used: null, budget: 1 });
+    fake.pageSize = 2;
+    fake.history.push(queued(1), queued(2), queued(3));
+    // This session leaves the three as they are and takes up the turn's own.
+    fake.onMessage = answers("言い直しへの返事。", 12);
+    const result = await runTurn(turn(fake));
+    expect(result).toMatchObject({ text: "言い直しへの返事。", stop: "end_turn", costReported: true, released: true });
+    expect(result.cumulative?.list_cost_cents).toBe(12);
+    // The list is read to its end, two pages, before anything is sent.
+    expect(fake.log).toEqual([
+      "GET /",
+      "GET /events",
+      "GET /events",
+      "POST /events user.interrupt",
+      "POST / budget=100",
+      "GET /events/stream",
+      "POST /events user.message",
+      "GET /",
+      "POST / budget=13",
+    ]);
+  });
+
+  test("a list too long to read through is taken as used", async () => {
+    // The look gives up after 10,000 events (`LIST_MAX_EVENTS`). What it did
+    // not read may hold a message that was taken up, so the turn is refused
+    // rather than begun from a ceiling counted from nothing.
+    const fake = new FakeSession({ used: null, budget: 1 });
+    fake.pageSize = 2_500;
+    for (let n = 1; n <= 10_001; n++) fake.history.push(queued(n));
+    fake.onMessage = answers("始まってはいけないターンの返事。");
+    const error = await failure(runTurn(turn(fake)));
+    expect(error).toMatchObject({ kind: "protocol", retryable: false });
+    expect((error as ProviderError).diagnostics.code).toBe("list_cost_missing");
+    // Four pages of 2,500; the fifth is not asked for.
+    expect(fake.log).toEqual(["GET /", "GET /events", "GET /events", "GET /events", "GET /events"]);
+  });
+
+  test("a list whose pages never end is given up after a fixed number of requests", async () => {
+    // Pages without an event that still name a next one: the count of events
+    // never gets anywhere, so the requests are counted as well. Refused, as
+    // above: what was not read may hold a message that was taken up.
+    const fake = new FakeSession({ used: null, budget: 1 });
+    let pages = 0;
+    fake.on(`GET ${SESSION}/events`, () => Response.json({ data: [], next_page: String(++pages) }));
+    fake.onMessage = answers("始まってはいけないターンの返事。");
+    const error = await failure(runTurn(turn(fake)));
+    expect(error).toMatchObject({ kind: "protocol", retryable: false });
+    expect((error as ProviderError).diagnostics.code).toBe("list_cost_missing");
+    expect(fake.log).toEqual(["GET /", ...Array.from({ length: 20 }, () => "GET /events")]);
+  });
+
+  test("a turn that is out of time stops reading the list, and ends as one that ran out of time", async () => {
+    const fake = new FakeSession({ used: null, budget: 1 });
+    fake.pageSize = 1;
+    fake.history.push(queued(1), queued(2), queued(3));
+    fake.onMessage = answers("始まってはいけないターンの返事。");
+    let now = 1_000;
+    // The time limit passes while the first page is on its way.
+    fake.on(`GET ${SESSION}/events`, () => { now = 5_000; return undefined; });
+    const result = await runTurn(turn(fake, { deadlineAt: 2_000, hooks: { sleep: async () => {}, now: () => now } }));
+    expect(result).toMatchObject({ stop: "timeout", text: "" });
+    // One page, and nothing was raised or sent.
+    expect(fake.log.filter((line) => line === "GET /events")).toHaveLength(1);
+    expect(fake.sent.filter((request) => request.method === "POST")).toEqual([]);
+  });
+
+  test("a turn that is stopped stops reading the list", async () => {
+    const fake = new FakeSession({ used: null, budget: 1 });
+    fake.pageSize = 1;
+    fake.history.push(queued(1), queued(2), queued(3));
+    fake.onMessage = answers("始まってはいけないターンの返事。");
+    const stop = new AbortController();
+    fake.on(`GET ${SESSION}/events`, () => { stop.abort(new Error("stopped")); return undefined; });
+    await failure(runTurn(turn(fake, { signal: stop.signal })));
+    // The second page is not asked for.
+    expect(fake.log).toEqual(["GET /", "GET /events"]);
+  });
+
+  test("a list that cannot be read does not begin the turn", async () => {
+    // Taken as never used, the session would get a ceiling counted from nothing.
+    for (const failing of [1, 2]) {
+      const fake = new FakeSession({ used: null, budget: 1 });
+      fake.pageSize = 1;
+      fake.history.push(queued(1), queued(2));
+      fake.onMessage = answers("始まってはいけないターンの返事。");
+      let asked = 0;
+      fake.on(`GET ${SESSION}/events`, () =>
+        (++asked === failing ? rejected(400, { type: "invalid_request_error", message: "no such list" }) : undefined));
+      const error = await failure(runTurn(turn(fake)));
+      expect(error).toBeInstanceOf(ProviderError);
+      expect((error as ProviderError).diagnostics.code).not.toBe("list_cost_missing");
+      expect(fake.log).toEqual(["GET /", ...Array.from({ length: failing }, () => "GET /events")]);
     }
   });
 });

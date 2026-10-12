@@ -115,7 +115,12 @@ const RAISE_ATTEMPTS = 3;
 const LOWER_ATTEMPTS = 6;
 // Events one look at the list reads at most. The list is read newest first
 // and stops at the turn's own message, so only a very large turn gets here.
+// The look for a message that was taken up (`requireCost`) reads in the
+// list's own order instead, and stops at the first such message.
 const LIST_MAX_EVENTS = 10_000;
+// Requests that look makes at most. It runs before the turn is given a
+// ceiling, and a page need not hold an event to name a next one.
+const LIST_MAX_PAGES = 20;
 // How far before the turn's message a call the session waits on is looked for.
 const LIST_PAST_EVENTS = 2_000;
 
@@ -484,17 +489,34 @@ class Turn {
     if (reading.cost) return false;
     const some = (totals?: WorkspaceTotals) => !!totals && Object.values(totals).some((value) => value > 0);
     if (some(reading.totals) || some(this.input.baseline)) throw this.protocol("list_cost_missing");
-    let messages: RawEvent[];
+    let read = 0, pages = 0, used = false;
     try {
-      // In the list's own order, oldest first. Messages are taken up in the
-      // order they were sent, so one that was taken up is on the first page.
-      const page = await this.client.beta.sessions.events.list(this.sid, { types: ["user.message"] }, { signal: this.input.signal });
-      messages = page.data as unknown as RawEvent[];
+      // Read until a message that was taken up is found or the list ends,
+      // not just its first page. The API reference orders the list by
+      // `processed_at`, oldest first unless asked otherwise; where a message
+      // that has none yet stands in it, and how many events a page holds,
+      // were not seen on the API. If the queued ones come last, a message
+      // that was taken up is the first event read; a session without any
+      // message costs one request either way. A list too long to read
+      // through, in events or in pages, counts as used: what was not read
+      // may hold such a message.
+      const first = await this.client.beta.sessions.events.list(this.sid, { types: ["user.message"] }, { signal: this.input.signal });
+      for await (const page of first.iterPages()) {
+        for (const item of page.data) {
+          used = !!(item as unknown as RawEvent).processed_at || ++read >= LIST_MAX_EVENTS;
+          if (used) break;
+        }
+        if (used || !page.hasNextPage()) break;
+        // Out of time: `begin` ends the turn as such before it sends anything.
+        if (this.now() >= this.input.deadlineAt) return read > 0;
+        used = ++pages >= LIST_MAX_PAGES;
+        if (used) break;
+      }
     } catch (error) {
       throw this.requestError(error);
     }
-    if (messages.some((event) => event.processed_at)) throw this.protocol("list_cost_missing");
-    return messages.length > 0;
+    if (used) throw this.protocol("list_cost_missing");
+    return read > 0;
   }
 
   /** The runs still open, from the session's own events. The row can be

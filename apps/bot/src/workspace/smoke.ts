@@ -333,6 +333,9 @@ type Turned = TurnResult & { seen: Seen };
 type TurnOptions = {
   allowCents?: number; timeoutMs?: number; images?: string[]; context?: string; notes?: string[];
   steering?: AbortController;
+  /** Reads the session once more, right after the message was sent, and
+   *  prints what it reports under this name (`atSendText`). */
+  atSend?: string;
   /** The result a custom tool call gets, as a value to serialize. Nothing
    *  means the step did not expect that call. */
   answer?: (call: WorkspaceCall, ctx: Context) => unknown;
@@ -391,6 +394,26 @@ const sentText = (at: NonNullable<Seen["sent"]>) => at.index < 0
   ? `not among the ${at.of} message(s) listed, by the id the send returned`
   : `entry ${at.index + 1} of ${at.of} in the list of messages, ${at.queued ? "still queued" : "already processed"}`;
 
+/** How a session reads right after a message was sent to it, before the
+ *  stream is followed to where the message is taken up. The runner's ceiling
+ *  for a session without a list cost rests on two things no document settles
+ *  (`requireCost` in runner.ts): that a new session reports no use at all
+ *  while its first message waits, and that a waiting message is listed
+ *  without `processed_at`. The session is read before the list (`turn`), so
+ *  with a message the list still has queued, the session was read before the
+ *  message was taken up. Reported, not judged. */
+function atSendText(session: BetaManagedAgentsSession | undefined, at: Seen["sent"], anchor?: string): string {
+  const { totals: t, cost } = sessionTotals(session?.usage);
+  return (!session ? "the session could not be read"
+    : `${printable(session.status, 32)}, ` +
+      `${!session.usage?.list_cost ? "no list cost" : cost ? `a list cost of ${t.list_cost_cents} cents` : "a list cost the bot cannot read"}, ` +
+      `${t.active_seconds} active seconds, ${t.input_tokens} input tokens, ${t.cache_read_tokens} read from cache, ` +
+      `${t.cache_write_5m_tokens + t.cache_write_1h_tokens} written to cache, ${t.output_tokens} output tokens`) + "; " +
+    (!anchor ? "the send returned no id for the message" : !at ? "the list of messages could not be read"
+      : `the message was then ${sentText(at)}` +
+        (at.index >= 0 && !at.queued ? " (so the session may have been read after it was taken up)" : ""));
+}
+
 /** One turn through the runner, called the way workspace/index.ts calls it. */
 async function turn(session: Live, text: string, options: TurnOptions = {}): Promise<Turned> {
   const allowCents = await allowance(session, options.allowCents ?? TURN_CENTS);
@@ -427,8 +450,13 @@ async function turn(session: Live, text: string, options: TurnOptions = {}): Pro
     },
     onSent: async (mark) => {
       seen.anchor = mark.eventId || undefined;
-      // An observation only: the turn goes on whether or not it can be made.
+      // Observations only: the turn goes on whether or not they can be made.
+      // The session comes first, where a step asks for it (`atSendText`).
+      const read = options.atSend
+        ? await client.beta.sessions.retrieve(session.id, {}, abortable).catch(() => undefined) : undefined;
       if (mark.eventId) seen.sent = await sentMessage(session.id, mark.eventId).catch(() => undefined);
+      // Printed here and not with the step, which a turn that fails later never reaches.
+      if (options.atSend) note(options.atSend, atSendText(read, seen.sent, seen.anchor));
     },
     baseline: session.totals,
     knownRuns: session.openRuns,
@@ -623,9 +651,11 @@ async function plain() {
   await attempt("archiving a session twice", archivedTwice);
 
   // 1. A reply. The first message carries the context block, as the bot's does.
+  // It is also the one message after which the session is read at once: a
+  // new session that has been sent a message and may not have taken it up.
   const first = await attempt("reply", async () => {
     const result = await turn(session, `Remember this code for later: ${codes.memory}. For now, reply with the single word: ready`,
-      { context: await workspaceContextBlock(runtime, ctx) });
+      { context: await workspaceContextBlock(runtime, ctx), atSend: "the session right after its first message was sent" });
     step("reply", result.stop === "end_turn" && result.text.length > 0,
       `${result.text.length} characters after ${result.rounds} model request(s), ended as ${result.stop}`);
     return result;

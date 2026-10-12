@@ -196,10 +196,11 @@ describe("the session table", () => {
     const disposal = bot.table.retire("c1", "delete");
     expect(disposal).toEqual({
       sessionId: "sesn_1", mode: "delete", channelId: "c1", guildId: "100", key, variant: "plain",
-      totals: used, queuedAt: START + 60_000, attempts: 0,
+      totals: used, allowedCents: 100, queuedAt: START + 60_000, attempts: 0,
     });
     expect(bot.table.get("c1")).toBeUndefined();
-    // The queue is quiesced whatever its state, so the lease need not follow.
+    // The queue is quiesced whatever its state, so the lease does not follow:
+    // only what it still allowed beyond the 12 cents that were counted.
     expect(bot.table.leased()).toEqual([]);
     expect(bot.table.disposals()).toEqual([disposal!]);
     expect(onDisk(path)).toEqual({ sessions: [], disposals: [{ session_id: "sesn_1", mode: "delete", attempts: 0 }] });
@@ -210,6 +211,54 @@ describe("the session table", () => {
     bot.restart();
     expect(bot.table.get("c1")).toBeUndefined();
     expect(bot.table.disposals()).toEqual([disposal!]);
+  });
+
+  test("a lease keeps how it was settled, and a retired row takes along only what its lease still owes", async () => {
+    const path = await dbPath();
+    const bot = startBot(path);
+    const leaseOf = (channelId: string) => bot.table.get(channelId)!.lease;
+    for (const [channelId, sessionId] of [["c1", "sesn_1"], ["c2", "sesn_2"], ["c3", "sesn_3"], ["c4", "sesn_4"]] as const) {
+      bot.table.save(session(channelId, sessionId, "100"));
+      bot.table.touch(channelId, sessionId, { totals: totals({ list_cost_cents: 12 }), lease: { ceilingCents: 112 } });
+    }
+    // Marking a lease leaves its ceiling and its time as they are.
+    bot.clock.now += 1000;
+    expect(bot.table.touch("c1", "sesn_1", { lease: { settled: "counted" } })).toBe(true);
+    expect(bot.table.touch("c2", "sesn_2", { lease: { settled: "lowered" } })).toBe(true);
+    expect(leaseOf("c1")).toEqual({ ceilingCents: 112, at: START, settled: "counted" });
+    expect(leaseOf("c2")).toEqual({ ceilingCents: 112, at: START, settled: "lowered" });
+    expect(leaseOf("c3")).toEqual({ ceilingCents: 112, at: START });
+    // What was counted stays counted: marking it lowered must not make it owed again.
+    bot.table.touch("c1", "sesn_1", { lease: { settled: "lowered" } });
+    expect(leaseOf("c1")).toEqual({ ceilingCents: 112, at: START, settled: "counted" });
+    // A row without a lease has nothing to mark.
+    bot.table.touch("c4", "sesn_4", { lease: null });
+    bot.table.touch("c4", "sesn_4", { lease: { settled: "counted" } });
+    expect(leaseOf("c4")).toBeUndefined();
+
+    bot.restart();
+    expect(leaseOf("c1")).toEqual({ ceilingCents: 112, at: START, settled: "counted" });
+    expect(leaseOf("c2")).toEqual({ ceilingCents: 112, at: START, settled: "lowered" });
+    expect(leaseOf("c3")).toEqual({ ceilingCents: 112, at: START });
+    // All three are still leases: the sweep has something to do for each.
+    expect(bot.table.leased().map((row) => row.sessionId).sort()).toEqual(["sesn_1", "sesn_2", "sesn_3"]);
+    // A new turn's ceiling is a new lease.
+    bot.table.save(session("c5", "sesn_5", "100"));
+    bot.table.touch("c5", "sesn_5", { lease: { ceilingCents: 50 } });
+    bot.table.touch("c5", "sesn_5", { lease: { settled: "counted" } });
+    bot.table.touch("c5", "sesn_5", { lease: { ceilingCents: 80 } });
+    expect(leaseOf("c5")).toEqual({ ceilingCents: 80, at: START + 1000 });
+    // Also on disk: read as counted after a restart, the new lease would
+    // neither be held against the limits nor counted.
+    bot.restart();
+    expect(leaseOf("c5")).toEqual({ ceilingCents: 80, at: START + 1000 });
+
+    // What was counted is not owed again; a lowered lease owes what a plain one does.
+    const owed = () => bot.table.disposals().map((d) => [d.sessionId, d.allowedCents]);
+    for (const channelId of ["c1", "c2", "c3", "c4"]) bot.table.retire(channelId, "archive");
+    expect(owed()).toEqual([["sesn_1", undefined], ["sesn_2", 100], ["sesn_3", 100], ["sesn_4", undefined]]);
+    bot.restart();
+    expect(owed()).toEqual([["sesn_1", undefined], ["sesn_2", 100], ["sesn_3", 100], ["sesn_4", undefined]]);
   });
 
   test("a move that fails on disk loses no session id", async () => {
@@ -423,6 +472,38 @@ describe("schema", () => {
     expect(bot.table.get("1")).toMatchObject({ sessionId: "sesn_2" });
     expect(bot.table.disposals().map((d) => d.sessionId)).toEqual(["sesn_1"]);
     expect(starts(bot.history.get("1", "100", "key", false, 3600))).toEqual(["t0"]);
+    expect(errors).toEqual([]);
+  });
+
+  test("a file from before a lease's settlement was kept gains the two columns, and its rows read as they did", async () => {
+    const path = await dbPath(), errors: unknown[] = [];
+    // The two tables as #76 first created them, with a leased row and a
+    // queued session.
+    const old = new Database(path, { create: true });
+    for (const sql of SCHEMA) old.exec(sql);
+    const columns = (table: string) => (old.query(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+    expect(columns("workspace_sessions")).not.toContain("lease_settled");
+    expect(columns("workspace_disposals")).not.toContain("allowed_cents");
+    old.query(`INSERT INTO workspace_sessions (channel_id, guild_id, key, session_id, variant, created_at, used_at, usage, lease_ceiling_cents, lease_at)
+      VALUES ('c1', '100', ?, 'sesn_1', 'plain', ?, ?, ?, 112, ?)`).run(key, START, START, JSON.stringify(totals({ list_cost_cents: 12 })), START);
+    old.query(`INSERT INTO workspace_disposals (session_id, mode, channel_id, guild_id, key, variant, usage, queued_at, attempts)
+      VALUES ('sesn_0', 'delete', 'c0', '100', ?, 'plain', NULL, ?, 2)`).run(key, START);
+    old.close();
+
+    const bot = startBot(path, { errors });
+    expect(bot.table.get("c1")).toEqual({
+      channelId: "c1", guildId: "100", key, sessionId: "sesn_1", variant: "plain", createdAt: START, usedAt: START,
+      totals: totals({ list_cost_cents: 12 }), lease: { ceilingCents: 112, at: START },
+    });
+    expect(bot.table.disposals()).toEqual([{
+      sessionId: "sesn_0", mode: "delete", channelId: "c0", guildId: "100", key, variant: "plain", queuedAt: START, attempts: 2,
+    }]);
+    // And it is written like any other.
+    bot.table.touch("c1", "sesn_1", { lease: { settled: "lowered" } });
+    bot.table.retire("c1", "archive");
+    // Opening it again adds nothing twice.
+    bot.restart();
+    expect(bot.table.disposals().map((d) => [d.sessionId, d.allowedCents])).toEqual([["sesn_0", undefined], ["sesn_1", 100]]);
     expect(errors).toEqual([]);
   });
 

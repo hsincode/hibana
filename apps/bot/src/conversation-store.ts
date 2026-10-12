@@ -30,8 +30,9 @@ export const SCHEMA = [
   // Anthropic Workspace (#76): the cloud session each channel talks to. The
   // conversation is on Anthropic's side, so the row is all that finds it
   // again after a restart. `usage` holds the session's cumulative totals as
-  // last added to the usage ledger. The two lease columns are set while a
-  // turn's raised spending ceiling has not been lowered again.
+  // last added to the usage ledger. The lease columns are set while a turn's
+  // raised spending ceiling has not been lowered again (one more of them is
+  // in `ADDED_COLUMNS`).
   `CREATE TABLE IF NOT EXISTS workspace_sessions (
      channel_id TEXT PRIMARY KEY, guild_id TEXT, key TEXT NOT NULL, session_id TEXT NOT NULL, variant TEXT NOT NULL,
      created_at INTEGER NOT NULL, used_at INTEGER NOT NULL, usage TEXT, state TEXT,
@@ -43,21 +44,31 @@ export const SCHEMA = [
      session_id TEXT PRIMARY KEY, mode TEXT NOT NULL, channel_id TEXT NOT NULL, guild_id TEXT, key TEXT NOT NULL,
      variant TEXT NOT NULL, usage TEXT, queued_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0)`,
 ];
+// Columns a table gained after it was first created. `CREATE TABLE IF NOT
+// EXISTS` leaves a table that exists as it is, so each of these is added
+// when it is missing, to a new file as to an older one. Additive as well:
+// they may be empty, and the version before names the columns it writes.
+// `lease_settled` says why a lease stays on its row, and `allowed_cents`
+// what a retired session's lease still owed (workspace/sessions.ts).
+const ADDED_COLUMNS: [table: string, column: string, type: string][] = [
+  ["workspace_sessions", "lease_settled", "TEXT"],
+  ["workspace_disposals", "allowed_cents", "INTEGER"],
+];
 
 type ChannelRow = { guild_id: string | null; key: string; usage: string | null };
 type TurnRow = { seq: number; at: number; tokens: number; summary: number; messages: string };
 // Columns are always named, never `*`: a newer version may have added some.
 const SESSION_COLUMNS =
-  "channel_id, guild_id, key, session_id, variant, created_at, used_at, usage, state, lease_ceiling_cents, lease_at";
+  "channel_id, guild_id, key, session_id, variant, created_at, used_at, usage, state, lease_ceiling_cents, lease_at, lease_settled";
 type SessionRecord = {
   channel_id: string; guild_id: string | null; key: string; session_id: string; variant: string;
   created_at: number; used_at: number; usage: string | null; state: string | null;
-  lease_ceiling_cents: number | null; lease_at: number | null;
+  lease_ceiling_cents: number | null; lease_at: number | null; lease_settled: string | null;
 };
-const DISPOSAL_COLUMNS = "session_id, mode, channel_id, guild_id, key, variant, usage, queued_at, attempts";
+const DISPOSAL_COLUMNS = "session_id, mode, channel_id, guild_id, key, variant, usage, queued_at, attempts, allowed_cents";
 type DisposalRecord = {
   session_id: string; mode: string; channel_id: string; guild_id: string | null; key: string;
-  variant: string; usage: string | null; queued_at: number; attempts: number;
+  variant: string; usage: string | null; queued_at: number; attempts: number; allowed_cents: number | null;
 };
 
 /**
@@ -96,6 +107,10 @@ export class ConversationStore {
       db.exec("PRAGMA journal_mode = WAL");
       db.exec("PRAGMA synchronous = NORMAL");
       for (const statement of SCHEMA) db.exec(statement);
+      for (const [table, column, type] of ADDED_COLUMNS) {
+        const columns = db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
+        if (!columns.some((known) => known.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+      }
       this.db = db;
     } catch (error) {
       try { db?.close(); } catch {}
@@ -233,7 +248,12 @@ export class ConversationStore {
       totals: this.column<WorkspaceTotals>(row.usage),
       state: this.column<WorkspaceState>(row.state),
       lease: typeof row.lease_ceiling_cents === "number"
-        ? { ceilingCents: row.lease_ceiling_cents, at: row.lease_at ?? row.used_at }
+        ? {
+          ceilingCents: row.lease_ceiling_cents, at: row.lease_at ?? row.used_at,
+          // A row written before this was kept, or a value this version does
+          // not know, reads as a lease like any other.
+          ...((row.lease_settled === "counted" || row.lease_settled === "lowered") && { settled: row.lease_settled }),
+        }
         : undefined,
     };
   }
@@ -245,15 +265,16 @@ export class ConversationStore {
     });
   }
   saveSession(row: SessionRow) {
-    this.guard((db) => db.query(`INSERT INTO workspace_sessions (${SESSION_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    this.guard((db) => db.query(`INSERT INTO workspace_sessions (${SESSION_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (channel_id) DO UPDATE SET guild_id = excluded.guild_id, key = excluded.key,
         session_id = excluded.session_id, variant = excluded.variant, created_at = excluded.created_at,
         used_at = excluded.used_at, usage = excluded.usage, state = excluded.state,
-        lease_ceiling_cents = excluded.lease_ceiling_cents, lease_at = excluded.lease_at`)
+        lease_ceiling_cents = excluded.lease_ceiling_cents, lease_at = excluded.lease_at,
+        lease_settled = excluded.lease_settled`)
       .run(
         row.channelId, row.guildId ?? null, row.key, row.sessionId, row.variant, row.createdAt, row.usedAt,
         row.totals ? JSON.stringify(row.totals) : null, row.state ? JSON.stringify(row.state) : null,
-        row.lease?.ceilingCents ?? null, row.lease?.at ?? null,
+        row.lease?.ceilingCents ?? null, row.lease?.at ?? null, row.lease?.settled ?? null,
       ));
   }
   /** Sessions whose spending ceiling was raised for a turn and not lowered
@@ -278,10 +299,10 @@ export class ConversationStore {
     this.guard((db) => db.transaction(() => {
       for (const d of disposals) {
         db.query("DELETE FROM workspace_sessions WHERE channel_id = ? AND session_id = ?").run(d.channelId, d.sessionId);
-        db.query(`INSERT OR REPLACE INTO workspace_disposals (${DISPOSAL_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        db.query(`INSERT OR REPLACE INTO workspace_disposals (${DISPOSAL_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
           .run(
             d.sessionId, d.mode, d.channelId, d.guildId ?? null, d.key, d.variant,
-            d.totals ? JSON.stringify(d.totals) : null, d.queuedAt, d.attempts,
+            d.totals ? JSON.stringify(d.totals) : null, d.queuedAt, d.attempts, d.allowedCents ?? null,
           );
       }
     })());
@@ -299,6 +320,7 @@ export class ConversationStore {
         key: row.key,
         variant: row.variant === "ultra" ? "ultra" : "plain",
         totals: this.column<WorkspaceTotals>(row.usage),
+        ...(typeof row.allowed_cents === "number" && row.allowed_cents > 0 && { allowedCents: row.allowed_cents }),
         queuedAt: row.queued_at,
         attempts: row.attempts,
       }))) ?? [];

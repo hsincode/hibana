@@ -16,7 +16,7 @@ import { applyRunEvent, coalesce, eventLine, runLine, waitingLine, type RunView 
 import { contextDigest, openRunsNote, resumeContent, userContent, workspaceContextBlock, workspaceSystem } from "./prompt";
 import { WorkspaceResources } from "./resources";
 import { quiesce, runTurn, type TurnInput, type TurnResult } from "./runner";
-import { SessionTable, type Disposal, type SessionPatch, type SessionRow } from "./sessions";
+import { owed, SessionTable, type Disposal, type SessionPatch, type SessionRow } from "./sessions";
 import { bindWorkspaceTurn, outputFiles, toolsFingerprint, WorkspaceCalls, workspaceToolParams } from "./tools";
 import type { RawEvent, WorkspaceMark, WorkspaceState, WorkspaceTotals } from "./types";
 import { sessionTotals, totalsDelta, totalsMax, WorkspaceUsage } from "./usage";
@@ -81,6 +81,9 @@ type Prepared = {
   budget: TurnInput["budget"];
   /** What the turn may add to the session's cost, in cents. */
   allow: number;
+  /** How many of the messages that were still to go are not sent: with them
+   *  the message would be over the length limit. */
+  omitted?: number;
   /** When a resumed turn first started: its time limit still counts from
    *  there. A new turn starts when it has a slot. */
   startedAt?: number;
@@ -110,6 +113,9 @@ const MONTH_LIMIT = "Anthropic Workspace の今月の利用額の上限に達し
 const LEDGER_UNREAD = "Anthropic Workspace の利用額の記録を読み込めていないため、実行しませんでした。管理者に連絡してください。";
 const tooLong = (chars: number, max: number) =>
   `メッセージが長すぎます（${chars} 文字）。Anthropic Workspace に送れるのは ${max} 文字までです。短くして送り直してください。`;
+// Said with the reply. What is left out here is not sent later by itself.
+const leftOut = (count: number, max: number) =>
+  `最後のメッセージより前の ${count} 件は、合わせると Anthropic Workspace に送れる ${max} 文字を超えるため、送っていません。必要であれば、もう一度送ってください。`;
 // The session ended its turn with no text, and nothing was posted for it. It
 // is not asked again by itself: that would be another turn's cost.
 const NO_REPLY = "返信の本文がないまま、このターンが終わりました。必要であれば、もう一度メッセージを送ってください。";
@@ -117,9 +123,11 @@ const TURN_OVER = "The turn ended before this call ran.";
 
 const nothing = (): WorkspaceTotals => sessionTotals(undefined).totals;
 const some = (totals: WorkspaceTotals) => Object.values(totals).some((value) => value > 0);
-/** What a lease still allows its session to add to what the ledger counted. */
-const leftover = (row?: SessionRow) =>
-  row?.lease ? Math.max(0, row.lease.ceilingCents - (row.totals?.list_cost_cents ?? 0)) : 0;
+/** What is held against the limits for a lease: what it still allows its
+ *  session to add to what the ledger counted. Nothing for a lease that is
+ *  settled: its allowance is in the limits already, or its ceiling is down
+ *  again and the session can add no more. */
+const leftover = (row?: SessionRow) => (row?.lease?.settled ? 0 : owed(row));
 /** The model a session was created for, from its conversation key. */
 function modelOf(key: string): string {
   try {
@@ -372,8 +380,17 @@ export class Workspace {
     // Never past what earlier attempts recorded: a new message always goes.
     const sent = mark ? Math.min(mark.sent ?? earlier, earlier) : 0;
     const records = input.messages.slice(sent).filter((m) => m.role === "user");
-    const text = records.map((m) => m.content ?? "").join("\n\n");
-    const images = records.flatMap((m) => m.images ?? []).slice(-MAX_IMAGES);
+    const joined = (from: number) => records.slice(from).map((m) => m.content ?? "").join("\n\n");
+    // One message has a length limit, and what the person wrote last must not
+    // be refused for what they wrote before it. So the newest always goes,
+    // and of the ones before it as many as fit with it, counted back from
+    // the newest. The rest is left out and the reply says so (`leftOut`):
+    // it counts as dealt with, like what was sent, and is not kept for a
+    // later turn to send unasked.
+    let from = Math.max(0, records.length - 1);
+    while (from > 0 && joined(from - 1).length <= limits.inputMaxChars) from--;
+    const text = joined(from);
+    const images = records.slice(from).flatMap((m) => m.images ?? []).slice(-MAX_IMAGES);
     const unsent = !!text.trim() || images.length > 0;
     live.reserved = 0;
     // Picked up where it was: nothing new was written, and nothing is unsent.
@@ -399,6 +416,7 @@ export class Workspace {
     // month's limits. That includes a turn picked up without a new message
     // (`/retry`, the start of the bot) that still has something unsent.
     if (!unsent) throw new Error("再開できる作業はありません。");
+    // Only the newest by itself can still be too long here.
     if (text.length > limits.inputMaxChars) return { reply: tooLong(text.length, limits.inputMaxChars) };
     // The limits below are checked against the ledger. One that could not be
     // read only knows this process's turns, which would let every restart
@@ -410,7 +428,7 @@ export class Workspace {
     // With what an unfinished turn on this session may have added since the
     // ledger last counted it.
     live.reserved = allow + leftover(row);
-    return { row, variant, send: { text, images }, budget: { allowCents: allow }, allow };
+    return { row, variant, send: { text, images }, budget: { allowCents: allow }, allow, ...(from > 0 && { omitted: from }) };
   }
 
   /** What is left of the day's and the month's limits, in cents, after what
@@ -567,8 +585,9 @@ export class Workspace {
           }
           await input.onSent({
             sessionId, eventId, ceilingCents, startedAt,
-            // Everything recorded for the turn is in the session now: sent
-            // with this message, or by the attempts it follows.
+            // Everything recorded for the turn is dealt with now: sent with
+            // this message or by the attempts it follows, or left out of it
+            // for its length (`prepare`).
             sent: input.messages.length,
             // A turn picked up without a new message counts as picked up,
             // also when the message had to be sent again (another session,
@@ -607,8 +626,18 @@ export class Workspace {
           // goes by the same rule (`rest`).
           ...(some(delta) && { allowed_cents: prepared.allow }),
         });
-        // Otherwise the lease stays, and the sweep takes the allowance back.
-        if (result.released) patch.lease = null;
+        // The budget is down. The lease goes with it once the session has
+        // reported usage or a cost. One that has reported neither may not
+        // have got to its message yet, or not have reported in time for the
+        // turn's last read. Its lease stays, marked as lowered, so that
+        // whoever reads the session next can still count the allowance: the
+        // sweep, or the removal if the conversation ends first (`owed`).
+        if (result.released) patch.lease = some(delta) || result.costReported ? null : { settled: "lowered" };
+        // The budget is still up, so the lease stays for the sweep to take
+        // the allowance back. One that was just counted in place of a cost
+        // is marked: the sweep must not count it again, and it is no longer
+        // held against the limits on top of what they now include.
+        else if (some(delta) && !result.costReported) patch.lease = { settled: "counted" };
       }
       // A turn that threw still learned which runs it started.
       const open = (result?.openRuns ?? [
@@ -635,7 +664,13 @@ export class Workspace {
     // One that ended by itself without a word says so, unless a file it
     // posted is its answer: silence would read as a bot that did not react.
     const said = [result.text, result.notice].filter(Boolean).join("\n\n");
-    const text = result.stop === "stopped" ? "" : said || (result.stop === "end_turn" && !ctx.delivered ? NO_REPLY : "");
+    const reply = said || (result.stop === "end_turn" && !ctx.delivered ? NO_REPLY : "");
+    // What was left out is said with whatever the turn says, also when that
+    // is nothing else. A turn that failed says it the next time it is tried
+    // only if the message had not gone out yet.
+    const text = result.stop === "stopped"
+      ? ""
+      : [reply, prepared.omitted && leftOut(prepared.omitted, limits.inputMaxChars)].filter(Boolean).join("\n\n");
     return {
       text,
       messages: [...input.messages, { role: "assistant", content: text }],
@@ -753,8 +788,12 @@ export class Workspace {
   /** Takes back the allowance a turn left on its session, and counts what
    *  the session used meanwhile. */
   private async rest(client: Anthropic, row: SessionRow, signal: AbortSignal) {
-    if (await this.park(client, row.sessionId, true, signal)) return;
-    const settled = await quiesce(client, row.sessionId, { interrupt: true, signal, log: this.deps.log });
+    // A lease marked as lowered is here to be read. Its turn brought the
+    // session to rest in its own way, and that is not done over: the session
+    // is interrupted only if it reads as running after all.
+    const interrupt = row.lease?.settled !== "lowered";
+    if (await this.park(client, row.sessionId, interrupt, signal)) return;
+    const settled = await quiesce(client, row.sessionId, { interrupt, signal, log: this.deps.log });
     // The conversation may have ended meanwhile. The session then waits to
     // be removed with the totals the row had, and its removal counts the
     // rest: counting it here too would add the same usage twice.
@@ -765,16 +804,23 @@ export class Workspace {
       // As a turn settles (`run`): the allowance stands in for a cost only
       // when the session reported tokens or running time without one. A
       // session that reported nothing since the row was written adds nothing.
+      // What the lease owes is nothing once it was counted, by the turn or
+      // by an earlier pass that could not lower the budget.
       if (some(delta)) {
         this.usage.record({
           model: modelOf(row.key), ultra: row.variant === "ultra", delta, cost_reported: !!settled.costReported, turn: false,
-          allowed_cents: leftover(row),
+          allowed_cents: owed(row),
         });
         patch.totals = totalsMax(settled.totals, row.totals);
+        // Counted now. If the lease has to stay, it says so.
+        if (!settled.costReported) patch.lease = { settled: "counted" };
       }
     }
-    if (settled.lowered) patch.lease = null;
-    if (patch.totals || settled.lowered) this.sessions.touch(row.channelId, row.sessionId, patch);
+    // A lease kept only to be read is let go once the session was read. Its
+    // turn lowered the budget already; that it cannot be brought down to the
+    // cent now must not keep every later pass reading and asking again.
+    if (settled.lowered || (!interrupt && settled.totals)) patch.lease = null;
+    if (patch.totals || patch.lease === null) this.sessions.touch(row.channelId, row.sessionId, patch);
   }
 
   /** Removes one session no channel uses any more. Whatever state it is in,
@@ -808,9 +854,12 @@ export class Workspace {
     // Counted only now, together with leaving the queue: a removal that is
     // tried again must not count the same usage again.
     const delta = settled.totals ? totalsDelta(settled.totals, disposal.totals) : nothing();
+    // With what its lease still owed when the conversation ended, which
+    // stands in for a cost the session does not report, as in `rest`.
     if (some(delta))
       this.usage.record({
         model: modelOf(disposal.key), ultra: disposal.variant === "ultra", delta, cost_reported: !!settled.costReported, turn: false,
+        ...(disposal.allowedCents && { allowed_cents: disposal.allowedCents }),
       });
     this.sessions.disposed(sessionId);
     this.deps.log.info({ session: sessionId, mode }, "Workspace session removed");

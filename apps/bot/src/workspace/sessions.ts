@@ -18,9 +18,22 @@ export type SessionRow = {
   state?: WorkspaceState;
   /** Set while a turn's raised spending ceiling has not been lowered again.
    *  A process that dies in a turn leaves it behind, which is how the next
-   *  one knows the session may still be spending. */
-  lease?: { ceilingCents: number; at: number };
+   *  one knows the session may still be spending. `settled` marks a lease
+   *  that stays although nothing is held against the limits for it:
+   *  `counted`, the ceiling is still up, and the limits already have the
+   *  allowance in place of a cost the session did not report; `lowered`, the
+   *  ceiling is down again, and the session, which had reported neither usage
+   *  nor a cost when its turn ended, is to be read once more. */
+  lease?: { ceilingCents: number; at: number; settled?: "counted" | "lowered" };
 };
+
+/** What the limits count, once, in place of a cost when a leased session
+ *  reports usage and no cost: all its lease lets it add to what the ledger
+ *  counted. Nothing without a lease, and nothing once that was counted. */
+export const owed = (row?: Pick<SessionRow, "lease" | "totals">): number =>
+  row?.lease && row.lease.settled !== "counted"
+    ? Math.max(0, row.lease.ceilingCents - (row.totals?.list_cost_cents ?? 0))
+    : 0;
 
 /** A session no channel uses any more, waiting to be removed on Anthropic's
  *  side. `delete` takes its files and transcript with it and is for an
@@ -34,6 +47,10 @@ export type Disposal = {
   variant: WorkspaceVariant;
   /** What the ledger had counted when the session was retired. */
   totals?: WorkspaceTotals;
+  /** What its lease still owed then (`owed`). The row's lease does not come
+   *  along, so this is all that is left of an allowance nothing has counted:
+   *  the removal counts it if the session reports usage and no cost. */
+  allowedCents?: number;
   queuedAt: number;
   attempts: number;
 };
@@ -42,8 +59,9 @@ export type Disposal = {
 export type SessionPatch = {
   totals?: WorkspaceTotals;
   state?: WorkspaceState;
-  /** `null` releases the lease. */
-  lease?: { ceilingCents: number } | null;
+  /** A ceiling starts a new lease, `settled` marks the one the row has, and
+   *  `null` releases it. */
+  lease?: { ceilingCents: number } | { settled: "counted" | "lowered" } | null;
 };
 
 // Memory keeps what the store would hand back after a restart (the JSON form).
@@ -100,7 +118,9 @@ export class SessionTable {
     if (patch.totals) row.totals = plain(patch.totals);
     if (patch.state) row.state = plain(patch.state);
     if (patch.lease === null) delete row.lease;
-    else if (patch.lease) row.lease = { ceilingCents: patch.lease.ceilingCents, at: this.now() };
+    else if (patch.lease && "ceilingCents" in patch.lease) row.lease = { ceilingCents: patch.lease.ceilingCents, at: this.now() };
+    // Counted stays counted for as long as the lease is the same one.
+    else if (patch.lease && row.lease && row.lease.settled !== "counted") row.lease.settled = patch.lease.settled;
     row.usedAt = this.now();
     // Synchronous, so a lease is on disk before the ceiling is raised.
     this.store?.saveSession(row);
@@ -117,7 +137,7 @@ export class SessionTable {
     const queuedAt = this.now();
     const moved = rows.map((row): Disposal => ({
       sessionId: row.sessionId, mode, channelId: row.channelId, guildId: row.guildId, key: row.key,
-      variant: row.variant, totals: row.totals, queuedAt, attempts: 0,
+      variant: row.variant, totals: row.totals, ...(owed(row) > 0 && { allowedCents: owed(row) }), queuedAt, attempts: 0,
     }));
     for (const disposal of moved) {
       this.rows.delete(disposal.channelId);

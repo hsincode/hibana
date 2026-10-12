@@ -114,7 +114,9 @@ export type LedgerEntry = {
   new_session?: boolean;
   /** What the stretch was allowed to add, in cents. The limits count it in
    *  place of a cost the session did not report. Left out for a stretch in
-   *  which the session reported no usage at all, which is taken as none. */
+   *  which the session reported no usage at all, which is taken as none.
+   *  Nothing here knows whether an allowance was counted before: the caller
+   *  passes each one once (`owed` in sessions.ts). */
   allowed_cents?: number;
 };
 

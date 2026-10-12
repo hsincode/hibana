@@ -4,10 +4,15 @@ import { loadConfig } from "../config";
 import { ProviderError, providerFailureNotice } from "../llm-errors";
 import { apiErrorInfo, createWorkspaceClient, SessionGone, toProviderError, workspaceBaseUrl } from "../workspace/client";
 import { outputFiles } from "../workspace/tools";
+import { offline } from "./workspace-offline";
 
 // Decision record: #76. The official SDK as Anthropic Workspace uses it: which
 // key goes to which host, and how its errors become the bot's fixed
-// classifications. Every request is answered by a function in this file.
+// classifications. Every request is answered by a function in this file: by
+// the `fetch` the client is given, or, in the one test that gives it none, by
+// a server on 127.0.0.1.
+// Should the client ever turn to the global `fetch`, that reaches no host.
+offline();
 
 const config = (extra: NodeJS.ProcessEnv = {}) => loadConfig({
   ANTHROPIC_WORKSPACE_API_KEY: "fixture", SANDBOX_ENABLED: "false", SKILLS_ENABLED: "false",
@@ -133,6 +138,83 @@ describe("the client", () => {
       }
       expect(JSON.stringify(sent)).not.toContain("another-");
     });
+  });
+
+  test("keeps its key on the global fetch too, which is what it sends through when it is given none", async () => {
+    // Production gives the client no `fetch` (workspace/index.ts), so this is
+    // the path its requests take. The global `fetch` really sends, so a server
+    // on 127.0.0.1 answers here and nothing is sent anywhere else.
+    const got: { method: string; path: string; body: string; headers: Record<string, string> }[] = [];
+    const server = Bun.serve({
+      hostname: "127.0.0.1", port: 0,
+      async fetch(request) {
+        const { pathname } = new URL(request.url);
+        got.push({ method: request.method, path: pathname, body: await request.text(), headers: Object.fromEntries(request.headers.entries()) });
+        return pathname.endsWith("/events/stream") ? new Response("event: ping\ndata: {}\n\n", { headers: { "content-type": "text/event-stream" } })
+          : pathname.endsWith("/content") ? new Response("written by the session")
+          : Response.json({ id: "sesn_1", type: "session", status: "idle", data: [] });
+      },
+    });
+    const local = `http://127.0.0.1:${server.port}`;
+    try {
+      // Another base the SDK could find is local as well, and answers nothing.
+      await withEnv({
+        ANTHROPIC_CUSTOM_HEADERS: TWICE, ANTHROPIC_AUTH_TOKEN: "another-provider", ANTHROPIC_API_KEY: "another-key",
+        ANTHROPIC_BASE_URL: "http://127.0.0.1:1/another-base",
+      }, async () => {
+        const sdk = createWorkspaceClient(config({ ANTHROPIC_WORKSPACE_BASE_URL: `${local}/v1` }), { maxRetries: 0 });
+        // Before anything is sent: only to the server above.
+        if (sdk.baseURL !== local) throw new Error(`nothing sent: the client's base is ${sdk.baseURL}, not ${local}`);
+        await sdk.beta.sessions.retrieve("sesn_1");
+        await sdk.beta.sessions.events.send("sesn_1", { events: [{ type: "user.interrupt" }] });
+        const stream = await sdk.beta.sessions.events.stream("sesn_1", {}, { maxRetries: 0 }).asResponse();
+        expect(await stream.text()).toContain("event: ping");
+        expect(await (await outputFiles(sdk).download("file_1")).text()).toBe("written by the session");
+      });
+      expect(got.map((request) => `${request.method} ${request.path}`)).toEqual([
+        "GET /v1/sessions/sesn_1", "POST /v1/sessions/sesn_1/events", "GET /v1/sessions/sesn_1/events/stream", "GET /v1/files/file_1/content",
+      ]);
+      expect(got[1]!.body).toBe(JSON.stringify({ events: [{ type: "user.interrupt" }] }));
+      for (const request of got) {
+        expect(request.headers["x-api-key"]).toBe("fixture");
+        expect(request.headers.authorization).toBeUndefined();
+        expect(request.headers["x-extra"]).toBe("1");
+      }
+      expect(JSON.stringify(got)).not.toContain("another-");
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("sends through the fetch it is given, never through the global one", async () => {
+    const global = globalThis.fetch;
+    // Records and fails without sending, so a client that turned to the
+    // global `fetch` after all would be seen here and reach no host.
+    const reached: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      reached.push(input instanceof Request ? input.url : String(input));
+      throw new TypeError("the global fetch was called");
+    }) as unknown as typeof fetch;
+    try {
+      // Created after the replacement: the client takes its `fetch` when it is made.
+      const { client: sdk, sent } = client((url) =>
+        url.pathname.endsWith("/events/stream") ? new Response("event: ping\ndata: {}\n\n", { headers: { "content-type": "text/event-stream" } })
+          : url.pathname.endsWith("/content") ? new Response("written by the session")
+          : session());
+      const failure = await (async () => {
+        await sdk.beta.sessions.retrieve("sesn_1");
+        await sdk.beta.sessions.events.send("sesn_1", { events: [{ type: "user.interrupt" }] });
+        await (await sdk.beta.sessions.events.stream("sesn_1", {}, { maxRetries: 0 }).asResponse()).text();
+        await (await outputFiles(sdk).download("file_1")).text();
+      })().then(() => undefined, (error: unknown) => error);
+      expect(reached).toEqual([]);
+      expect(failure).toBeUndefined();
+      expect(sent.map((request) => new URL(request.url).pathname)).toEqual([
+        "/v1/sessions/sesn_1", "/v1/sessions/sesn_1/events", "/v1/sessions/sesn_1/events/stream", "/v1/files/file_1/content",
+      ]);
+    } finally {
+      globalThis.fetch = global;
+    }
   });
 
   test("drops a trailing /v1, which the SDK adds to every path itself", async () => {

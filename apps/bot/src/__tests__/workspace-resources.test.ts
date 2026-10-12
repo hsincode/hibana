@@ -11,10 +11,13 @@ import {
   budgetLimit, cents, multiagentMismatch, ULTRA_MULTIAGENT, workspaceEffort, WorkspaceResources,
   type SessionTools, type WorkspaceIdentity, type WorkspaceNetworking,
 } from "../workspace/resources";
+import { offline } from "./workspace-offline";
 
 // Decision record: #76. The agents and the environment Anthropic Workspace
 // sessions are created from, and the session create request itself. The API
 // is a function in this file that keeps what was created; nothing is sent.
+// Should the client ever turn to the global `fetch`, that reaches no host.
+offline();
 
 let dir: string;
 beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), "hibana-workspace-resources-")); });

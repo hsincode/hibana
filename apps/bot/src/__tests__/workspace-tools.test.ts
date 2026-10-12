@@ -18,10 +18,13 @@ import {
   toolFailure, toolResult, toolsFingerprint, workspaceToolParams,
 } from "../workspace/tools";
 import type { WorkspaceCall, WorkspaceResult } from "../workspace/types";
+import { offline } from "./workspace-offline";
 
 // Decision record: #76. The custom tools of an Anthropic Workspace session:
 // which ones the session is given, who may run one when it is called, and how
 // a file leaves the container. No request leaves the process.
+// Should the client ever turn to the global `fetch`, that reaches no host.
+offline();
 
 const dir = await mkdtemp(join(tmpdir(), "hibana-workspace-tools-"));
 afterAll(() => rm(dir, { recursive: true, force: true }));

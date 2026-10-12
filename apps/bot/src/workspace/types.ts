@@ -15,11 +15,13 @@ export type WorkspaceResult = { content: [{ type: "text"; text: string }]; is_er
 /** Saved on the context (and so in the checkpoint) once the message was accepted. */
 export type WorkspaceMark = {
   sessionId: string; eventId: string; ceilingCents: number; startedAt: number; resumes: number;
-  /** How many of the messages recorded for the turn the session had been sent
-   *  by then. The checkpoint goes on collecting what the person writes, and a
-   *  message whose own attempt failed before it went out is recorded behind
-   *  the mark without having reached the session. Absent on a mark written
-   *  before this was counted. */
+  /** How many of the messages recorded for the turn were dealt with by then:
+   *  the session had been sent them, or they were left out because they did
+   *  not fit in one message with what was written after them. The checkpoint
+   *  goes on collecting what the person writes, and a message whose own
+   *  attempt failed before it went out is recorded behind the mark without
+   *  having reached the session. Absent on a mark written before this was
+   *  counted. */
   sent?: number;
 };
 

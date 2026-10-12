@@ -180,7 +180,7 @@ APIに届かない間、botは待ち時間を倍にしながら再試行しま�
 
 Webの `/analytics` は、APIの `GET /api/analytics/cost` を通して Anthropic の Admin API の cost report（`GET /v1/organizations/cost_report`）を表示します（[#48](https://github.com/hsincode/hibana/issues/48)）。見られるのは administrator（`WEB_ADMIN_IDS`）だけです。
 
-APIのVercelプロジェクト（`hibana-api`）の環境変数に `ANTHROPIC_ADMIN_API_KEY` を設定します。botが使う `ANTHROPIC_API_KEY`（workspace のキー）とは別のもので、使えるのは次のどちらかです（[公式ドキュメント](https://platform.claude.com/docs/en/manage-claude/admin-api)）。
+APIのVercelプロジェクト（`hibana-api`）の環境変数に `ANTHROPIC_ADMIN_API_KEY` を設定します。botが使う `ANTHROPIC_API_KEY`（Anthropic Console の workspace に属するキー。プロバイダー「Anthropic Workspace」とは別の話です）とは別のもので、使えるのは次のどちらかです（[公式ドキュメント](https://platform.claude.com/docs/en/manage-claude/admin-api)）。
 
 - Admin API キー（`sk-ant-admin...`）。組織の admin ロールのメンバーだけが Claude Console で作成できます
 - workspace に紐づかない個人キー（`sk-ant-usr-...`）。権限はキーを発行したアカウントと同じです。アカウントに権限がないと、cost report は403（`permission_error`）を返し、ページにその旨が表示されます
@@ -211,7 +211,115 @@ bot は、会話履歴と Auto Routing の経路を `/var/lib/hibana/conversatio
 - 保存した会話が消えるのは、`/clear`、チャンネルやスレッドの削除、モデルの変更、guild の設定変更、スレッドの期限切れです。通常のチャンネルに期限はありません
 - 会話の本文（ツールの結果を含む）がこのファイルに残ります。モードは 0600 です。バックアップは取っていません
 - すべて消すには、bot を止めて `conversations.db`・`conversations.db-wal`・`conversations.db-shm` を削除します。保存をやめるには、`/etc/hibana/bot.env` に `CONVERSATION_DB_PATH=`（空）を書いて再起動します
-- 中身は `sqlite3 /var/lib/hibana/conversations.db` で見られます（表は `history_channels`・`history_turns`・`routes`）
+- 中身は `sqlite3 /var/lib/hibana/conversations.db` で見られます（表は `history_channels`・`history_turns`・`routes`。Anthropic Workspace を入れた版からは `workspace_sessions`・`workspace_disposals` も。この 2 つの表に後から足した列 `lease_settled`・`allowed_cents` は、列の無いファイルを開いたときに bot が `ALTER TABLE … ADD COLUMN` で足します）
 - bot を前の版に切り戻している間、前の版はこのファイルを使いません。その間の会話は保存されず、新しい版に戻ると、切り戻す前の履歴の続きになります
 
 検証は手元のテスト（`apps/bot/src/__tests__/conversation-store.test.ts`、`sync.test.ts`）までです。本番での動作、実際の会話でのファイルの大きさ、キャッシュのヒット率の変化は、配信後に確かめる必要があります。
+
+## Claude 向けのハーネス（2026-10-11）
+
+Anthropic 公式 API（`provider: anthropic`）のターンは、Claude 向けのハーネスで動きます（[#66](https://github.com/hsincode/hibana/issues/66)、[ADR-0009](adr/0009-split-the-harness-by-provider.md)、[ハーネスの説明](harness.md)）。ほかのプロバイダーは従来のハーネスのままです。
+
+- 配信すると、`anthropic` を使っているチャンネルの会話は 1 回最初からになります（Auto Routing の経路も選び直しになり、「Auto Routing:」の通知が出ます）。従来のハーネスで保存された会話と、進行中だった作業のチェックポイントは引き継ぎません。ほかのプロバイダーの会話は続きます
+- 従来のハーネスに戻すには、`/etc/hibana/bot.env` に `ANTHROPIC_HARNESS=codex` を書いて `systemctl restart hibana` します。API・Web・DB は触りません。戻したときも、`anthropic` のチャンネルの会話は 1 回最初からになります
+- ログで見るもの:
+  - `LLM request completed` の `usage_detail`（キャッシュ書き込みの TTL 別、検索の回数）と `prefix`（直前のリクエストとの先頭の一致）
+  - `Anthropic rejected an optional request feature; continuing without it`（`feature` が `tool_search` か `thinking_updates`）。出ていたら、その機能は再起動まで使われません
+  - `Conversation summarized`（`method` が `api` なら API の要約、`prompt` なら会話の中で頼んだ要約）と、失敗時の `Conversation summary by the API failed`
+  - `Subagent completed` / `Subagent failed`
+- 画像をデータとして会話に保存するので、`conversations.db` は以前より大きくなります（大きさは実測していません）
+- 実 API での確認は、手元から Haiku 5.5 で行った手動のスクリプトだけです（2026-10-11、`docs/harness.md` の「実 API での確認」）。Opus 5.5 / Sonnet 5.5 には、新旧の比較（#69）で会話だけのターンを送りました。未確認: この 2 つのモデルでツールを呼ぶターン、本番でのキャッシュの効き、要約とサブエージェントの費用
+
+## Anthropic Workspace（2026-10-12）
+
+プロバイダー「Anthropic Workspace」（`anthropic_workspace`）のターンは、Claude Managed Agents のセッションで動きます（[#76](https://github.com/hsincode/hibana/issues/76)、[ADR-0011](adr/0011-add-anthropic-workspace-provider.md)、[ハーネスの説明](harness.md)の「workspace 経路」）。作業領域は VPS の Docker ではなく、Anthropic のクラウドのコンテナです。**未配信です。実際の API では、手元から、Haiku 5.5 のセッションで確かめただけです**（2026-10-12。Ultra なしの全項目と、Haiku Ultra の bot 自身のターン 1 回。この節の最後）。この節の手順と値は AI の案で、本人未確認です。
+
+### 使えるようにするまで
+
+プリセットが非公開か、鍵が無い間は、配信しても誰も新しく選べません。
+
+1. （勧め）Anthropic Console に、Workspace 専用の workspace を作り、その spend limit を設定します。bot が壊れても効く歯止めになります。Files API のファイルは同じ workspace のどの鍵からも読めるので、`ANTHROPIC_API_KEY` と同じ workspace に置くと、ファイルが分かれません（[spend limit](https://platform.claude.com/docs/en/api/rate-limits)、[Files API](https://platform.claude.com/docs/en/build-with-claude/files)。workspace の spend limit がセッションの稼働時間の料金にも効くかは未確認です）
+2. その workspace の API キーを、`/etc/hibana/bot.env` に `ANTHROPIC_WORKSPACE_API_KEY=` として置き、`systemctl restart hibana` します。`ANTHROPIC_API_KEY` は代わりになりません
+3. 対応した版の bot が動いていることを確かめてから、Web の `/models` で 3 つのプリセット（Anthropic Workspace / Claude Haiku 5.5・Sonnet 5.5・Opus 5.5）を公開します
+
+- エージェント 2 つと environment 1 つは、最初のターンで作り、ID を `/var/lib/hibana/anthropic_workspace_resources.json` に保存します。起動時には作りません
+- 設定 API を使わない bot（`WEB_API_URL` なし）には、手順 3 の公開の手段がありません。その構成では、3 つのプリセットは常に非公開・Premium 以上として扱われ、`runtime_state.json` を手で書き換えて公開しても、起動のたびに非公開へ戻ります（Web の構成で公開済みだった bot を、`WEB_API_URL` なしに切り替えた場合も同じです）。Workspace を使えるのは、`PROVIDER=anthropic_workspace` を bot の既定にしたときだけです。本番の構成（`WEB_API_URL` あり）は変わりません
+- 公開する前でも、`/usage` と `/switch` の `ultra` の説明文には「Workspace」の語が出ます（スラッシュコマンドの説明は全員に見えます）
+
+### 環境変数
+
+既定値と範囲は AI の案で、本人未確認です（#76）。範囲の外の値は、起動時にエラーになります。
+
+| 変数 | 既定 | 中身 |
+|---|---|---|
+| `ANTHROPIC_WORKSPACE_API_KEY` | なし | 鍵。無ければ、Workspace のターンは認証エラーになる |
+| `ANTHROPIC_WORKSPACE_BASE_URL` | `https://api.anthropic.com` | 接続先。末尾の `/v1` は付けても付けなくてもよい |
+| `ANTHROPIC_WORKSPACE_TURN_BUDGET_USD` | 1 | 1 ターンがセッションに足せる額（USD。0.05〜100） |
+| `ANTHROPIC_WORKSPACE_ULTRA_TURN_BUDGET_USD` | 3 | 同、Haiku Ultra のターン（0.05〜100） |
+| `ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD` | 5 | bot 全体の 1 日の額（UTC。0.01〜10000） |
+| `ANTHROPIC_WORKSPACE_MONTHLY_BUDGET_USD` | 50 | bot 全体の月の額（UTC。0.01〜100000） |
+| `ANTHROPIC_WORKSPACE_TURN_TIMEOUT_MS` | 1200000 | 1 ターンの時間（20 分） |
+| `ANTHROPIC_WORKSPACE_ULTRA_TURN_TIMEOUT_MS` | 3600000 | 同、Haiku Ultra のターン（60 分） |
+| `ANTHROPIC_WORKSPACE_MAX_CONCURRENT` | 2 | bot 全体で同時に動く Workspace のターン（1〜64） |
+| `ANTHROPIC_WORKSPACE_INPUT_MAX_CHARS` | 60000 | 1 回の発言の長さ。いちばん新しい発言 1 件が超えると断る。まだ送っていない発言と合わせて超えるときは、新しいものから収まるだけを送る（下の「データとログ」の再開の項） |
+| `ANTHROPIC_WORKSPACE_NETWORKING` | `unrestricted` | コンテナのネットワーク。`limited` にすると、下の一覧とパッケージの配布元だけになる |
+| `ANTHROPIC_WORKSPACE_ALLOWED_HOSTS` | 空 | `limited` のときに許すホスト名（カンマ区切り。スキーム・ポート・パスは書かない）。`limited` 以外で指定すると起動時にエラー |
+| `ANTHROPIC_WORKSPACE_WEB_ENABLED` | `true` | コンテナの web 検索と web 取得 |
+
+- 金額は、セッションが報告する list cost（公開単価での額）で数えます。請求額とは一致しないことがあります
+- 1 ターンの 2 つの上限は、0.05 未満にできません（枠が 5 セント未満のターンは始めないため）。**`bot.env` に 0.05 未満の値があると、bot は起動時のエラーで止まります。** 配信の前に確かめてください（実際の `bot.env` の値は、AI は確かめていません）。1 日と月の上限は 0.01 まで下げられます
+- 1 日と月の上限の判定は、報告された額より多めに数えます。セッションを 1 つ作るたびに 1 セントと、トークンや稼働秒数などの使用量が増えたのに額が報告されなかった区間の、渡していた枠の全額を、判定にだけ足します（報告は 1 セント単位の四捨五入で、短いセッションは 0 と報告されるため）。`/usage` に出る額は変わりません。`/usage` の額が上限より少ないのに「上限に達している」と断られるときは、この分か、実行中のターンに渡している枠の分です
+  - 枠を足すのは、「使用量の報告があるのに、額の報告が無い」区間だけで、1 つの枠につき 1 回です。その使用量を最初に読んだ処理（ターンの精算、ターンの後の掃除、会話が終わった後の片付けのどれか）が足します。足し終えた枠は、実行中のターンに渡している枠（予約）としては、もう引きません
+  - 使用量の報告がまったく無かったターンには、枠を足しません（何も使っていないものとして扱います）。発言が取り上げられる前に、`/clear` された、同じ人が言い直した、時間切れになった、というターンです。そのセッションが後から使用量（額なし）を報告したときは、次の掃除（60 秒ごと）か、その前の片付けが読んで、枠を 1 回足します。掃除が 1 回読んだ後で初めて出た使用量には、足しません
+  - `/usage` の「額の報告が無かったターン」の件数には、使用量の報告が無かったターンも入ります。掃除や片付けが、額の無い使用量を記録したときも 1 増えます（判定に足したかどうかも、ターンの数も、この件数からは分かりません）
+- 「プロバイダとの通信を再試行しましたが、応答を完了できませんでした。（送信時・list_cost_missing）」で失敗するターンは、セッションが、使用済みなのに額（list cost）を報告していないものです（トークンや稼働秒数の報告がある、bot が以前に使用量を数えている、処理済みの発言がある、のどれか）。上限を「使った額 + 枠」で置けないので、発言を送る前に止めています。取り上げ前の発言がキューにあるだけのセッションは、これに当たりません（`docs/harness.md` の「上限と費用」）。処理済みの発言があるかは、発言の一覧を、見つかるか尽きるまで読んで確かめます（額も使用量も報告しておらず、bot が使用量を数えたこともないセッションだけ。取り上げ前の発言だけが何ページも並ぶと、その分、ターンの開始前のリクエストが増えます）。10,000 件読んでも決まらないセッションも、この失敗になります
+- ネットワークと web の設定は、**新しく作るセッションにだけ**効きます。既にあるセッションは、作ったときの設定のままです。ネットワークを変えると、新しい environment が作られます
+- `limited` にするときは、Discord の CDN（`cdn.discordapp.com`・`media.discordapp.net`）を一覧に入れないと、添付を取得できません。web 検索と web 取得も、同じ一覧で絞られます
+- `WORKFLOWS_ENABLED`・`SUBAGENT_ENABLED`・`TOOLS_ENABLED` のどれかを `false` にすると、Haiku Ultra は働きません（委譲なしのセッションになります）
+- bot の環境に `ANTHROPIC_CUSTOM_HEADERS` を置くと、公式 SDK がそれを読み、Workspace のリクエストにもヘッダーが付きます。鍵（`x-api-key`）と `Authorization` は、この変数に書いてあっても置き換わりません（Workspace の鍵のまま送り、`Authorization` は送りません。同じ名前を、大文字と小文字を変えて何回書いても同じです。送信の直前に固定しています）。それ以外のヘッダーは、そのまま付きます。Workspace に送りたくないヘッダーがあるなら、この変数を置かないでください
+  - Workspace のリクエストがすべて送信前に失敗する書き方が、確かめた範囲で 1 つあります。`X-Api-Key: …` と `Authorization: …` を書いたうえで、その両方を、別の綴りの値なしの行（`x-api-key:`、`authorization:`）でもう一度書いた場合です。鍵は送られません（`docs/harness.md` の「限界」）
+
+### データとログ
+
+- `/var/lib/hibana/anthropic_workspace_usage.json`: 利用額の台帳（日 × モデル。約 400 日分）。1 日と月の上限は、これで判定します。判定にだけ足す額は、`limit_extra_cents` という項目に入ります（この項目の無い台帳は、0 として読みます）
+  - **読めないとき（ファイルが壊れているなど）は、Workspace のターンを、新しい発言も再開（`/retry`、起動時の自動の再開）も断ります**（「利用額の記録を読み込めていないため、実行しませんでした」）
+  - 読めない間、残ったセッションの片付けは、budget を下げるだけになります。額の記録、渡した枠の返却、セッションの delete / archive は進みません。台帳を直して（または消して）再起動すると、その起動の最初の片付けが、残りを数えて進めます
+- `/var/lib/hibana/anthropic_workspace_resources.json`: エージェントと environment の ID。消しても、同じ名前のものを Anthropic 側から探して使います
+- `conversations.db` の `workspace_sessions`（チャンネルとセッションの対応）と `workspace_disposals`（片付け待ち）。会話の本文は入りません。`workspace_sessions` の `lease_ceiling_cents` が入っている行は、ターンに渡した枠（lease）が残っているセッションです。`lease_settled` が空なら、ターンが実行中か、budget が上がったまま終わっていて、次の掃除（60 秒ごと）が下げるものです。`counted` は、budget は上がったままで、枠を判定用の額に数え終えたもの。`lowered` は、budget を下げ終えていて、使用量が後から出ていないかを次の掃除がもう一度読むものです。`workspace_disposals` の `allowed_cents` は、片付けに回った時点でまだ数えていなかった枠です（`docs/harness.md` の「上限と費用」）。`CONVERSATION_DB_PATH=`（空）で保存をやめている bot は、停止のときにセッションの archive を 3 秒だけ試みます。その bot がターンの途中で落ちると（クラッシュなど）、セッションを覚えているのはチェックポイントだけになります。次の起動は、そのターンを 1 回だけ、新しいセッションで再開し、前のセッションを止めて archive します（ログに `Workspace session of an unfinished turn is in no row; it is stopped and all it has used is counted`。そのセッションの累計の全額を台帳に足すので、二重に数えることがあります）
+- ログで見るもの（発言やコマンドの本文は入りません）:
+  - `Workspace session created`（`variant` が `plain` か `ultra`、`model`、`effort`）
+  - `Workspace turn finished`（`stop` が `end_turn`・`interrupted`・`timeout`・`budget`・`stopped` のどれか、`list_cost_cents`、`cost_reported`、`runs_started`、`open_runs`、`released`）。`released` が偽のターンは、budget を下げられずに終わっています。次の掃除（60 秒ごと）が下げます。`released` が真でも、使用量も額も見えないまま終わったターンは、次の掃除がセッションをもう一度読みます（セッションの GET が 1 回。`running` か `rescheduling` と読めたときだけ interrupt も送ります。読めたら、その掃除で lease を外します）
+  - `Workspace session keeps an older tool list`: ツールの一覧が、そのセッションを作ったときから変わっている
+  - `Workspace session removed` と、失敗時の `Workspace session could not be removed`（5 回失敗すると、次の起動まで試しません。workflow run が開いたままのセッションは、delete / archive が 400 で拒否されることがあります。下の `/clear` の項）
+  - 警告: `workspace budget could not be lowered`、`workspace budget was not lowered: every value was rejected`、`workspace session has more than one workflow run open`、`workspace session multiagent differs from its variant`、`workspace tool result was not accepted`（Hibana のツールの結果を、セッションが受け取らなかった。届かなかった結果は送り直します）
+- `/usage`（owner のみ）に、従来の推計とは別の行で出ます。`/context` には `workspace`（`variant`、`created_at`、`container_until`）が出ます。`container_until` は作成から 30 日後で、その後はコンテナの中身が失われます
+- `/clear` は、会話に加えて、クラウドのセッションと作業ファイルも削除します。**Haiku Ultra で workflow run が開いたまま残っているセッションは、削除（モデルの変更では archive）が 400 で拒否されることがあります**（公開文書の記述。実 API では未確認）。その間は、会話と作業ファイルが Anthropic 側に残ります。`/clear` の返信は「削除を始めました」のままです。片付けは 60 秒ごとに 5 回試し、その後は次の bot の起動まで試しません。止まった run は、寿命（既定 24 時間）が過ぎるまで自分では終わりません
+- bot がサーバーから外されても（kick）、そのサーバーのセッションは片付けません。`workspace_sessions` の行と、Anthropic 側の会話・作業ファイルは残ります
+- 同じチャンネルのターンは、発言した人によらず 1 つずつ順に動きます（従来の 2 つのハーネスと同じ、チャンネルごとのキュー）。待っている発言に、待ちの表示は出ません
+- 起動すると、Discord のコマンド登録より前に、前のプロセスが残したセッションの片付け（interrupt と budget の引き下げ）を始めます。コマンド登録やサーバーごとの初期化が失敗しても、片付けは走ります
+- 再起動で中断したターンは、起動後に 1 回だけ自動で再開します。もう一度止まったら、利用者の `/retry` を待ちます
+  - 再開も、台帳と 1 日・月の上限で確かめます。断られたときは、チャンネルに定型文（上限に達している、または記録を読み込めていない）が出て、チェックポイントは消えます（続けるには、新しい発言が要ります）
+  - 再開の前に、セッションに最後に送られた発言が、チェックポイントのものと同じかを確かめます（1 リクエスト）。同じチャンネルで別の人の発言が間に入っていたら、「続けて」ではなく、本人の発言を新しい発言として送り直します。そのターンは、新しい枠と新しい時間の上限で動きます（起動時の自動の再開では、最大 2 時間前の依頼が走ります）
+  - チェックポイントに、セッションへまだ送っていない発言が残っていることがあります（発言が受理された後で失敗し、次の発言のターンが、送る前に失敗した場合）。チェックポイントは、何件目までが済んだか（セッションが受け取った、または長さのために送らなかった）を覚えていて（`ctx.workspaceMark.sent`。この項目の無いチェックポイントは、今までどおりに読みます）、`/retry` と起動時の自動の再開は、「続けて」の代わりに、まだ送っていない発言を新しい発言として送ります。次の発言があれば、その前に付けて 1 つの発言にします。どちらも新しい枠と新しい時間の上限で動き、断られると（いちばん新しい 1 件が長すぎる、上限、台帳）、チェックポイントごと消えます
+  - 1 つにまとめると `ANTHROPIC_WORKSPACE_INPUT_MAX_CHARS` を超えるときは、新しいものから順に、収まるだけを送ります（いちばん新しい 1 件は必ず送ります）。送らなかった件数は、返信の後ろに「最後のメッセージより前の N 件は、合わせると Anthropic Workspace に送れる M 文字を超えるため、送っていません。必要であれば、もう一度送ってください。」と付きます。送らなかった発言を、後から自動で送り直すことはしません。発言を送った後でそのターンが失敗したときは、この 1 行は出ません（`docs/harness.md` の「限界」）
+- budget の定型文（「このターンの費用の上限…」）で止まった後の次の発言では、止まっていた前の作業を止めてから、その発言を始めます。前の作業の続きは捨てます（`docs/harness.md` の「ターンの流れ」）
+- 本文なしでターンが終わり、チャンネルに何も届いていないときは、「返信の本文がないまま、このターンが終わりました。必要であれば、もう一度メッセージを送ってください。」と返します（費用は数えます）
+
+### 止め方
+
+- **`/models` でプリセットを非公開に戻しても、既に選んでいるサーバーは動き続けます。** 新しく選べなくなるだけです
+- 全部を止めるには、`bot.env` から `ANTHROPIC_WORKSPACE_API_KEY` を消して再起動します。Workspace を選んでいるサーバーのターンは、すべて認証エラーになります（ほかのモデルには切り替わりません）。片付け待ちのセッションの削除も、鍵を戻すまで進みません
+- サーバーごとに止めるには、`/switch` かダッシュボードでモデルを替えます。そのサーバーのセッションは archive されます
+- `ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD=0.01` にして再起動すると、新しいターンは「1 日の利用額の上限」の定型文で断られます。その再起動で中断したターンの再開も、枠を残していれば断られます（コードの読み取りから。この値での動作はテストしていません）
+- Console の側では、専用の workspace の spend limit を下げるか、鍵を無効にします
+
+### 切り戻し
+
+bot を前の版に戻している間（relay の自動の切り戻しを含む）:
+
+- 新しい 2 つの表と 2 つのファイルは、前の版には使われないだけで、そのまま残ります（表については、前の版の `conversation-store.ts` と `history.ts` を取り出して、新しい版が書いたファイルに対して手元で動かして確かめました。前の版の bot 全体は動かしていません。この確認は、2 つの表に列を 1 つずつ足す前のファイルで行ったもので、列が増えても同じ、というのは、前の版がこの 2 つの表を読み書きしないことによります。2 つのファイルは、前の版のコードに読み書きする箇所が無いことによります）
+- 前の版は `anthropic_workspace` を知りません。Workspace を選んでいるサーバーのターンは失敗する見込みで、進行中だった Workspace のチェックポイントを従来のハーネスのものとして扱うことがあります（前の版のコードの読み取りによる。未検証）。切り戻す前に、Workspace を選んでいるサーバーのモデルを替えておくのが安全です
+- その間の `/clear` やチャンネルの削除は、クラウドのセッションに届きません。新しい版に戻すと、消したはずの会話と作業ファイルが続きます。確実に消すには、新しい版に戻してからもう一度 `/clear` します
+- 停止のときに budget を下げられなかったセッションは、新しい版が戻るまで、上げた budget のまま残ります（使えるのはその budget まで）
+
+検証は、手元のテスト（`apps/bot/src/__tests__/workspace-*.test.ts`。Anthropic の応答はすべて偽のもの）と、手元からの実 API での確認（2026-10-12 の 4 回の実行）です。**実 API では、2026-10-12 に、Haiku 5.5・effort medium のセッションで、手動のスクリプト（`cd apps/bot && bun run workspace-smoke`）と bot 自身のターン（Discord は偽）が通りました。Haiku Ultra は、bot 自身のターン 1 回（workflow run が 1 つ始まって終わる）が通りました**（AI が実行。持ち主は再実行していません。`docs/harness.md` の「workspace 経路の実 API での確認」）。スクリプトは課金されるので、次に流すときも、そのつど持ち主の承認が要ります。未確認: Haiku Ultra のうち、budget で止まった run の扱い・ターンをまたぐ run・run が開いたセッションの片付け、Sonnet 5.5・Opus 5.5、実際の Discord を通したターン、実際の費用（請求額）、切り戻しの挙動、本番での動作。

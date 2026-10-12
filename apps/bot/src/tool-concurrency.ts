@@ -8,6 +8,9 @@ const parallelTools = new Set([
   "websearch", "web_fetch", "web_fetch_exa", "web_search_advanced_exa",
   "read_file", "Read", "list_files", "grep_files", "Grep", "Glob",
   "run_jev", "tool_search", "ToolSearch", "search_tool",
+  // Claude harness: subagents started in one response run side by side. Their
+  // number is bounded by the harness's own limits, not by this batch size.
+  "Agent",
 ]);
 
 export function supportsParallelTool(name: string, args: Json = {}): boolean {

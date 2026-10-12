@@ -1,12 +1,16 @@
 import { type ChatInputCommandInteraction, MessageFlags } from "discord.js";
 import {
   REASONING_EFFORTS,
+  ultraSupported,
+  WORKSPACE_PROVIDER,
 } from "@hibana/shared/catalog";
 import type { Runtime } from "./runtime";
+import { deprecationLine, refuseDeprecatedPreset } from "./deprecation";
 import type { ToolRegistry } from "./tools";
 import type { History } from "./history";
 import type { Voice } from "./voice";
 import type { UsageLedger } from "./usage-ledger";
+import type { Workspace } from "./workspace";
 import type { Context, Json } from "./types";
 const string = (
   name: string,
@@ -38,11 +42,11 @@ export function commands(runtime: Runtime) {
     command("clear", "このチャンネルの会話履歴を消去"),
     command("context", "会話履歴とトークン使用量"),
     command("retry", "失敗した作業を再開"),
-    command("usage", "Anthropic API の推計利用額（owner のみ）"),
+    command("usage", "Anthropic API の利用額（推計と Workspace の公開単価。owner のみ）"),
     command("switch", "このサーバーのモデルを切り替え", [
       { ...string("preset", "モデルのプリセット"), autocomplete: true },
       string("effort", "推論の深さ", [...REASONING_EFFORTS, "default"]),
-      string("ultra", "Ultracode（xhigh・ワークフローを常時編成）", ["on", "off"]),
+      string("ultra", "Ultracode（xhigh・ワークフロー）。Workspace は Haiku 5.5 だけ Ultra", ["on", "off"]),
       string("multi", "Multi-Agent（役割分担・並列）", ["on", "off"]),
     ]),
     ...flags.map(([name, desc]) =>
@@ -138,6 +142,8 @@ export async function handleCommand(
   voice: Voice,
   retry: (ctx: Context) => Promise<void>,
   usage: UsageLedger,
+  /** Anthropic Workspace sessions (#76). */
+  workspace?: Workspace,
 ) {
   if (runtime.snapshot.blocked_users.includes(i.user.id)) {
     await i.reply({
@@ -164,28 +170,50 @@ export async function handleCommand(
   try {
     let result: unknown;
     let patch: Json = {};
+    // Shown above the JSON, which is cut to what the message has room for.
+    let note: string | undefined;
     const guild = () => {
       if (!i.guildId) throw new Error("サーバー内で使用してください。");
       return i.guildId;
     };
     switch (i.commandName) {
-      case "info":
-        result = runtime.resolve(ctx.guildId, ctx.userId);
+      case "info": {
+        const settings = runtime.resolve(ctx.guildId, ctx.userId);
+        result = settings;
+        note = [
+          deprecationLine(settings.selection),
+          settings.selection.provider === WORKSPACE_PROVIDER
+            ? "Anthropic Workspace: 会話と作業領域は Anthropic のクラウドにあります（チャンネルごと）。"
+            : undefined,
+        ].filter(Boolean).join("\n") || undefined;
         break;
-      case "context":
-        result = history.info(ctx.channelId);
+      }
+      case "context": {
+        // `turns` and `estimated_tokens` are the local record of the
+        // conversation, also for a Workspace channel, whose conversation
+        // itself is in the cloud session named here.
+        const cloud = workspace?.info(ctx.channelId);
+        result = cloud ? { ...history.info(ctx.channelId), workspace: cloud } : history.info(ctx.channelId);
         break;
+      }
       case "usage":
         // Spend covers every server the bot is in, so only the owner
         // (`WEB_ADMIN_IDS`, role administrator) may read it (#44).
         if (runtime.role(i.user.id) !== "administrator")
           throw new Error("このコマンドは owner のみ使用できます。");
         result = usage.summary();
+        // Workspace sessions report their own cost; it is not in the estimate.
+        note = workspace?.usageLine();
         break;
-      case "clear":
+      case "clear": {
+        // Asked first: the clear is what ends the channel's session.
+        const cloud = workspace?.info(ctx.channelId);
         history.clear(ctx.channelId);
-        result = { ok: true };
+        result = cloud
+          ? { ok: true, workspace: "クラウドのセッションと作業ファイルの削除を始めました" }
+          : { ok: true };
         break;
+      }
       case "retry":
         await i.editReply("作業を再開します。");
         await retry(ctx);
@@ -202,6 +230,9 @@ export async function handleCommand(
         };
         if (!Object.keys(patch).length)
           result = runtime.resolve(ctx.guildId, ctx.userId).selection;
+        // A new choice of a deprecated provider stops here (#67). Typing an
+        // id that autocomplete no longer offers reaches this line too.
+        else refuseDeprecatedPreset(runtime, guild(), i.user.id, patch.preset);
         break;
       case "temperature":
         patch = { temperature: i.options.getNumber("value") };
@@ -296,11 +327,26 @@ export async function handleCommand(
         throw new Error("不明なコマンドです。");
       }
     }
-    if (Object.keys(patch).length)
+    if (Object.keys(patch).length) {
       result = await runtime.patch(guild(), patch, i.user.id);
+      // The switch is stored either way; on Anthropic Workspace it only
+      // takes effect as Haiku Ultra (#76), and the person is told when the
+      // turns they will get are not that.
+      if (i.commandName === "switch" && (patch.ultra_mode === true || patch.multi_agent === true)) {
+        const settings = runtime.resolve(ctx.guildId, ctx.userId);
+        if (settings.selection.provider === WORKSPACE_PROVIDER && !settings.workspace_ultra)
+          note = ultraSupported(settings.selection)
+            ? "Anthropic Workspace の Ultra は、いまの設定では働きません（Multi-Agent が on か、ワークフローが無効です）。設定は保存しました。"
+            : "Anthropic Workspace の Ultra は Haiku 5.5 だけで働きます。設定は保存しました。";
+      }
+    }
+    // A Discord message holds 2000 characters. A short note leaves the JSON
+    // the 1850 it always had; a longer one takes its room from the JSON.
+    const room = Math.min(1850, 1987 - (note?.length ?? 0));
     await i.editReply(
-      "```json\n" +
-        JSON.stringify(result ?? { ok: true }, null, 2).slice(0, 1850) +
+      (note ? `${note}\n` : "") +
+        "```json\n" +
+        JSON.stringify(result ?? { ok: true }, null, 2).slice(0, room) +
         "\n```",
     );
   } catch (error) {

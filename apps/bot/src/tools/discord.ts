@@ -71,6 +71,8 @@ const permission: Record<string, bigint> = {
   list_guild_webhooks: P.ManageWebhooks,
   get_audit_log: P.ViewAuditLog,
 };
+/** The largest file posted as an attachment, wherever its bytes come from. */
+export const ATTACHMENT_LIMIT = 25 * 1024 * 1024;
 export const id = (value: unknown): string => {
   if (typeof value !== "string" || !/^\d{1,25}$/.test(value))
     throw new Error("Expected a Discord snowflake string");
@@ -568,13 +570,34 @@ export class DiscordTools {
     await this.authorizeChannel(ctx, channelId);
     const path = await this.sandbox.path(ctx, String(a.path));
     const stat = await lstat(path);
-    if (!stat.isFile() || stat.size > 25 * 1024 * 1024)
+    if (!stat.isFile() || stat.size > ATTACHMENT_LIMIT)
       throw new Error("Attachment must be a regular file under 25 MiB");
+    return this.postFile(
+      ctx,
+      channelId,
+      {
+        data: await readFile(path),
+        name: basename(String(a.filename ?? path)),
+        content: a.content,
+      },
+      replyTo,
+    );
+  }
+  /** Posts one attachment and records that the turn delivered something. The
+   *  caller has authorized the channel and bounded the size. `sendFile` reads
+   *  the bytes from the sandbox; an Anthropic Workspace session (#76) fetches
+   *  them from its container's outputs. */
+  async postFile(
+    ctx: Context,
+    channelId: string,
+    file: { data: Buffer; name: string; content?: unknown },
+    replyTo?: string,
+  ) {
     const result = await this.client.rest.post(
       `/channels/${channelId}/messages`,
       {
         body: {
-          content: a.content || undefined,
+          content: file.content || undefined,
           allowed_mentions: { parse: [] },
           // The direct `/image` shortcut replies to the request. Tool calls
           // omit replyTo, so model-sent files stay unthreaded.
@@ -587,12 +610,7 @@ export class DiscordTools {
               }
             : {}),
         },
-        files: [
-          {
-            data: await readFile(path),
-            name: basename(String(a.filename ?? path)),
-          },
-        ],
+        files: [{ data: file.data, name: file.name }],
       },
     );
     ctx.delivered = true;

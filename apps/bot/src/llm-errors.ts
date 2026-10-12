@@ -34,9 +34,23 @@ export class ProviderError extends Error {
     public readonly kind: FailureKind,
     public readonly retryable: boolean,
     public readonly status?: number,
+    /** What an Anthropic 400 objected to, when it named one of the request
+     *  features the Claude harness can send without (see `requestFeature`). */
+    public readonly feature?: RequestFeature,
   ) {
     super(`Provider ${status ? `HTTP ${status}: ` : ""}${kind}`);
   }
+}
+
+export type RequestFeature = "thinking_binding" | "tool_search" | "thinking_updates" | "compaction";
+/** Reads which optional feature a rejection is about from its message. The
+ *  message itself is still never kept: only this fixed label leaves. */
+function requestFeature(message: string): RequestFeature | undefined {
+  // "Invalid `signature` in `thinking` block. The block is bound to a different conversation."
+  if (/bound to a different conversation/i.test(message)) return "thinking_binding";
+  if (/defer_loading|tool_search_tool|tool_reference/i.test(message)) return "tool_search";
+  if (/thinking-display-updates|thinking\.display|display[^.]{0,40}updates/i.test(message)) return "thinking_updates";
+  if (/compact-2026|compaction/i.test(message)) return "compaction";
 }
 
 export function httpFailure(status: number): ProviderError {
@@ -59,8 +73,12 @@ function classifyApiFailure(raw: unknown): ProviderError {
   const codes = [error.code, error.type];
   const message = typeof error.message === "string" ? error.message : "";
   if (/tool names must be unique/i.test(message)) return new ProviderError("duplicate_tools", false);
-  if (codes.includes("context_length_exceeded") || /maximum context length|context window.*exceed/i.test(message))
+  // Anthropic words it "prompt is too long: N tokens > M maximum"; without
+  // this it was an invalid request and the history was never shortened.
+  if (codes.includes("context_length_exceeded") || /maximum context length|context window.*exceed|prompt is too long/i.test(message))
     return new ProviderError("context_length", false);
+  const feature = requestFeature(message);
+  if (feature && codes.includes("invalid_request_error")) return new ProviderError("invalid_request", false, undefined, feature);
   if (/tool_call_id.*not found|tool.calls.*must be followed|insufficient tool messages/i.test(message))
     return new ProviderError("tool_history", false);
   if (codes.some(c => c === "insufficient_quota" || c === "billing_hard_limit_reached"))
@@ -73,7 +91,9 @@ function classifyApiFailure(raw: unknown): ProviderError {
     return new ProviderError("not_found", false);
   const status = Number(error.status ?? error.code);
   if (Number.isInteger(status) && status >= 400 && status <= 599) return httpFailure(status);
-  const transient = codes.some(c => ["server_error", "internal_error", "internal_server_error", "overloaded_error", "rate_limit_error", "rate_limit_exceeded", "timeout", "request_timeout"].includes(String(c)));
+  // `api_error` and `timeout_error` are Anthropic's names for an internal
+  // error and a timed-out request; in a stream they arrive as an error event.
+  const transient = codes.some(c => ["server_error", "internal_error", "internal_server_error", "overloaded_error", "rate_limit_error", "rate_limit_exceeded", "timeout", "request_timeout", "api_error", "timeout_error"].includes(String(c)));
   return new ProviderError(transient ? "transient" : "protocol", transient);
 }
 
@@ -143,7 +163,7 @@ export async function readHttpFailure(response: Response, signal: AbortSignal): 
     const data = JSON.parse(text + decoder.decode());
     const classified = apiFailure(data.error);
     const failure = classified.kind === "protocol" || (!fallback.retryable && classified.retryable) ? fallback
-      : new ProviderError(classified.kind, classified.retryable, response.status);
+      : new ProviderError(classified.kind, classified.retryable, response.status, classified.feature);
     failure.diagnostics = classified.diagnostics;
     return failure;
   } catch { return fallback; }

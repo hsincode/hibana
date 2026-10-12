@@ -40,7 +40,7 @@ export function ChatgptAccounts() {
   return (
     <Section
       title="ChatGPT マスターアカウント"
-      desc="有効なマスターアカウントがあれば、一般ユーザーも ChatGPT モデルを利用できます。"
+      desc="有効なマスターアカウントがあれば、一般ユーザーも ChatGPT モデルを利用できます。ChatGPT は非推奨のプロバイダで、新しくは選べません。この登録は ChatGPT モデルにだけ効き、いま使っているサーバーとユーザーのために残しています。"
     >
       <div className="toolbar">
         <button type="button" className="btn" disabled={busy} onClick={start}>

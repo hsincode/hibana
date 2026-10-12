@@ -30,8 +30,9 @@ type RouteDecision = Awaited<ReturnType<typeof evaluateRoute>>;
 import { evaluateTriage, shouldPrestartExplorer, TRIAGE_TIMEOUT_MS, type Triage } from "../jev-triage";
 import definitions from "./definitions.json";
 import codexDefinitions from "./codex-definitions.json";
-import { collaborationNames, collaborationTools, collaborationValidationSchema, teamTools } from "../multi-agent-policy";
+import { childPresets, collaborationNames, collaborationTools, collaborationValidationSchema, teamTools } from "../multi-agent-policy";
 import { Runtime } from "../runtime";
+import { refuseDeprecatedPreset } from "../deprecation";
 import { Agent } from "../agent";
 import { nativeSearchFor } from "../llm";
 import { JevClient, JEV_NOTICE_HEADER, jevInputSchema } from "../jev";
@@ -55,6 +56,12 @@ import { Vpn } from "./vpn";
 import { WebTools } from "./web";
 import { ImageTools } from "./image";
 import { askQuestions, questionsSchema } from "./questions";
+import { ClaudeAgents } from "../claude/agents";
+import { CLAUDE_TOOLS, claudeSurface, internalName, isClaudeTool, runClaudeTool, type ClaudeHost } from "../claude/tools";
+import {
+  WORKSPACE_TOOLS, isWorkspaceTool, refuseFileArguments, runWorkspaceTool, takeWorkspaceCall, workspaceSurface,
+  type WorkspaceHost,
+} from "../workspace/tools";
 import { downloadPublic } from "../network";
 const sandboxNames = new Set([
   "bash",
@@ -89,6 +96,15 @@ export class ToolRegistry {
   readonly waiting = new Set<string>();
   private subagents: Semaphore;
   private validators = new Map<string, ReturnType<Ajv["compile"]>>();
+  // Kept apart from `validators`: Read, Glob and Grep are also alias names
+  // that the Codex-style harness accepts with looser arguments.
+  private claudeValidators = new Map<string, ReturnType<Ajv["compile"]>>();
+  private claudeAgents: ClaudeAgents;
+  private claudeHost: ClaudeHost;
+  // An Anthropic Workspace session's own definitions (#76): tools it has
+  // under a name the frozen list also uses, with a different schema.
+  private workspaceValidators = new Map<string, ReturnType<Ajv["compile"]>>();
+  private workspaceHost: WorkspaceHost;
   /** Workflow resume state survives the Discord turn that produced it. */
   readonly workflowJournals = new WorkflowJournals();
   readonly workflowFiles: WorkflowFiles;
@@ -119,6 +135,21 @@ export class ToolRegistry {
       this.validators.set(d.function.name, ajv.compile(d.function.parameters));
     for (const d of collaborationTools)
       this.validators.set(`agents__${d.function.name}`, ajv.compile(collaborationValidationSchema(d)));
+    for (const d of CLAUDE_TOOLS) this.claudeValidators.set(d.function.name, ajv.compile(d.function.parameters));
+    this.claudeAgents = new ClaudeAgents(runtime, agent, (c) => this.tools(c), (n, a, c) => this.execute(n, a, c), log);
+    this.claudeHost = {
+      sandbox: this.sandbox,
+      proxy: (ctx) => this.media.homeRoute(ctx),
+      integration: (name, args, ctx) => this.runTool(name, args, ctx),
+      ask: (args, ctx) => this.ask(args, ctx),
+      agent: (call, ctx) => this.claudeAgents.run(call, ctx),
+    };
+    for (const d of WORKSPACE_TOOLS) this.workspaceValidators.set(d.function.name, ajv.compile(d.function.parameters));
+    this.workspaceHost = {
+      discord: this.discord,
+      integration: (name, args, ctx) => this.runTool(name, args, ctx),
+      ask: (args, ctx) => runClaudeTool(this.claudeHost, "AskUserQuestion", args, ctx),
+    };
   }
   async load() {
     await this.sandbox.probe();
@@ -225,7 +256,12 @@ export class ToolRegistry {
       }, "Jev route finished");
     }
   }
-  base(ctx: Context): ToolDef[] {
+  /** `listing` leaves out the checks on the caller's own role. The Claude
+   *  harness shows one tool list to everyone in a conversation, because a list
+   *  that changes with the speaker changes the head of every request (no
+   *  cache, and thinking blocks rejected). Who may run a tool is still
+   *  decided by the strict form when it is called. */
+  base(ctx: Context, listing = false): ToolDef[] {
     if (!this.runtime.config.toolsEnabled) return [];
     const settings = this.runtime.resolve(ctx.guildId, ctx.userId);
     const native = nativeSearchFor(
@@ -246,12 +282,12 @@ export class ToolRegistry {
       if (
         /^home_vpn_/.test(n) &&
         (!this.runtime.config.browserProxyUrl || !this.sandbox.available || ctx.depth > 0 ||
-          this.runtime.role(ctx.userId) !== "administrator")
+          (!listing && this.runtime.role(ctx.userId) !== "administrator"))
       ) return false;
       if (
         /^vpn_/.test(n) &&
         (!this.runtime.config.vpnEnabled ||
-          this.runtime.role(ctx.userId) !== "administrator" ||
+          (!listing && this.runtime.role(ctx.userId) !== "administrator") ||
           (n === "vpn_login_code" &&
             this.runtime.config.vpnProvider !== "surfshark"))
       )
@@ -294,7 +330,7 @@ export class ToolRegistry {
     return {
       concurrency: this.runtime.config.workflowConcurrency,
       modelOption: settings.subagent_model.mode === "auto",
-      presets: MODEL_PRESETS.filter((p) => this.runtime.canSelect(p.id, ctx.userId)).map((p) => p.id),
+      presets: childPresets().filter((p) => this.runtime.canSelect(p.id, ctx.userId)).map((p) => p.id),
     };
   }
   /** Claude Code serves the authoring reference as the workflow-authoring
@@ -331,8 +367,44 @@ export class ToolRegistry {
       { type: "function", function: { name: TASK_STOP_TOOL, description: TASK_STOP_DESCRIPTION, parameters: TASK_STOP_PARAMETERS } },
     ];
   }
+  /** The Claude harness's surface (#66): Claude Code's file and shell tools,
+   *  and the integration tools under their `mcp__` names. */
+  private claudeTools(ctx: Context): ToolDef[] {
+    const settings = this.runtime.resolve(ctx.guildId, ctx.userId);
+    return claudeSurface(this.base(ctx, true), {
+      sandbox: this.sandbox.available,
+      root: ctx.depth === 0,
+      role: ctx.agentRole,
+      agents: this.runtime.config.subagentEnabled && settings.subagent_enabled,
+    });
+  }
+  /** The custom tools of an Anthropic Workspace session (#76), under their
+   *  own names. A session's list is fixed when the session is created and is
+   *  shared by everyone who talks in its channel, so it is built from the
+   *  server's settings alone: no speaker (a personal Jev switch would change
+   *  it), no depth and no role. Who may run a tool is decided when it is
+   *  called, in `executeWorkspace`. */
+  workspaceTools(ctx: Context): ToolDef[] {
+    if (!this.runtime.config.toolsEnabled) return [];
+    // `resolve` reads an empty user id as "no user": the server's own row.
+    const server: Context = {
+      guildId: ctx.guildId, channelId: ctx.channelId, thread: ctx.thread, botId: ctx.botId,
+      userId: "", depth: 0, delivered: false, harness: "workspace",
+    };
+    return workspaceSurface(this.base(server, true));
+  }
+  /** Whether a new Workspace session gets the container's own web search and
+   *  fetch. `exa_mode: off` switches every web tool off (#46), these too. An
+   *  existing session keeps what it was created with. */
+  workspaceWeb(ctx: Context): boolean {
+    const config = this.runtime.config;
+    return config.toolsEnabled && config.webSearch && config.anthropicWorkspace.web &&
+      this.runtime.guild(ctx.guildId).exa_mode !== "off";
+  }
   tools(ctx: Context) {
     if (!this.runtime.config.toolsEnabled) return [];
+    if (ctx.harness === "claude") return this.claudeTools(ctx);
+    if (ctx.harness === "workspace") return this.workspaceTools(ctx);
     const base = this.base(ctx);
     // Filter the final surface, not base(): harness-native aliases such as
     // shell_command/apply_patch are added later and must obey the role too.
@@ -362,6 +434,10 @@ export class ToolRegistry {
       } : t);
   }
   jevTaskMode(ctx: Context): boolean {
+    // The mode rewrites the tool list from a setting, which the Claude
+    // harness's fixed list cannot follow; its turns ignore the setting. So do
+    // the turns of a Workspace session, whose list is fixed at creation.
+    if (ctx.harness === "claude" || ctx.harness === "workspace") return false;
     const settings = this.runtime.resolve(ctx.guildId, ctx.userId);
     // Multi-Agent parallelizes through role workers; a Jev decision before
     // every root operation serialized exactly the work it is meant to speed up.
@@ -397,6 +473,8 @@ export class ToolRegistry {
       this.runtime.guild(ctx.guildId).bot_disabled
     )
       throw new Error("Bot access disabled");
+    if (ctx.harness === "claude") return this.executeClaude(rawName, rawArgs, ctx);
+    if (ctx.harness === "workspace") return this.executeWorkspace(rawName, rawArgs, ctx);
     const { name, args: a } = normalizeTool(rawName, rawArgs);
     // Checked after normalization so use_tool wrappers and aliases cannot
     // reach a tool that the role's tool list does not expose.
@@ -428,6 +506,57 @@ export class ToolRegistry {
     } finally {
       finishHomeWork();
     }
+  }
+  private async executeClaude(name: string, args: Json, ctx: Context): Promise<unknown> {
+    const internal = internalName(name);
+    if (!roleAllowsTool(ctx.agentRole, internal))
+      throw new Error(`A subagent of this type cannot use ${name}. Say what is needed in your report instead.`);
+    // Shown is not the same as allowed: the list is the same for everyone in
+    // the conversation, so an integration tool is checked again here against
+    // what this person may run.
+    const allowed = isClaudeTool(name)
+      ? this.claudeTools(ctx).some((t) => t.function.name === name)
+      : name.startsWith("mcp__") && this.base(ctx).some((t) => t.function.name === internal) &&
+        this.claudeTools(ctx).some((t) => t.function.name === name);
+    if (!allowed) throw new Error(`${name} is not available to you in this conversation.`);
+    const validator = isClaudeTool(name) ? this.claudeValidators.get(name) : this.validators.get(internal);
+    if (validator && !validator(args))
+      throw new Error(`Invalid arguments for ${name}: ${validator.errors?.map((e) => `${e.instancePath || "input"} ${e.message}`).join("; ")}`);
+    if (sandboxNames.has(internal) && !this.sandbox.available) throw new Error("The sandbox is unavailable.");
+    const finishHomeWork = internal === "home_vpn_status" ? () => {} : this.media.beginHomeWork(ctx);
+    try {
+      return isClaudeTool(name)
+        ? await runClaudeTool(this.claudeHost, name, args, ctx)
+        : await this.runTool(internal, args, ctx);
+    } finally {
+      finishHomeWork();
+    }
+  }
+  /** One custom tool call of an Anthropic Workspace session (#76). The
+   *  session's built-in tools run in Anthropic's container and never come
+   *  here. No home connection is opened: none of these tools uses one. */
+  private async executeWorkspace(name: string, args: Json, ctx: Context): Promise<unknown> {
+    // `WorkspaceCalls` is the only way in. It is what makes a call from a
+    // workflow run's thread a worker's call, and what refuses a run that
+    // someone else started; a call that arrives without its mark skipped both.
+    if (!takeWorkspaceCall(ctx)) throw new Error("A Workspace tool call must come through the turn's call queue.");
+    if (!isWorkspaceTool(name)) throw new Error(`${name} is not a tool of this workspace.`);
+    if (!roleAllowsTool(ctx.agentRole, internalName(name)))
+      throw new Error(`An agent of a workflow run cannot use ${name}. Return what is needed in your result instead.`);
+    // Shown is not the same as allowed: the list is the same for everyone in
+    // the channel, so an integration tool is checked again here against what
+    // this person may run. `send_file` is not taken from `base()`, where it
+    // depends on the Docker sandbox this path does not use.
+    const allowed = this.runtime.config.toolsEnabled && (
+      name === "send_file" ||
+      (name === "AskUserQuestion" ? ctx.depth === 0 : this.base(ctx).some((t) => t.function.name === name)));
+    if (!allowed) throw new Error(`${name} is not available to you in this conversation.`);
+    const validator = this.workspaceValidators.get(name) ??
+      (isClaudeTool(name) ? this.claudeValidators.get(name) : this.validators.get(name));
+    if (validator && !validator(args))
+      throw new Error(`Invalid arguments for ${name}: ${validator.errors?.map((e) => `${e.instancePath || "input"} ${e.message}`).join("; ")}`);
+    refuseFileArguments(name, args);
+    return runWorkspaceTool(this.workspaceHost, name, args, ctx);
   }
   private async runTool(name: string, a: Json, ctx: Context): Promise<unknown> {
     if (name === "image_generation_status") return this.image.status(ctx);
@@ -696,6 +825,9 @@ export class ToolRegistry {
             (p) => p.model === a.model && p.provider === a.provider,
           )?.id;
         if (!a.reset && !preset && (a.preset || a.model || a.provider)) throw new Error("Unknown preset");
+        // The tool description still lists the deprecated presets (it is part
+        // of the frozen tool surface), so a new choice of one is refused here (#67).
+        if (!a.reset) refuseDeprecatedPreset(this.runtime, ctx.guildId, ctx.userId, preset);
         patch = a.reset ? { preset: "reset", ultra_mode: null, multi_agent: null } : {
           ...(preset ? { preset } : {}),
           ...(a.ultra_mode === undefined ? {} : { ultra_mode: a.ultra_mode }),

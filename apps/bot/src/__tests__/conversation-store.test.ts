@@ -491,7 +491,9 @@ test("a restarted bot continues the conversation on the route it had", async () 
     expect(routings).toBe(1);
     expect(sent.filter((text) => text.startsWith("Auto Routing"))).toEqual(["Auto Routing: **Opus 5.5 High**"]);
     // The turn from before the restart is in the request, ahead of the new one.
-    const said = request.messages.filter((m) => m.role === "user" || m.role === "assistant").map((m) => m.content);
+    // The Claude harness ends each user message with the date it was sent.
+    const said = request.messages.filter((m) => m.role === "user" || m.role === "assistant")
+      .map((m) => m.content?.replace(/\n\[date: \d{4}-\d{2}-\d{2}\]$/, ""));
     expect(said.slice(-3)).toEqual(["難しい設計の相談", "reply 1", "ありがとう"]);
   } finally { await second.close(); }
 });

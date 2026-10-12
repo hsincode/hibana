@@ -68,7 +68,13 @@ export type GuildSummary = {
   id: string;
   name: string;
   icon: string | null;
+  /** 選択中のモデル名。プロバイダは `provider` で分かる。 */
   preset: string | null;
+  /**
+   * 選択中のプロバイダ。Anthropic と Anthropic Workspace は同じモデル名を持つ（#76）ので、
+   * モデル名からは決まらない。旧 API は返さないので、無ければカタログから逆引きする。
+   */
+  provider?: string | null;
 };
 
 export type Artifact = {
@@ -97,6 +103,11 @@ export type Preset = {
   min_role?: string;
   /** false = 未公開。Admin/Mod の /models 以外では出さない。未指定 = 公開。 */
   published?: boolean;
+  /**
+   * true = 非推奨のプロバイダ（Anthropic と Anthropic Workspace 以外。判断記録 #67、#76）。新しくは選べず、
+   * API も断る。現在の選択としてだけ表示する。旧 API は返さないので、無ければ非推奨として扱わない。
+   */
+  deprecated?: boolean;
 };
 
 export type Catalog = {

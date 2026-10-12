@@ -10,7 +10,9 @@ export type Checkpoint = {
 };
 
 export function checkpointSnapshot(ctx: Context, messages: Message[], historyStart: number, selectionKey: string): Checkpoint {
-  const { signal, progress, notify, jevTaskProgress, jevExecutions, recordToolUsage, pendingImages, team, agentPath, agentSelection, openStatus, ...saved } = ctx;
+  // turnId names one run in the logs; a resumed turn gets its own, so the
+  // stored checkpoint keeps the shape it had before the id existed.
+  const { signal, progress, notify, jevTaskProgress, jevExecutions, recordToolUsage, pendingImages, team, agentPath, agentSelection, openStatus, turnId, agentCalls, rootSelection, ...saved } = ctx;
   // The agent keeps appending to its live array. Retaining that reference made
   // /retry use different history from the on-disk checkpoint after a failure.
   return structuredClone({ ctx: saved, messages, at: Date.now(), historyStart, selectionKey });
@@ -77,6 +79,16 @@ export function resumeNote(messages: readonly Message[]): Message | undefined {
   if (messages.at(-1)?.role !== "assistant") return;
   return { role: "user", internal: true,
     content: "The previous attempt stopped after the answer above was drafted; it may not have reached the user. Continue the authorized task and reply with the complete, self-contained final answer. Do not repeat side effects that already succeeded." };
+}
+
+/** Whether the bot picks this checkpoint up by itself when it starts. Older
+ *  than two hours it is left alone, as `/retry` leaves it. An Anthropic
+ *  Workspace turn (#76) is picked up this way once: its session goes on
+ *  spending while the bot is down, and a bot that restarts in a loop would
+ *  otherwise start the same work again each time. After that it waits for
+ *  `/retry`. */
+export function resumesAtStart(checkpoint: Checkpoint, now = Date.now()): boolean {
+  return now - checkpoint.at <= 7200000 && (checkpoint.ctx.workspaceMark?.resumes ?? 0) < 1;
 }
 
 export function checkpointInScope(checkpoint: Checkpoint, ctx: Context): boolean {

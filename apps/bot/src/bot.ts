@@ -14,7 +14,7 @@ import type { Config, Selection } from "./config";
 import { Runtime } from "./runtime";
 import { LlmClient, nativeSearchFor } from "./llm";
 import { providerFailureNotice, ProviderError } from "./llm-errors";
-import { checkpointSnapshot, checkpointInScope, resumeCheckpoint, resumeNote, type Checkpoint } from "./checkpoint";
+import { checkpointSnapshot, checkpointInScope, resumeCheckpoint, resumeNote, resumesAtStart, type Checkpoint } from "./checkpoint";
 import { Agent, type AgentOptions } from "./agent";
 import { MultiAgentSession } from "./multi-agent";
 import { History } from "./history";
@@ -25,6 +25,12 @@ import { Voice } from "./voice";
 import { commands, handleCommand } from "./commands";
 import { imagePrompt, shouldRespond, splitMessage } from "./triggers";
 import { assemblePrompt } from "./harness";
+import { DeprecationNotices } from "./deprecation";
+import { ClaudeCompaction, userMessage } from "./claude/context";
+import { stripThinking } from "./claude/progress";
+import { claudeSystem, contextBlock, contextMessage } from "./claude/prompt";
+import { conversationKey, harnessFor, keyHarness, workspaceVariant } from "./claude/select";
+import { Workspace, type WorkspaceDeps } from "./workspace";
 import { atomicJson, readJson, Serial } from "./io";
 import { UsageLedger } from "./usage-ledger";
 import {
@@ -70,6 +76,7 @@ type FailureReport = {
   failure_phase: FailurePhase;
   http_status: number | null;
   has_checkpoint: boolean;
+  turn_id?: string;
 };
 /** The sanitized provider diagnostics the dashboard log keeps (#42): where
  *  the request failed and how often it reconnected, never provider text. */
@@ -88,9 +95,15 @@ export class Hibana {
   readonly llm: LlmClient;
   readonly agent: Agent;
   readonly history: History;
+  private compaction: ClaudeCompaction;
+  /** Tells a server or person once that their chosen provider is deprecated (#67). */
+  readonly deprecation: DeprecationNotices;
   /** History and auto routes on disk, so a restart keeps them (#59). */
   readonly conversations: ConversationStore;
   readonly usage: UsageLedger;
+  /** Turns of the `anthropic_workspace` provider: Managed Agents sessions
+   *  that Anthropic runs, one per channel (#76). */
+  readonly workspace: Workspace;
   routes: RouteMemory;
   private fallbackAnnounced = new Set<string>();
   readonly tools: ToolRegistry;
@@ -108,6 +121,9 @@ export class Hibana {
   constructor(
     readonly config: Config,
     private log: Logger,
+    /** Tests reach the Workspace API through their own `fetch`; the smoke
+     *  script names what its bot creates (`identity`). */
+    options: { workspace?: Pick<WorkspaceDeps, "fetch" | "now" | "sleep" | "limits" | "identity"> } = {},
   ) {
     this.client = new Client({
       intents: [
@@ -121,6 +137,7 @@ export class Hibana {
       partials: [Partials.Channel],
     });
     this.runtime = new Runtime(config);
+    this.deprecation = new DeprecationNotices(this.runtime, (e) => this.report(e));
     this.usage = new UsageLedger(
       join(config.dataDir, "anthropic_usage.json"),
       undefined,
@@ -128,6 +145,7 @@ export class Hibana {
     );
     this.llm = new LlmClient(config, fetch, {
       onRetry: notice => this.log.warn(notice, "LLM reconnecting"),
+      onFeatureDisabled: feature => this.log.warn({ feature }, "Anthropic rejected an optional request feature; continuing without it"),
       onCompletion: record => {
         this.log.info(record, "LLM request completed");
         this.usage.record(record);
@@ -138,6 +156,7 @@ export class Hibana {
     // stay in process memory.
     this.conversations = new ConversationStore(config.conversationDbPath, (e) => this.report(e));
     this.history = new History(config, this.conversations);
+    this.compaction = new ClaudeCompaction(config, this.history, this.llm, log);
     this.routes = new RouteMemory(Date.now, this.conversations);
     this.tools = new ToolRegistry(this.runtime, this.client, this.agent, this.log);
     this.sync = new WebSync(this.runtime, this.tools, (e) => this.report(e));
@@ -149,6 +168,13 @@ export class Hibana {
       (e) => this.report(e),
     );
     this.runtime.onChange = (id) => this.history.clearGuild(id);
+    this.workspace = new Workspace(config, {
+      runtime: this.runtime, tools: this.tools, store: this.conversations, log: this.log,
+      report: (e) => this.report(e), shutdown: this.shutdown.signal, ...options.workspace,
+    });
+    // A conversation that ends here ends its cloud session too: `/clear`, a
+    // deleted channel, a changed model, an expired thread.
+    this.history.onDrop = (drop) => this.workspace.drop(drop);
     this.checkpointPath = join(config.dataDir, "retry_checkpoints.json");
   }
   private report(error: unknown, failure?: FailureReport) {
@@ -181,6 +207,9 @@ export class Hibana {
     // A damaged ledger must not keep the bot offline; it then stays in memory
     // and the file is left untouched for inspection.
     await this.usage.load().catch((e) => this.report(e));
+    // The same for the Workspace ledger, except that its limits are checked
+    // against it: while it is unread, Workspace turns are refused.
+    await this.workspace.load().catch((e) => this.report(e));
     this.client.on(Events.Error, (e) => this.report(e));
     this.client.on(Events.GuildCreate, (guild) => this.track(this.runtime.initializeGuild(guild.id)));
     this.client.on(Events.MessageCreate, (m) => this.track(this.onMessage(m)));
@@ -191,7 +220,8 @@ export class Hibana {
           i.respond(
             MODEL_PRESETS.filter(
               (p) =>
-                this.runtime.canSelect(p.id, i.user.id) &&
+                // Deprecated providers are not offered as a new choice (#67).
+                this.runtime.selectable(p.id, i.user.id) &&
                 (p.id.toLowerCase().includes(query) ||
                   p.label.toLowerCase().includes(query)),
             )
@@ -213,6 +243,7 @@ export class Hibana {
             this.voice,
             (ctx) => this.retry(ctx),
             this.usage,
+            this.workspace,
           ),
         );
     });
@@ -227,6 +258,12 @@ export class Hibana {
     await this.client.login(this.config.token);
   }
   private async ready() {
+    // A Workspace session the last process left in the middle of a turn is
+    // stopped and its spending ceiling lowered. Started first: it asks
+    // nothing of Discord, and must not depend on what can fail below (a
+    // guild's settings, the command registration).
+    const swept = this.workspace.sweep();
+    this.track(swept);
     for (const id of this.client.guilds.cache.keys()) await this.runtime.initializeGuild(id);
     const applicationId = this.client.application!.id;
     await this.client.rest.put(
@@ -242,10 +279,12 @@ export class Hibana {
       { bot: this.client.user?.tag, sandbox: this.tools.sandbox.available },
       "Hibana ready",
     );
+    // A Workspace turn is resumed only after that sweep. The other
+    // harnesses' turns do not wait for it.
     for (const cp of Object.values(this.checkpoints)) {
-      if (Date.now() - cp.at > 7200000) continue;
+      if (!resumesAtStart(cp)) continue;
       const ctx = { ...cp.ctx, botId: this.client.user!.id };
-      this.track(this.retry(ctx));
+      this.track(keyHarness(cp.selectionKey) === "workspace" ? swept.then(() => this.retry(ctx)) : this.retry(ctx));
     }
   }
   private async onMessage(m: DiscordMessage) {
@@ -313,8 +352,19 @@ export class Hibana {
     // authors never reach here, and voice transcripts do not use this path.
     const keyword = this.config.ultracodeKeywordTrigger && hasUltracodeKeyword(m.content) &&
       workflowsEnabled(this.config, this.runtime.resolve(m.guildId ?? undefined, m.author.id));
-    const current = this.active.get(m.channelId);
-    if (current?.accepting && current.userId === m.author.id) {
+    let current = this.active.get(m.channelId);
+    if (current?.accepting && current.userId === m.author.id && current.ctx.harness === "claude") {
+      // Built before it is queued: the Claude harness sends images as data
+      // and dates each message. The turn may end while the images download,
+      // in which case the message starts a turn of its own below.
+      const prompt = await userMessage(text, images, this.shutdown.signal);
+      current = this.active.get(m.channelId);
+      if (current?.accepting && current.userId === m.author.id) {
+        current.pending.push(prompt);
+        current.request.abort(new Error("User steering"));
+        return;
+      }
+    } else if (current?.accepting && current.userId === m.author.id) {
       const prompt: Message = { role: "user", content: text, images, turnStart: true };
       if (keyword) {
         this.keywordPrompts.add(prompt);
@@ -390,12 +440,17 @@ export class Hibana {
       const settings = this.runtime.resolve(ctx.guildId, ctx.userId);
       // History.put overwrites the channel usage figure. This path spent no
       // tokens, so keep the previous figure instead of storing zeros.
+      // Under the key and rules of the harness this conversation runs on: a
+      // read under another key would discard the conversation.
+      // For Workspace that would also end the cloud session.
+      const harness = harnessFor(settings.selection, this.config);
       this.history.get(
         ctx.channelId,
         ctx.guildId,
-        JSON.stringify(settings.selection),
+        conversationKey(settings.selection, harness, workspaceVariant(settings)),
         ctx.thread,
         settings.thread_history_max_age_secs ?? this.config.threadHistoryAge,
+        harness === "claude",
       );
       const usage = this.history.info(ctx.channelId).usage ?? emptyUsage();
       this.history.put(
@@ -488,6 +543,8 @@ export class Hibana {
       ...original,
       signal: this.shutdown.signal,
       pendingImages: [] as string[],
+      // A retry is a new turn in the logs: it sends its own requests.
+      turnId: crypto.randomUUID().slice(0, 8),
     };
     if (
       this.runtime.snapshot.blocked_users.includes(ctx.userId) ||
@@ -511,6 +568,9 @@ export class Hibana {
       }
     };
     ctx.notify = send;
+    // Its own message, never part of the conversation sent to the model, so
+    // the deprecated providers' requests stay as they are. Never throws.
+    await this.deprecation.announce(ctx.guildId, ctx.userId, send);
     const suppressEmbeds = this.runtime.resolve(ctx.guildId, ctx.userId)
       .suppress_embeds
       ? 4
@@ -556,37 +616,65 @@ export class Hibana {
     typing();
     const timer = setInterval(typing, 8000);
     const settings = this.runtime.resolve(ctx.guildId, ctx.userId);
+    // Anthropic's own API runs on the Claude harness, everything else on the
+    // Codex-style one (#66). The flag travels on the context so the tools and
+    // the loop branch on the same decision.
+    // An `anthropic_workspace` turn is a third path (#76): a message to a
+    // session in Anthropic's cloud, which keeps the conversation, the prompt
+    // and the tools. None of what the two harnesses assemble below is used.
+    const harness = harnessFor(settings.selection, this.config);
+    const claude = harness === "claude", workspace = harness === "workspace";
+    // A context that is carried over (a resumed checkpoint, a steering
+    // message) must not bring the harness of the turn before it.
+    if (harness !== "codex") ctx.harness = harness;
+    else delete ctx.harness;
     // History keeps the stored selection as its key: turning Ultracode on or
     // off changes the effort sent, not the conversation (Claude Code keeps it).
-    const key = JSON.stringify(settings.selection);
+    // The key also names the harness, so neither continues the other's turns.
+    // A Workspace key names the variant too: the session's agent is fixed.
+    const key = conversationKey(settings.selection, harness, workspaceVariant(settings));
     const ultracode = settings.ultracode;
     // An auto preset is replaced below, once the history is known.
     let selection = turnSelection(settings.selection, ultracode);
     const started = Date.now();
-    this.log.info({ channel: ctx.channelId, message_id: ctx.messageId,
+    this.log.info({ channel: ctx.channelId, turn_id: ctx.turnId, message_id: ctx.messageId,
       settings_version: this.runtime.snapshot.version, provider: selection.provider,
       model: selection.model, effort: selection.effort ?? null, subagent_enabled: settings.subagent_enabled,
       ultra_mode: settings.ultra_mode, multi_agent: settings.multi_agent, ultracode,
       workflow_keyword: !!ctx.workflowKeyword, jev_enabled: settings.jev_enabled,
       jev_task_enabled: settings.jev_task_enabled }, "Turn started");
-    const releaseWorkspace = this.tools.sandbox.lease(ctx);
+    // A Workspace turn works in the session's container, not in the sandbox.
+    const releaseWorkspace = workspace ? () => {} : this.tools.sandbox.lease(ctx);
     let failurePhase: FailurePhase = "history_read";
     let checkpointPersisted = false;
     try {
       const candidate = retry ?? this.checkpoints[`${ctx.channelId}/${ctx.userId}`];
       const pending = candidate && checkpointInScope(candidate, ctx) && Date.now() - candidate.at < 7200000
+        // A checkpoint written under another harness names tools this one
+        // does not have (a Workspace one holds no conversation at all); it is
+        // left to expire instead of being resumed.
+        && keyHarness(candidate.selectionKey) === harness
         ? candidate : undefined;
       checkpointPersisted = Boolean(pending);
       if (retry && !pending) throw new Error("再開できる作業はありません。");
       if (pending) ctx.delivered = pending.ctx.delivered;
+      if (workspace) {
+        // The mark says the session already has the message. A turn that is
+        // picked up without a new message is counted before it runs, so a bot
+        // that keeps restarting resumes it once and then waits for `/retry`.
+        const mark = pending?.ctx.workspaceMark;
+        ctx.workspaceMark = mark && !text ? { ...mark, resumes: mark.resumes + 1 } : mark;
+      } else delete ctx.workspaceMark;
       let prior = this.history.get(
         ctx.channelId,
         ctx.guildId,
         key,
         ctx.thread,
         settings.thread_history_max_age_secs ?? this.config.threadHistoryAge,
+        claude,
       );
-      if (ctx.thread && !pending) {
+      // The Claude harness summarizes threads and channels alike, below.
+      if (ctx.thread && !pending && !claude && !workspace) {
         failurePhase = "history_compaction";
         await this.history.compact(
           ctx.channelId,
@@ -614,15 +702,40 @@ export class Hibana {
         if (route.announce) await send(routeHeader(selection));
       }
       failurePhase = "prompt_assembly";
-      const prefix = await assemblePrompt(
-        this.runtime,
-        ctx,
-        this.config.skillsEnabled ? await this.tools.skillCatalog(ctx) : "",
-      );
-      const resumed = pending ? resumeCheckpoint(pending, prefix, settings.selection) : undefined;
-      const messages: Message[] = resumed?.messages ?? [...prefix, ...prior];
-      const seed = resumed?.historyStart ?? messages.length;
-      if (text) {
+      const skills = !workspace && this.config.skillsEnabled ? await this.tools.skillCatalog(ctx) : "";
+      const prefix = workspace ? [] : claude ? [await claudeSystem(this.runtime)] : await assemblePrompt(this.runtime, ctx, skills);
+      const nativeSearch = !workspace && nativeSearchFor(settings.selection, settings.exa_mode, this.config.webSearch);
+      if (claude) {
+        ctx.rootSelection = selection;
+        if (!pending) {
+          failurePhase = "history_compaction";
+          const spent = await this.compaction.run({
+            channelId: ctx.channelId, selection, prefix, prior, tools: this.tools.tools(ctx),
+            nativeSearch, signal: ctx.signal, turn: ctx.turnId,
+          });
+          if (spent) {
+            routeUsage = routeUsage ? (addUsage(routeUsage, spent), routeUsage) : spent;
+            prior = this.history.get(ctx.channelId, ctx.guildId, key, ctx.thread,
+              settings.thread_history_max_age_secs ?? this.config.threadHistoryAge, true);
+          }
+          failurePhase = "prompt_assembly";
+        }
+      }
+      const resumed = pending && !workspace ? resumeCheckpoint(pending, prefix, settings.selection) : undefined;
+      // Workspace: only what the person wrote for this turn, as the local
+      // record of it. An attempt that did not finish left its messages in the
+      // checkpoint; earlier turns are in the session and are not sent again.
+      const messages: Message[] = workspace ? structuredClone(pending?.messages ?? []) : resumed?.messages ?? [...prefix, ...prior];
+      const seed = workspace ? 0 : resumed?.historyStart ?? messages.length;
+      if (workspace) {
+        if (text) messages.push({ role: "user", content: text, images: ctx.images, turnStart: true });
+      } else if (text && claude) {
+        // Who the bot is here and what this place has. Sent when the
+        // conversation does not carry it yet, and again only when it changed.
+        const block = contextMessage(await contextBlock(this.runtime, ctx, skills), messages);
+        if (block) messages.push(block);
+        messages.push(await userMessage(text, ctx.images, ctx.signal));
+      } else if (text) {
         // Claude Code attaches these system reminders to a typed prompt only
         // while dynamic workflows are on; /retry resumes add none.
         const workflows = workflowsEnabled(this.config, settings);
@@ -645,18 +758,16 @@ export class Hibana {
       const options: AgentOptions = {
         selection,
         messages,
-        tools: this.tools.tools(ctx),
+        tools: workspace ? [] : this.tools.tools(ctx),
         getTools: (c) => this.tools.tools(c),
         jevTaskMode: (c) => this.tools.jevTaskMode(c),
         context: ctx,
         maxRounds: this.config.maxRounds,
         serviceTier: settings.service_tier,
         temperature: settings.temperature,
-        nativeSearch: nativeSearchFor(
-          settings.selection,
-          settings.exa_mode,
-          this.config.webSearch,
-        ),
+        nativeSearch,
+        // Stored turns still hold the thinking blocks the API just rejected.
+        onThinkingStripped: () => this.history.rewrite(ctx.channelId, stripThinking),
         execute: (name, args, c) => this.tools.execute(name, args, c),
         checkpoint: (messages) => this.saveCheckpoint(ctx, messages, seed, key),
         takeSteering: () => {
@@ -671,7 +782,18 @@ export class Hibana {
         requestSignal: () =>
           AbortSignal.any([this.shutdown.signal, state.request.signal]),
       };
-      const result = this.config.toolsEnabled && this.config.subagentEnabled && settings.subagent_enabled
+      // A Workspace turn is the session's own loop. The Claude harness
+      // delegates through its Agent tool, inside the loop.
+      const result = workspace
+        ? await this.workspace.turn({
+          ctx, settings, key, messages, text, resume: ctx.workspaceMark, steering: state.request.signal,
+          // From here on a restart continues the message instead of sending it again.
+          onSent: async (mark) => {
+            ctx.workspaceMark = mark;
+            await this.saveCheckpoint(ctx, messages, seed, key);
+          },
+        })
+        : !claude && this.config.toolsEnabled && this.config.subagentEnabled && settings.subagent_enabled
         ? await new MultiAgentSession(this.runtime, this.agent, c => this.tools.tools(c), {
           // A resumed checkpoint continues earlier work; a fresh triage could
           // pre-start an explorer that repeats research already in the history.
@@ -682,9 +804,19 @@ export class Hibana {
         : await this.agent.run(options);
       if (routeUsage) addUsage(result.usage, routeUsage);
       // The turn's last request renewed the cache this route is kept for.
-      this.routes.touch(ctx.channelId);
+      if (!workspace) this.routes.touch(ctx.channelId);
       state.accepting = false;
-      for (const pending of state.pending.splice(0))
+      const queued = state.pending.splice(0);
+      // Workspace: what the person added meanwhile is answered in one turn. A
+      // turn for each would bring its own allowance and re-read the session.
+      const next: Message[] = workspace && queued.length > 1
+        ? [{
+          role: "user",
+          content: queued.map((m) => m.content ?? "").join("\n\n"),
+          images: queued.flatMap((m) => m.images ?? []).slice(0, 4),
+        }]
+        : queued;
+      for (const pending of next)
         this.track(
           this.respond(pending.content ?? "", {
             ...original,
@@ -699,17 +831,24 @@ export class Hibana {
       this.history.put(
         ctx.channelId,
         result.messages.slice(Math.min(seed, result.messages.length - 1)),
-        result.usage,
+        claude ? { ...result.usage, context_tokens: result.context } : result.usage,
+        claude,
       );
+      // A Workspace thread's record is never summarized or sent anywhere; it
+      // is only kept from growing without end.
+      if (workspace && ctx.thread && this.history.info(ctx.channelId).estimated_tokens > this.config.historyMaxTokens)
+        this.history.shrink(ctx.channelId);
       failurePhase = "checkpoint_clear";
       await this.clearCheckpoint(ctx);
       checkpointPersisted = false;
       this.log.info(
         {
           channel: ctx.channelId,
+          turn_id: ctx.turnId,
           provider: selection.provider,
           model: selection.model,
           usage: result.usage,
+          rounds: result.rounds,
           latency_ms: Date.now() - started,
         },
         "Turn completed",
@@ -745,12 +884,16 @@ export class Hibana {
       if (!this.shutdown.signal.aborted) {
         const failureCode = classifyFailure(error, failurePhase);
         const httpStatus = httpStatusOf(error);
-        if (error instanceof ProviderError && error.kind === "context_length") this.history.shrink(ctx.channelId);
+        // Dropping turns is how the other harness shortens a conversation; this
+        // one summarizes it before the next turn instead.
+        if (!workspace && error instanceof ProviderError && error.kind === "context_length")
+          claude ? this.compaction.markOversized(ctx.channelId) : this.history.shrink(ctx.channelId);
         const failureReport: FailureReport = {
           failure_code: failureCode,
           failure_phase: failurePhase,
           http_status: httpStatus,
           has_checkpoint: checkpointPersisted,
+          turn_id: ctx.turnId,
         };
         this.report(error, failureReport);
         if (this.config.webApiUrl) {
@@ -843,6 +986,9 @@ export class Hibana {
     await Promise.allSettled([...this.tasks]);
     await this.runtime.persist();
     await this.usage.flush();
+    await this.deprecation.flush();
+    // While the store is still open: the session rows are written through it.
+    await this.workspace.close();
     this.conversations.close();
     this.client.destroy();
   }

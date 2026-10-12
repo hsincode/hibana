@@ -55,6 +55,7 @@ export function ModelsPage() {
   const rows = catalog?.presets ?? null;
   const unpublished = rows?.filter((p) => p.published === false).length ?? 0;
   const premium = rows?.filter((p) => p.min_role === "premium").length ?? 0;
+  const deprecated = rows?.filter((p) => p.deprecated).length ?? 0;
 
   return (
     <div className="page is-wide">
@@ -69,13 +70,19 @@ export function ModelsPage() {
               <Badge>
                 プレミアム {premium} / {rows.length}
               </Badge>
+              <Badge>
+                非推奨 {deprecated} / {rows.length}
+              </Badge>
             </div>
           )}
         </div>
         <p className="lead">
           Administrator / Moderator が /switch
           とダッシュボードに出すモデルを切り替えます。非公開はリリース前にカタログへ載せておき、公開にした瞬間から使えます。プレミアムは
-          Premium / Moderator / Administrator だけが選べます。
+          Premium / Moderator / Administrator だけが選べます。「非推奨」は Anthropic と Anthropic Workspace
+          以外のプロバイダのプリセットです。公開のままでも新しくは選べず、いま使っているサーバーとユーザーはそのまま使い続けます。Anthropic
+          Workspace のプリセットは最初は非公開です。対応した版の bot を配信し、専用の API
+          キーを設定してから公開にしてください。
         </p>
       </header>
 
@@ -107,7 +114,15 @@ export function ModelsPage() {
                           <ProviderTile provider={p.provider} label={p.label} />
                           <div>
                             <div className="cell-title mono">{p.model ?? p.id}</div>
-                            <div className="cell-sub">{meta.label}</div>
+                            <div className="cell-sub">
+                              {meta.label}
+                              {p.deprecated && (
+                                <>
+                                  {" "}
+                                  <Badge tone="warn">非推奨</Badge>
+                                </>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </td>

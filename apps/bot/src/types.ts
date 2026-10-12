@@ -1,5 +1,6 @@
 import type { Selection } from "./config";
 import type { MultiAgentSession } from "./multi-agent";
+import type { WorkspaceMark } from "./workspace/types";
 export type Json = Record<string, unknown>;
 export type ToolCall = {
   id: string;
@@ -20,11 +21,24 @@ export type Message = {
   /** A state note that stays in the conversation and is added again only when
    *  its state changes, so later turns keep extending the same prefix. */
   sticky?: boolean;
+  /** On a tool message: the call failed. Sent as Anthropic's `is_error`; the
+   *  other protocols have no such field and never set it. */
+  is_error?: boolean;
 };
 export type ToolDef = {
   type: "function";
   function: { name: string; description: string; parameters: Json };
+  /** Claude harness: found through tool search instead of loaded up front. */
+  defer?: boolean;
 };
+/** A tool result that is already text for the model, as the Claude harness's
+ *  tools return it. Other results are objects and are sent as JSON. */
+export class ToolOutput {
+  constructor(
+    readonly text: string,
+    readonly options: { isError?: boolean; images?: string[] } = {},
+  ) {}
+}
 export type Usage = {
   prompt_tokens: number;
   completion_tokens: number;
@@ -32,6 +46,10 @@ export type Usage = {
   cached_tokens: number;
   // Optional: usage persisted before cache write tracking lacks it.
   cache_write_tokens?: number;
+  /** Claude harness: input plus output of the turn's last request, which is
+   *  the size the next request starts from. The totals above add every
+   *  request of a turn together and cannot tell how long the conversation is. */
+  context_tokens?: number;
 };
 export const emptyUsage = (): Usage => ({
   prompt_tokens: 0,
@@ -52,6 +70,23 @@ export type Context = {
   botId: string;
   thread: boolean;
   messageId?: string;
+  /** Names one user turn in the logs, so its model requests (children's
+   *  included) can be grouped. Never sent to a provider. */
+  turnId?: string;
+  /** Set for a turn that runs on the Claude harness (#66) or as an Anthropic
+   *  Workspace session (#76); a child keeps its root's. Absent means the
+   *  Codex-style harness. */
+  harness?: "claude" | "workspace";
+  /** Workspace: set once the session accepted this turn's message, and saved
+   *  with the checkpoint, so a resumed turn continues that message under the
+   *  same spending ceiling instead of sending it again. */
+  workspaceMark?: WorkspaceMark;
+  /** Claude harness: subagents started in this turn, shared with children so
+   *  the per-turn limit counts the whole tree. */
+  agentCalls?: { count: number };
+  /** Claude harness: the model this turn runs on, after auto routing. A
+   *  general-purpose subagent runs on the same one. */
+  rootSelection?: Selection;
   images?: string[];
   pendingImages?: string[];
   depth: number;

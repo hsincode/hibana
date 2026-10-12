@@ -12,6 +12,8 @@ Hibana が起動・通信・待機・中断を管理します。
 on / ultra の協調ツールは、ユーザーまたは適用される指示の明示的な依頼があるときに使います。
 `SUBAGENT_ENABLED=false` または `TOOLS_ENABLED=false` なら、協調ツールも Workflow も提供しません。
 
+プロバイダー「Anthropic Workspace」のターンでは、この文書の協調ツール・Workflow・Multi-Agent モードは、どれも使いません。保存値が on / multi のときは委譲なしで動き、ultra は Haiku 5.5 のときだけ、Claude Managed Agents の dynamic workflows（Haiku Ultra）として働きます。Ultracode とは別の仕組みで、xhigh に固定しません。サブエージェントと役割の「固定」のモデルに、Workspace のプリセットは選べません。保存値は残るので、ほかのモデルに切り替えると、この文書のとおりに動きます（[ハーネス](harness.md#haiku-ultra)、#76）。
+
 サーバー設定・マイ設定の「サブエージェント」は off / on / ultra / multi を選べます。
 off は `subagent_enabled=false` で起動と協調ツールを無効化し、on / ultra は
 `subagent_enabled=true` と `ultra_mode=false / true` を保存します。multi は

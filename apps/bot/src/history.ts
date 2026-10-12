@@ -15,8 +15,18 @@ function textTokens(text: string): number {
   return Math.ceil((text.length - wide) / 3 + wide);
 }
 const total = (turns: Turn[]) => turns.reduce((sum, t) => sum + t.tokens, 0);
+/** A conversation that ended here. `reset`: `get` found one it could not
+ *  continue (another model or mode, another guild, a thread idle past its
+ *  age). `clear`: `/clear`, or the channel was deleted. `guild`: a settings
+ *  change cleared a guild's conversations; without a guild, all of them. */
+export type HistoryDrop = { channelId: string; cause: "reset" | "clear" } | { guildId?: string; cause: "guild" };
 export class History {
   private channels = new Map<string, Entry>();
+  /** Told about each drop, once it is done here and in the store. An
+   *  Anthropic Workspace conversation is held by a cloud session, which has
+   *  to end with the local record of it (#76). `get` reports only a
+   *  conversation that existed: a channel's first turn drops nothing. */
+  onDrop?: (drop: HistoryDrop) => void;
   /** With a store, each change is also written to disk, and a channel is read
    *  back the first time it is used after a start. A restart, which every
    *  deploy is, then keeps the conversations (#59). Without a store, or while
@@ -45,12 +55,14 @@ export class History {
   clear(channelId: string) {
     this.channels.delete(channelId);
     this.store?.deleteChannel(channelId);
+    this.onDrop?.({ channelId, cause: "clear" });
   }
   clearGuild(guildId?: string) {
     for (const [id, e] of this.channels)
       if (!guildId || e.guildId === guildId) this.channels.delete(id);
     // Also the channels of the guild that this process has not read yet.
     this.store?.deleteGuild(guildId);
+    this.onDrop?.({ guildId, cause: "guild" });
   }
   get(
     channelId: string,
@@ -58,6 +70,11 @@ export class History {
     key: string,
     thread: boolean,
     age: number,
+    /** Claude harness: never drop single turns. Its conversations are
+     *  shortened by a summary of the whole instead (`replace`), because a
+     *  conversation with its head cut off invalidates the thinking blocks in
+     *  the turns that remain. */
+    appendOnly = false,
   ) {
     let entry = this.entry(channelId);
     const last = entry?.turns.at(-1);
@@ -69,13 +86,15 @@ export class History {
     // A stored conversation is continued only in the guild (or DM) it was
     // written in, whatever a row on disk says.
     if (!entry || entry.key !== key || entry.guildId !== guildId || idle) {
+      const existed = entry !== undefined;
       entry = { guildId, key, turns: [] };
       this.channels.set(channelId, entry);
       // Unconditional: rows can exist that `entry` could not read.
       this.store?.deleteChannel(channelId);
+      if (existed) this.onDrop?.({ channelId, cause: "reset" });
     }
     // A thread is summarized first (compact), which keeps what trimming drops.
-    if (!thread) this.trim(channelId, entry);
+    if (!thread && !appendOnly) this.trim(channelId, entry);
     return entry.turns.flatMap((t) => structuredClone(t.messages));
   }
   /** Drops the oldest turns in one step, from the limit down to the keep
@@ -100,7 +119,7 @@ export class History {
     while (count < entry.turns.length && size > target) size -= entry.turns[count++]!.tokens;
     this.drop(channelId, entry, count);
   }
-  put(channelId: string, messages: Message[], usage: Usage) {
+  put(channelId: string, messages: Message[], usage: Usage, keepImages = false) {
     const entry = this.entry(channelId);
     if (!entry) return;
     const clean = messages
@@ -111,8 +130,10 @@ export class History {
       .filter((m) => m.role !== "system" && (m.role !== "developer" || m.sticky))
       // Text is stored as it was sent. A shortened tool result would make the
       // next turn differ from this one at that result. Images are still
-      // dropped, so the turn after an image differs once at that message.
-      .map(({ images, ...copy }) => copy);
+      // dropped, so the turn after an image differs once at that message. The
+      // Claude harness keeps them (as data, not as an expiring URL): there a
+      // turn that differs from what was sent is rejected, not just uncached.
+      .map(({ images, ...copy }) => (keepImages && images?.length ? { ...copy, images } : copy));
     // Memory keeps what the store would hand back after a restart (the JSON
     // form, detached from the agent's arrays), so the next request is built
     // from the same turn whether or not the process restarted in between.
@@ -121,6 +142,40 @@ export class History {
     entry.turns.push({ ...turn, messages: JSON.parse(json) as Message[] });
     entry.usage = usage;
     this.store?.appendTurn(channelId, entry, { ...turn, json });
+  }
+  /** Size of the conversation as the provider last counted it, or undefined
+   *  when no turn recorded it. */
+  contextTokens(channelId: string): number | undefined {
+    return this.entry(channelId)?.usage?.context_tokens;
+  }
+  /** Replaces the whole conversation with `messages`: the summary block the
+   *  API returned for it. Returns false when the channel was cleared while the
+   *  summary was written, so a cleared conversation does not come back. */
+  replace(channelId: string, expected: readonly Message[], messages: Message[]): boolean {
+    const entry = this.channels.get(channelId);
+    // Compare with what the summary was made from, not just "an entry exists".
+    if (!entry || JSON.stringify(entry.turns.flatMap((t) => t.messages)) !== JSON.stringify(expected)) return false;
+    const seq = (entry.turns.at(-1)?.seq ?? -1) + 1;
+    this.drop(channelId, entry, entry.turns.length);
+    const json = JSON.stringify(messages);
+    const turn = { seq, at: Date.now(), tokens: textTokens(json), summary: true };
+    entry.turns = [{ ...turn, messages: JSON.parse(json) as Message[] }];
+    // The old size no longer describes the conversation.
+    entry.usage = entry.usage && { ...entry.usage, context_tokens: undefined };
+    this.store?.appendTurn(channelId, entry, { ...turn, json });
+    return true;
+  }
+  /** Rewrites every stored message of a channel, keeping turn boundaries. */
+  rewrite(channelId: string, change: (messages: Message[]) => void) {
+    const entry = this.entry(channelId);
+    if (!entry) return;
+    this.store?.deleteChannel(channelId);
+    for (const turn of entry.turns) {
+      change(turn.messages);
+      const json = JSON.stringify(turn.messages);
+      turn.tokens = textTokens(json);
+      this.store?.appendTurn(channelId, entry, { seq: turn.seq, at: turn.at, tokens: turn.tokens, summary: turn.summary, json });
+    }
   }
   info(channelId: string) {
     const e = this.entry(channelId);

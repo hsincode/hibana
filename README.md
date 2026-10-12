@@ -9,7 +9,11 @@ Discord AI bot・設定API・WebダッシュボードをまとめたBun / TypeSc
 | `apps/web` | React / Viteの設定ダッシュボード |
 | `packages/shared` | 設定スキーマ・モデルカタログ・トリガー |
 
-Advisor、旧来の自動モデルRouter、品質検証（verify）、速度優先（fast）は削除済みです。モデルは明示的な選択（ユーザー → サーバー → 移行済み既定値 / 環境変数）で決まります。例外は Anthropic プロバイダーの「Anthropic / Auto (Jev)」プリセットで、これを選んだときだけ Jev が難易度に応じて Haiku 5.5 / Sonnet 5.5 / Opus 5.5 と effort を決めます（[docs/jev.md](docs/jev.md#anthropic-の-auto-routing)）。OpenRouterプロバイダー、サブエージェント、Reactの画面遷移は引き続き利用できます。
+Advisor、旧来の自動モデルRouter、品質検証（verify）、速度優先（fast）は削除済みです。モデルは明示的な選択（ユーザー → サーバー → 移行済み既定値 / 環境変数）で決まります。例外は Anthropic プロバイダーの「Anthropic / Auto (Jev)」プリセットで、これを選んだときだけ Jev が難易度に応じて Haiku 5.5 / Sonnet 5.5 / Opus 5.5 と effort を決めます（[docs/jev.md](docs/jev.md#anthropic-の-auto-routing)）。サブエージェント、Reactの画面遷移は引き続き利用できます。
+
+ハーネス（システムプロンプト・ツール・ループ）は 2 つあります。Anthropic 公式 API のターンは、Claude Code の設計に寄せた Claude 向けのハーネスで動きます。それ以外のプロバイダーは非推奨で、従来の Codex 型のハーネスのまま変えずに残しています。bot の環境変数 `ANTHROPIC_HARNESS=codex` で、Anthropic も従来のハーネスに戻せます（判断記録 #66・#67・#68、[docs/harness.md](docs/harness.md)）。Claude 向けのハーネスは、実際の API での確認と前後の比較（#69）がまだです。
+
+これとは別に、プロバイダー「Anthropic Workspace」（`anthropic_workspace`）のターンは、Claude Managed Agents のセッションで動きます。ループ・会話・作業領域（チャンネルごとのクラウドのコンテナ）は Anthropic 側にあり、Hibana はプロンプトと、Discord・設定のツールを渡します。モデルは Anthropic と同じ 3 つ（Auto は無し）で、Haiku 5.5 で ultra を選んだときだけ、公式 API の dynamic workflows を使います（Haiku Ultra）。専用の鍵 `ANTHROPIC_WORKSPACE_API_KEY` が要り、プリセットは最初は非公開です（公開は Web の `/models` から。`WEB_API_URL` を空にした bot だけの構成では公開できず、使えるのは `PROVIDER=anthropic_workspace` を既定にしたときだけです）。1 ターン・1 日・月の金額、1 ターンの時間、同時ターン数に上限があります（既定値は AI の案で、本人未確認）。`/clear` は、会話に加えてクラウドの作業ファイルも消します（workflow run が開いたままのセッションは、削除が拒否されて残ることがあります）。**実際の API では、まだ 1 回も動かしていません**（判断記録 #76、[ADR-0011](docs/adr/0011-add-anthropic-workspace-provider.md)、[docs/harness.md](docs/harness.md)）。
 
 ## 開発
 
@@ -42,12 +46,12 @@ make sandbox-smoke      # Docker隔離・ファイル操作の確認
 - メンション、Hibana / ひばな / ヒバナ / 火花、旧トリガー、スレッド・フォーラム名で応答。
 - `/switch`、`/temperature`、`/exa`、`/verify`、`/fast`、`/clear`、`/context`、`/retry`。
 - 会話履歴と Auto Routing の経路は `HIBANA_DATA_DIR/conversations.db`（SQLite）に保存し、bot の再起動（デプロイ）をまたいで続ける。`/clear`・モデルの変更・guild の設定変更で消える（#59、[ADR-0008](docs/adr/0008-keep-conversations-across-restarts.md)）。
-- `/usage`（owner のみ）: Anthropic API の推計利用額を、当日・当月・モデル別・直近7日で表示。応答の `usage` に `packages/shared` の単価表を掛けた推計で、請求額とは一致しない。日付は UTC。集計は `HIBANA_DATA_DIR/anthropic_usage.json` に約400日分を保存（#44）。
+- `/usage`（owner のみ）: Anthropic API の推計利用額を、当日・当月・モデル別・直近7日で表示。応答の `usage` に `packages/shared` の単価表を掛けた推計で、請求額とは一致しない。日付は UTC。集計は `HIBANA_DATA_DIR/anthropic_usage.json` に約400日分を保存（#44）。Anthropic Workspace の分はこの推計に入らず、別の行で、セッションが報告する list cost（公開単価での額）の合計を出す。集計は `HIBANA_DATA_DIR/anthropic_workspace_usage.json`（#76）。
 - Web の `/analytics`（administrator のみ）: Anthropic の Admin API の cost report から、日毎の利用料を表示。1日の目安（月 $200 ÷ その月の日数）を超えた日と、予算の残りが分かる。請求ベースで組織全体が対象。API の環境変数 `ANTHROPIC_ADMIN_API_KEY`（Admin API キーなど、cost report を読めるキー）が必要で、未設定ならページにその旨を表示する。日付は UTC（#48）。
-- Chat Completions / Responses / Anthropic Messages。プロバイダーの認証情報を分離。
+- Chat Completions / Responses / Anthropic Messages / Claude Managed Agents（Anthropic Workspace）。プロバイダーの認証情報を分離。`anthropic` と `anthropic_workspace` 以外は非推奨（#67、#76）。
 - [Jev 判定と行動選択モード](docs/jev.md)。根拠照合・分類と、Jev がファイル操作・検索などの各行動を選ぶ実行モードを別々に ON / OFF。
 - Discord操作、ファイル編集・配信、Exa検索、外部MCP、スキルCRUD、静的サイト公開。
-- 制限付きDockerでのbash・メディア処理・ブラウザ・動画レンダリング。Python製の既存メディアスキルは資産として引き継ぎ。
+- 制限付きDockerでのbash・メディア処理・ブラウザ・動画レンダリング。Python製の既存メディアスキルは資産として引き継ぎ。Anthropic Workspace のターンは Docker を使わず、Anthropic のコンテナで動く（スキル・サイトの公開・画像生成・VPN などは使えない）。
 - GitHub device login、Surfshark / VPN Gate、xAI STT / S2S通話（オプトイン）。
 - サーバー／個人の設定、OAuth・ロール・利用停止、成果物・スキル管理のWeb画面。
 
@@ -61,7 +65,7 @@ make sandbox-smoke      # Docker隔離・ファイル操作の確認
 
 MIT。元リポジトリの著作権表示と履歴を保持しています。
 
-設定画面のサブエージェントは off（無効）/ on（明示的な委譲要求時）/ ultra（Claude Code の Ultracode：xhigh とワークフローの常時編成）/ multi（役割分担・並列の Multi-Agent）から選択できます。保存済みの effort・Jev 判定とは独立しています（ultra の間だけ xhigh で動きます）。既存の Ultra 設定はそのまま ultra として引き継ぎ、Ultracode として動きます。on / ultra / multi ではメッセージにキーワード `ultracode` を書くと、その回だけワークフローで実行します。multi では Jev 行動選択モードを使いません。保存済みの個人設定はサーバー設定から独立します。仕組みと Claude Code との違いは [Ultra（Claude Code の Ultracode）](docs/ultracode.md) を参照してください。
+設定画面のサブエージェントは off（無効）/ on（明示的な委譲要求時）/ ultra（Claude Code の Ultracode：xhigh とワークフローの常時編成）/ multi（役割分担・並列の Multi-Agent）から選択できます。Anthropic のターンでは off と on だけが意味を持ち、ultra / multi は on として動きます（Claude 向けのハーネスの `Agent` ツール。#68）。Anthropic Workspace では、Haiku 5.5 で ultra を選んだときだけ委譲（Managed Agents の workflow run）が働き、それ以外は委譲なしで動きます。この ultra は Ultracode とは別の仕組みで、xhigh に固定せず、キーワード `ultracode` も効きません（#76）。保存済みの effort・Jev 判定とは独立しています（ultra の間だけ xhigh で動きます）。既存の Ultra 設定はそのまま ultra として引き継ぎ、Ultracode として動きます。on / ultra / multi ではメッセージにキーワード `ultracode` を書くと、その回だけワークフローで実行します。multi では Jev 行動選択モードを使いません。保存済みの個人設定はサーバー設定から独立します。仕組みと Claude Code との違いは [Ultra（Claude Code の Ultracode）](docs/ultracode.md) を参照してください。
 Service Tier は auto / default / priority / flex / ultrafast を設定でき、OpenAI・Codex Plus/Pro・ChatGPT の親・子エージェントのリクエストに適用します。auto はフィールドを省略して接続先の既定値を使い、他プロバイダーには送信しません。モデル・接続先・アカウントによって利用可否や料金が異なります。ultrafast は対応モデルと権限のあるアカウント（API の対象顧客、Codex では Enterprise / Pro 500 など）に限られ、API 料金は標準の約 6 倍です。権限がない場合はエラーにならず、レスポンスの `service_tier` が default などに落ちることがあります。旧 fast フラグは復活させません。
 送信値は [OpenAI API Reference](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create/) に準拠しています。設定保存・HTTPリクエスト生成・子への継承は自動テスト対象ですが、各ゲートウェイやChatGPTでの全Tierの受付・速度・課金は実測していません。
 協調ツール、サブエージェントのモデル・effort 設定、履歴継承と検証範囲は

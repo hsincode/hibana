@@ -146,8 +146,8 @@ const contentShape = (content: unknown) => {
   return JSON.stringify([blocks.filter((b) => b?.type === "text").map((b) => b.text), blocks.length]);
 };
 // The update's rejection for a budget at or below what the session has used.
-// Where the reason is carried is not verified against the API: the type
-// definitions name it, the documentation only gives the sentence.
+// The type definitions name the reason; the API sent the sentence alone, with
+// no code (smoke, 2026-10-12). Both are looked for.
 export const budgetNotRaised = (info: ApiErrorInfo) =>
   info.code === "budget_not_raised" || /budget_not_raised|greater than the session's consumed/i.test(info.message);
 

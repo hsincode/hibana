@@ -232,7 +232,7 @@ Anthropic 公式 API（`provider: anthropic`）のターンは、Claude 向け�
 
 ## Anthropic Workspace（2026-10-12）
 
-プロバイダー「Anthropic Workspace」（`anthropic_workspace`）のターンは、Claude Managed Agents のセッションで動きます（[#76](https://github.com/hsincode/hibana/issues/76)、[ADR-0011](adr/0011-add-anthropic-workspace-provider.md)、[ハーネスの説明](harness.md)の「workspace 経路」）。作業領域は VPS の Docker ではなく、Anthropic のクラウドのコンテナです。**未配信で、実際の API ではまだ 1 回も動かしていません。** この節の手順と値は AI の案で、本人未確認です。
+プロバイダー「Anthropic Workspace」（`anthropic_workspace`）のターンは、Claude Managed Agents のセッションで動きます（[#76](https://github.com/hsincode/hibana/issues/76)、[ADR-0011](adr/0011-add-anthropic-workspace-provider.md)、[ハーネスの説明](harness.md)の「workspace 経路」）。作業領域は VPS の Docker ではなく、Anthropic のクラウドのコンテナです。**未配信です。実際の API では、手元から 1 回、Haiku 5.5 の Ultra なしのセッションで確かめただけです**（2026-10-12、この節の最後）。この節の手順と値は AI の案で、本人未確認です。
 
 ### 使えるようにするまで
 
@@ -322,4 +322,4 @@ bot を前の版に戻している間（relay の自動の切り戻しを含む�
 - その間の `/clear` やチャンネルの削除は、クラウドのセッションに届きません。新しい版に戻すと、消したはずの会話と作業ファイルが続きます。確実に消すには、新しい版に戻してからもう一度 `/clear` します
 - 停止のときに budget を下げられなかったセッションは、新しい版が戻るまで、上げた budget のまま残ります（使えるのはその budget まで）
 
-検証は手元のテスト（`apps/bot/src/__tests__/workspace-*.test.ts`。Anthropic の応答はすべて偽のもの）までです。**実 API での確認は未実行です。** 手動のスクリプト（`cd apps/bot && bun run workspace-smoke`）は課金されるので、持ち主の承認が出るまで走らせません（`docs/harness.md` の「実 API での確認」）。未確認: 実 API での全経路、Haiku 5.5 で workflow run が使えるか、実際の費用、切り戻しの挙動、本番での動作。
+検証は、手元のテスト（`apps/bot/src/__tests__/workspace-*.test.ts`。Anthropic の応答はすべて偽のもの）と、手元からの実 API での確認 1 回です。**実 API では、2026-10-12 に、Haiku 5.5・effort medium の Ultra なしのセッションで、手動のスクリプト（`cd apps/bot && bun run workspace-smoke`）と bot 自身のターン（Discord は偽）が通りました**（AI が実行。持ち主は再実行していません。`docs/harness.md` の「workspace 経路の実 API での確認」）。スクリプトは課金されるので、次に流すときも、そのつど持ち主の承認が要ります。未確認: Haiku 5.5 で workflow run が使えるか（Haiku Ultra）、Sonnet 5.5・Opus 5.5、実際の Discord を通したターン、実際の費用（請求額）、切り戻しの挙動、本番での動作。

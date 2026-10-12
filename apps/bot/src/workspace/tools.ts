@@ -269,8 +269,9 @@ export function pickOutput(files: BetaFileMetadata[], rel: string): BetaFileMeta
   const exact = files.filter((f) => key(f) === rel);
   if (exact.length) return newest(exact);
   // Whether a file in a subdirectory is listed with its directory is not
-  // documented. When only the bare name is listed, one match is the file and
-  // several cannot be told apart.
+  // documented; the API listed it under its bare name (smoke, 2026-10-12).
+  // With only the bare name, one match is the file and several cannot be
+  // told apart.
   const named = rel === base ? [] : files.filter((f) => key(f) === base);
   if (named.length > 1)
     throw new Error(`${named.length} files named ${base} are in this session's outputs and cannot be told apart. Save it as ${WORKSPACE_OUTPUTS}<unique name> and send that.`);

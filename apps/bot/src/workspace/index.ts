@@ -14,7 +14,7 @@ import { emptyUsage, type Context, type Message, type Usage } from "../types";
 import { apiErrorInfo, createWorkspaceClient, SessionGone, toProviderError, workspaceBaseUrl } from "./client";
 import { applyRunEvent, coalesce, eventLine, runLine, waitingLine, type RunView } from "./progress";
 import { contextDigest, openRunsNote, resumeContent, userContent, workspaceContextBlock, workspaceSystem } from "./prompt";
-import { WorkspaceResources } from "./resources";
+import { WorkspaceResources, type WorkspaceIdentity } from "./resources";
 import { quiesce, runTurn, type TurnInput, type TurnResult } from "./runner";
 import { owed, SessionTable, type Disposal, type SessionPatch, type SessionRow } from "./sessions";
 import { bindWorkspaceTurn, outputFiles, toolsFingerprint, WorkspaceCalls, workspaceToolParams } from "./tools";
@@ -55,11 +55,13 @@ export type WorkspaceDeps = {
   log: Logger;
   report: (error: unknown) => void;
   shutdown: AbortSignal;
-  /** The rest are set by tests only. */
+  /** The rest are set by tests, and by the smoke script (smoke.ts). */
   fetch?: typeof fetch;
   now?: () => number;
   sleep?: typeof sleep;
   limits?: Partial<TurnInput["limits"]>;
+  /** Names and labels what is created, when it is not the bot's own. */
+  identity?: WorkspaceIdentity;
 };
 
 type Live = {
@@ -211,6 +213,7 @@ export class Workspace {
         ? { type: "limited", allowed_hosts: allowedHosts, allow_package_managers: true }
         : { type: "unrestricted" },
       log: this.deps.log,
+      ...(this.deps.identity && { identity: this.deps.identity }),
     }));
   }
 

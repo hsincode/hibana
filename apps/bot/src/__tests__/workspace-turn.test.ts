@@ -265,11 +265,17 @@ const today = "2026-10-12";
 
 /** A bot whose Workspace client talks to `cloud` and whose Discord client
  *  answers from memory. `open` uses the SQLite store, as a started bot does. */
-async function bot(extra: NodeJS.ProcessEnv = {}, options: { data?: string; cloud?: Cloud; open?: boolean; load?: boolean } = {}) {
+async function bot(
+  extra: NodeJS.ProcessEnv = {},
+  options: { data?: string; cloud?: Cloud; open?: boolean; load?: boolean; identity?: { prefix: string; app: string } } = {},
+) {
   const data = options.data ?? await mkdtemp(join(dir, "bot-"));
   const cloud = options.cloud ?? new Cloud();
   const hibana = new Hibana(loadConfig(env({ HIBANA_DATA_DIR: data, ...extra })), pino({ enabled: false }), {
-    workspace: { fetch: cloud.fetch, now, sleep: async () => {}, limits: { graceMs: 30, interruptWaitMs: 100, settleMs: 100 } },
+    workspace: {
+      fetch: cloud.fetch, now, sleep: async () => {}, limits: { graceMs: 30, interruptWaitMs: 100, settleMs: 100 },
+      ...(options.identity && { identity: options.identity }),
+    },
   });
   (hibana.client as { user: { id: string } | null }).user = { id: "30" };
   // Every message as it was first posted, and every text a message ever showed.
@@ -1519,6 +1525,28 @@ describe("sessions and channels", () => {
       for (const session of cloud.sessions)
         expect(cloud.of("POST", `/v1/sessions/${session.id}/events`)).toHaveLength(session.messages.length);
     } finally { await hibana.close(); }
+  });
+
+  // The smoke script runs a bot of its own on the real API (smoke.ts).
+  test("a bot given another identity names and labels what it creates with it, and adopts nothing of the bot's own", async () => {
+    const cloud = new Cloud();
+    const own = await bot({}, { cloud });
+    const other = await bot({}, { cloud, identity: { prefix: "hibana-smoke-x", app: "hibana-smoke" } });
+    try {
+      expect(await own.hibana.respond("一つ目", { ...dm })).toBe("ok");
+      expect(await other.hibana.respond("二つ目", { ...dm })).toBe("ok");
+      expect(cloud.environments.map((e) => e.metadata.app)).toEqual(["hibana", "hibana-smoke"]);
+      expect(cloud.agents.map((a) => a.metadata.app)).toEqual(["hibana", "hibana-smoke"]);
+      expect(cloud.sessions.map((s) => s.state.metadata.app)).toEqual(["hibana", "hibana-smoke"]);
+      expect(cloud.environments[1]!.name).toStartWith("hibana-smoke-x-env-");
+      expect(cloud.agents[1]!.name).toStartWith("hibana-smoke-x-plain-");
+      // Each session was created from its own bot's agent and environment.
+      expect(cloud.sessions.map((s) => s.state.agent.id)).toEqual(cloud.agents.map((a) => a.id));
+      expect(cloud.sessions.map((s) => s.state.environment_id)).toEqual(cloud.environments.map((e) => e.id));
+    } finally {
+      await own.hibana.close();
+      await other.hibana.close();
+    }
   });
 
   test("a session row survives a restart; another model archives it and starts a new one", async () => {

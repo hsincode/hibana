@@ -2,6 +2,8 @@
 // API (#76):
 //   cd apps/bot && bun run workspace-smoke               Haiku 5.5, a plain session
 //   cd apps/bot && bun run workspace-smoke --ultra       also a Haiku Ultra session (workflow runs)
+//   cd apps/bot && bun run workspace-smoke --bot         also turns of the bot itself, with its tools run by its registry
+//   cd apps/bot && bun run workspace-smoke --bot-only    those turns alone
 //   cd apps/bot && bun run workspace-smoke --budget 0.5  each session's budget in US dollars (default 1)
 //   cd apps/bot && bun run workspace-smoke --keep        leave what it created (sessions are still brought to rest)
 //   cd apps/bot && bun run workspace-smoke --cleanup     only remove what earlier runs left behind
@@ -10,12 +12,23 @@
 // running it needs the owner's approval first (#76). A session is created
 // with the budget given, and before every turn the script reads from the
 // session what it has used, so a turn is allowed at most what is left of that
-// budget. The whole run stops after 15 minutes.
+// budget. The bot's own turns are held to the same amount by the bot's own
+// limits: `--budget` is what its turns may add in a day. So a run can spend
+// up to `--budget` once for every part it runs. The whole run stops after 15
+// minutes.
 //
 // It prints what each step observed and what the sessions used. Message text
 // is not printed, and of an error only its status, its codes and the field
-// names its message mentions. Custom tools are not executed: their results
-// are supplied here, so no Discord access is needed.
+// names its message mentions. In the first two parts custom tools are not
+// executed: their results are supplied here.
+//
+// The part of `--bot` is a turn as the bot runs it (`Hibana.respond`): its
+// session table, its limits, its prompt and its tool list, on Haiku 5.5 at
+// effort medium, and every custom tool call run by the bot's registry with
+// its checks. Discord is answered from memory there: the bot's Discord client
+// is never logged in, its REST calls are kept in a list instead of being
+// sent, and while that part runs anything else that asks for the network is
+// refused. Of a tool call the registry refused, its reason is printed.
 //
 // Nothing of the bot's is touched. The data directory is a temporary one. The
 // environment, the agents and the sessions are created by the bot's own
@@ -33,13 +46,14 @@ import type { BetaFileMetadata } from "@anthropic-ai/sdk/resources/beta/files";
 import type { BetaManagedAgentsSession } from "@anthropic-ai/sdk/resources/beta/sessions/sessions";
 import { WORKSPACE_PROVIDER, WORKSPACE_ULTRA_MODEL } from "@hibana/shared/catalog";
 import pino from "pino";
+import { Hibana } from "../bot";
 import type { WorkspaceVariant } from "../claude/select";
 import { loadConfig, type Selection } from "../config";
 import { sleep } from "../io";
 import { httpFailure, ProviderError } from "../llm-errors";
 import { Runtime } from "../runtime";
 import definitions from "../tools/definitions.json";
-import type { Context, ToolDef } from "../types";
+import { ToolOutput, type Context, type Json, type ToolDef } from "../types";
 import { apiErrorInfo, createWorkspaceClient, workspaceBaseUrl } from "./client";
 import { openRunsNote, userContent, workspaceContextBlock, workspaceSystem } from "./prompt";
 import { budgetLimit, cents, multiagentMismatch, ULTRA_MULTIAGENT, WorkspaceResources } from "./resources";
@@ -63,16 +77,17 @@ const QUIET_MS = 20_000;
 
 const argv = process.argv.slice(2);
 function usage(problem: string): never {
-  console.error(`${problem}\nusage: bun run workspace-smoke [--ultra] [--budget <usd>] [--keep]\n       bun run workspace-smoke --cleanup`);
+  console.error(`${problem}\nusage: bun run workspace-smoke [--ultra] [--bot | --bot-only] [--budget <usd>] [--keep]\n       bun run workspace-smoke --cleanup`);
   process.exit(2);
 }
 // Checked strictly: a mistyped option must not start a billed run.
 for (let i = 0; i < argv.length; i++) {
-  if (!["--ultra", "--budget", "--keep", "--cleanup"].includes(argv[i]!)) usage(`unknown argument: ${argv[i]}`);
+  if (!["--ultra", "--bot", "--bot-only", "--budget", "--keep", "--cleanup"].includes(argv[i]!)) usage(`unknown argument: ${argv[i]}`);
   if (argv[i] === "--budget") i++;
 }
 const option = (name: string) => argv.includes(name);
 if (option("--cleanup") && argv.length > 1) usage("--cleanup takes no other option");
+if (option("--bot-only") && (option("--ultra") || option("--bot"))) usage("--bot-only runs the bot's turns alone");
 const budgetUsd = option("--budget") ? Number(argv[argv.indexOf("--budget") + 1]) : 1;
 if (!(budgetUsd >= 0.2 && budgetUsd <= 10)) usage("--budget takes US dollars between 0.2 and 10");
 const budgetCents = Math.round(budgetUsd * 100);
@@ -98,16 +113,26 @@ const abortable = { signal: stop.signal };
 
 const bump = (counts: Map<string, number>, key: string) => counts.set(key, (counts.get(key) ?? 0) + 1);
 // What went over the wire: the requests, and for the event stream its frames
-// by SSE event name, its comment lines and its longest silence.
+// by SSE event name, its comment lines and its longest silence. The real API
+// names every frame `message` and has the event's type in the data alone, so
+// the events are told apart by their data (`events`), never by the name.
 // `echoes`: the `user.message` frames, by whether they carry a `processed_at`.
 // The runner never passes a turn's own message on, so they are counted here.
+// `tools`: the built-in tool calls of the primary thread, by name, and
+// `results`: the custom tool results that were sent, with whether the API
+// took them. The bot's own turns hand this script no event, so its part reads
+// both from here.
 const wire = {
   requests: 0, frames: new Map<string, number>(), comments: 0, last: Date.now(), silence: 0,
   echoes: { queued: 0, processed: 0 },
+  events: new Map<string, number>(),
+  tools: [] as string[], results: [] as { error: boolean; accepted: boolean }[],
+  /** How often the event stream was opened. */
+  streams: 0,
 };
 function watchStream(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
   const decoder = new TextDecoder();
-  let rest = "", frame = "";
+  let rest = "";
   wire.last = Date.now();
   return body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
@@ -117,11 +142,17 @@ function watchStream(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Arra
       rest = lines.pop() ?? "";
       for (const line of lines) {
         if (line.startsWith(":")) wire.comments++;
-        else if (line.startsWith("event:")) bump(wire.frames, (frame = line.slice(6).trim()).slice(0, 48));
-        // Inside the message's own text the quotes would be escaped.
-        else if (line.startsWith("data:") && frame === "user.message")
-          wire.echoes[/"processed_at"\s*:\s*"/.test(line) ? "processed" : "queued"]++;
-        else if (!line) frame = "";
+        else if (line.startsWith("event:")) bump(wire.frames, line.slice(6).trim().slice(0, 48));
+        else if (line.startsWith("data:")) {
+          let event: RawEvent | undefined;
+          try {
+            event = JSON.parse(line.slice(5)) as RawEvent;
+          } catch {}
+          if (typeof event?.type !== "string") continue;
+          bump(wire.events, event.type.slice(0, 48));
+          if (event.type === "user.message") wire.echoes[event.processed_at ? "processed" : "queued"]++;
+          if (event.type === "agent.tool_use" && !event.session_thread_id && typeof event.name === "string") wire.tools.push(event.name);
+        }
       }
       controller.enqueue(chunk);
     },
@@ -131,15 +162,25 @@ function watchStream(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Arra
 // has no place for the field names the error's message mentions. The last
 // refusal is kept as it came over the wire, so `describe` can still name them.
 let refused: { status: number; fields: string } | undefined;
+// The network as the process found it. The bot's part swaps the global
+// `fetch` for one that refuses (`bot`); the API client keeps this one.
+const network = fetch;
 const counted = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
   wire.requests++;
-  const response = await fetch(input, init);
+  const response = await network(input, init);
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  if (init?.method === "POST" && typeof init.body === "string" && new URL(url).pathname.endsWith("/events")) {
+    try {
+      for (const event of (JSON.parse(init.body) as { events?: RawEvent[] }).events ?? [])
+        if (event.type === "user.custom_tool_result") wire.results.push({ error: !!event.is_error, accepted: response.ok });
+    } catch {}
+  }
   if (!response.ok) {
     const body = await response.clone().json().catch(() => undefined) as { error?: { message?: unknown } } | undefined;
     refused = { status: response.status, fields: mentioned(typeof body?.error?.message === "string" ? body.error.message : "") };
   }
   if (!response.ok || !response.body || !new URL(url).pathname.endsWith("/events/stream")) return response;
+  wire.streams++;
   return new Response(watchStream(response.body), { status: response.status, statusText: response.statusText, headers: response.headers });
 }) as unknown as typeof fetch;
 const client = createWorkspaceClient(config, { fetch: counted });
@@ -173,7 +214,7 @@ const newStore = () => new WorkspaceResources(client, {
 });
 let store = newStore();
 const code = () => crypto.randomUUID().slice(0, 8).toUpperCase();
-const codes = { memory: code(), file: code(), late: code(), tool: code(), again: code(), echo: code() };
+const codes = { memory: code(), file: code(), late: code(), tool: code(), again: code(), echo: code(), reopened: code() };
 const TOP = `smoke-${RUN}.txt`, SUB = `smoke-${RUN}/facts.txt`, LATE = `smoke-${RUN}-late.txt`;
 const out = (rel: string) => `${WORKSPACE_OUTPUTS}${rel}`;
 
@@ -333,6 +374,8 @@ type Turned = TurnResult & { seen: Seen };
 type TurnOptions = {
   allowCents?: number; timeoutMs?: number; images?: string[]; context?: string; notes?: string[];
   steering?: AbortController;
+  /** How long the stream may be silent before the runner opens it again. */
+  idleMs?: number;
   /** Reads the session once more, right after the message was sent, and
    *  prints what it reports under this name (`atSendText`). */
   atSend?: string;
@@ -460,7 +503,7 @@ async function turn(session: Live, text: string, options: TurnOptions = {}): Pro
     },
     baseline: session.totals,
     knownRuns: session.openRuns,
-    limits: { idleMs: config.llmStreamIdleMs, reconnects: config.llmStreamRetries, timeoutMs },
+    limits: { idleMs: options.idleMs ?? config.llmStreamIdleMs, reconnects: config.llmStreamRetries, timeoutMs },
     log,
   });
   if (result.cumulative) session.totals = totalsMax(result.cumulative, session.totals);
@@ -794,6 +837,23 @@ async function plain() {
       `listed ${versions.length} time(s); the newest ${current === codes.again ? "has" : "does not have"} the new content`);
   });
 
+  // A stream that is silent for too long is opened again, and what happened
+  // in between is read from the list. The stream carries nothing while a
+  // command runs, so a short limit forces that in the middle of a turn. What
+  // the turn then makes of the list is what the reply shows: the command's
+  // output, once.
+  await attempt("a stream opened again in the middle of a turn", async () => {
+    const opened = wire.streams;
+    const result = await turn(session,
+      `With the bash tool, run exactly this and wait for it to finish: sleep 20; echo ${codes.reopened}\n` +
+      "Then reply with only what it printed.",
+      { idleMs: 6_000 });
+    const times = wire.streams - opened;
+    step("a stream opened again in the middle of a turn", result.stop === "end_turn" && times > 1 && result.text.split(codes.reopened).length === 2,
+      `the stream was opened ${times} time(s) in the turn, which ended as ${result.stop} after ${result.rounds} model request(s); ` +
+      `the reply has the command's output ${result.text.split(codes.reopened).length - 1} time(s)`);
+  });
+
   // The runner reads the list newest first, and only the first page when it
   // looks for a message it sent.
   await attempt("event list", async () => {
@@ -1017,6 +1077,293 @@ async function ultra() {
   });
 }
 
+// ── The bot's own turns ───────────────────────────────────────────────────
+
+// The Discord ids of this part. Nothing goes to Discord, so they only have to
+// read as ids. `hidden` is a channel of the same server the person cannot read.
+const DISCORD = {
+  guild: "900000000000000001", channel: "900000000000000002", hidden: "900000000000000003",
+  user: "900000000000000004", bot: "900000000000000005", newest: "900000000000000013", posted: "900000000000000020",
+};
+type RestCall = { method: string; path: string; query: string; body?: Json; files: { name: string; data: Buffer }[] };
+// What the bot answers instead of running a turn (workspace/index.ts).
+const limited = (reply: string) => /利用額の上限|利用額の記録/.test(reply);
+
+/** What this part's bot is started with. Not the deployment's settings: only
+ *  what decides how a session is created is taken from there. No other
+ *  integration (Jev, published sites, skills, the sandbox) is switched on, so
+ *  the session is not offered a tool that would reach anything but Discord. */
+function botConfig(dir: string) {
+  const kept = [
+    "ANTHROPIC_WORKSPACE_API_KEY", "ANTHROPIC_WORKSPACE_BASE_URL", "ANTHROPIC_WORKSPACE_NETWORKING",
+    "ANTHROPIC_WORKSPACE_ALLOWED_HOSTS", "ANTHROPIC_WORKSPACE_WEB_ENABLED", "WEB_SEARCH_ENABLED", "PERSONA_FILE",
+  ];
+  return loadConfig({
+    ...Object.fromEntries(kept.flatMap((name) => (process.env[name] === undefined ? [] : [[name, process.env[name]]]))),
+    PROVIDER: WORKSPACE_PROVIDER, LLM_MODEL: MODEL, LLM_EFFORT: "medium",
+    HIBANA_DATA_DIR: dir, RUNTIME_STATE_PATH: "", LOG_DIR: "", SANDBOX_ENABLED: "false", SKILLS_ENABLED: "false",
+    // The bot's own limits hold this part to `--budget`.
+    ANTHROPIC_WORKSPACE_TURN_BUDGET_USD: String(Math.min(TURN_CENTS, budgetCents) / 100),
+    ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD: String(budgetUsd),
+    ANTHROPIC_WORKSPACE_MONTHLY_BUDGET_USD: String(budgetUsd),
+    ANTHROPIC_WORKSPACE_TURN_TIMEOUT_MS: String(TURN_MS),
+  });
+}
+
+/** Discord, answered from memory: the two channels of one server, the
+ *  messages `read_messages` returns, and a list of every REST call the bot's
+ *  tools made instead of sending it. */
+function fakeDiscord(hibana: Hibana, messages: Json[]) {
+  const rest: RestCall[] = [], shown: string[] = [];
+  const member = (userId: string) => ({ id: userId, permissions: { has: () => true } });
+  (hibana.client as { user: { id: string } | null }).user = { id: DISCORD.bot };
+  hibana.client.channels.fetch = (async (id: string) => {
+    if (id !== DISCORD.channel && id !== DISCORD.hidden) return null;
+    return {
+      id, guildId: DISCORD.guild, name: "smoke", isSendable: () => true, isThread: () => false, sendTyping: async () => {},
+      guild: { id: DISCORD.guild, members: { fetch: async (userId: string) => member(userId) } },
+      // Asked with a list for "may read this channel", with one flag otherwise.
+      permissionsFor: () => ({ has: (flags: unknown) => !Array.isArray(flags) || id !== DISCORD.hidden }),
+      send: async (value: { content: string }) => {
+        shown.push(value.content);
+        return { id: DISCORD.posted, edit: async (next: { content: string }) => { shown.push(next.content); } };
+      },
+    };
+  }) as never;
+  hibana.client.guilds.fetch = (async () => ({
+    id: DISCORD.guild, ownerId: DISCORD.user, members: { fetch: async (userId: string) => member(userId) },
+  })) as never;
+  const answer = (method: string) =>
+    async (path: string, options: { body?: Json; query?: URLSearchParams; files?: RestCall["files"] } = {}) => {
+      const files = options.files ?? [];
+      rest.push({ method, path, query: options.query?.toString() ?? "", body: options.body, files });
+      const channel = /^\/channels\/(\d+)\/messages$/.exec(path)?.[1];
+      if (channel && method === "get") return messages.slice(0, Number(options.query?.get("limit") ?? messages.length));
+      if (channel && method === "post")
+        return {
+          id: DISCORD.posted, channel_id: channel, content: options.body?.content ?? "",
+          attachments: files.map((file, i) => ({
+            id: String(i), filename: file.name, size: file.data.length, url: `https://cdn.example.invalid/${file.name}`,
+          })),
+        };
+      return method === "get" ? [] : undefined;
+    };
+  // Every way a request could leave through this client.
+  const client = hibana.client.rest as unknown as Record<string, unknown>;
+  for (const method of ["get", "post", "put", "patch", "delete"]) client[method] = answer(method);
+  for (const method of ["request", "queueRequest", "raw"])
+    client[method] = async () => { throw new Error("The smoke script's bot sends nothing to Discord."); };
+  return { rest, shown };
+}
+
+/** Turns as the bot runs them, with the session's custom tool calls run by
+ *  the bot's own registry. What the tools did is read from the fake Discord. */
+async function bot() {
+  const dir = join(dataDir, "bot");
+  const codes = { read: code(), sent: code(), file: code(), written: code() };
+  const FILE = `smoke-${RUN}-bot.txt`, WRITTEN = `smoke-${RUN}-bot-written.txt`;
+  const at = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
+  const author = { id: DISCORD.user, username: "smoke", bot: false };
+  const messages: Json[] = [
+    { id: DISCORD.newest, channel_id: DISCORD.channel, content: codes.read, author, timestamp: at(1), attachments: [], embeds: [] },
+    { id: "900000000000000012", channel_id: DISCORD.channel, content: "second", author, timestamp: at(2), attachments: [], embeds: [] },
+    { id: "900000000000000011", channel_id: DISCORD.channel, content: "first", author, timestamp: at(3), attachments: [], embeds: [] },
+  ];
+
+  // While this part runs, the global `fetch` reaches nothing. The bot's API
+  // client was handed `counted`; whatever else asks for the network (a tool
+  // that downloads a URL, an integration that was not switched off) is
+  // refused here and counted by host.
+  const blocked = new Map<string, number>();
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    bump(blocked, URL.canParse(url) ? new URL(url).host : "?");
+    throw new TypeError("The smoke script's bot reaches no host but the API.");
+  }) as unknown as typeof fetch;
+
+  const hibana = new Hibana(botConfig(dir), log, {
+    workspace: { fetch: counted, identity: { prefix: `${APP}-${RUN}`, app: APP } },
+  });
+  const discord = fakeDiscord(hibana, messages);
+  // The Workspace presets are Premium ones.
+  hibana.runtime.snapshot.user_roles[DISCORD.user] = "premium";
+  // A Workspace turn asks the session, never the Messages API.
+  let modelRequests = 0;
+  hibana.llm.complete = (async () => {
+    modelRequests++;
+    throw new Error("a Workspace turn must not use the LLM client");
+  }) as typeof hibana.llm.complete;
+  hibana.tools.web.remote = (async () => ({ tools: [] })) as never;
+  // Every custom tool call the registry was asked to run, and how it went.
+  const ran: { name: string; ok: boolean; error?: string }[] = [];
+  const execute = hibana.tools.execute.bind(hibana.tools);
+  hibana.tools.execute = (async (name: string, args: Json, toolCtx: Context) => {
+    try {
+      const result = await execute(name, args, toolCtx);
+      ran.push({ name, ok: !(result instanceof ToolOutput && result.options.isError) });
+      return result;
+    } catch (error) {
+      ran.push({ name, ok: false, error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+  }) as typeof hibana.tools.execute;
+
+  let turns = 0;
+  /** One message of the person in the channel, through `Hibana.respond`. */
+  const say = async (text: string) => {
+    const from = { ran: ran.length, rest: discord.rest.length, tools: wire.tools.length, results: wire.results.length };
+    const messageId = String(BigInt(DISCORD.newest) + BigInt(100 + ++turns));
+    const reply = await hibana.respond(
+      `${text}\n\n[author: smoke; user_id: ${DISCORD.user}; channel_id: ${DISCORD.channel}; message_id: ${messageId}]`,
+      { guildId: DISCORD.guild, channelId: DISCORD.channel, userId: DISCORD.user, botId: DISCORD.bot, messageId, thread: false, depth: 0, delivered: false },
+    );
+    return {
+      reply, ran: ran.slice(from.ran), rest: discord.rest.slice(from.rest),
+      builtins: wire.tools.slice(from.tools), results: wire.results.slice(from.results),
+    };
+  };
+  type Said = Awaited<ReturnType<typeof say>>;
+  const ranText = (turn: Said) => turn.ran.map((call) => `${printable(call.name, 40)} ${call.ok ? "ran" : `failed (${printable(call.error, 120)})`}`).join(", ") || "no custom tool call";
+  const ok = (turn: Said, ...names: string[]) => names.every((name) => turn.ran.some((call) => call.name === name && call.ok));
+  const ended = (turn: Said) => (limited(turn.reply) ? "the bot refused the turn at its own limit" : `a reply of ${turn.reply.length} characters`);
+
+  try {
+    hibana.conversations.open();
+    await hibana.workspace.load();
+
+    // 1. A reply, and the session the bot created for it.
+    await attempt("the bot's turn", async () => {
+      const turn = await say("Reply with the single word: ready");
+      step("the bot's turn", turn.reply.length > 0 && !limited(turn.reply), `${ended(turn)}, ${discord.shown.length} message text(s) shown in the channel`);
+    });
+    const row = hibana.workspace.sessions.get(DISCORD.channel);
+    if (!row) return step("the bot's session", false, "the bot has no session for the channel");
+    made.sessions.set(row.sessionId, "the bot's");
+    console.log(`created session ${row.sessionId} (the bot's)`);
+    await attempt("the bot's session", async () => {
+      const session = await client.beta.sessions.retrieve(row.sessionId, {}, abortable);
+      track(session.environment_id, session.agent.id, "plain");
+      const { model } = session.agent;
+      const offered = hibana.tools.workspaceTools({ ...ctx, guildId: DISCORD.guild, channelId: DISCORD.channel }).length;
+      const kept = session.agent.tools.filter((tool) => tool.type === "custom").length;
+      step("the bot's session",
+        (model.id === MODEL || model.id.startsWith(`${MODEL}-`)) && model.effort?.type === "medium" && kept === offered && session.metadata?.app === APP,
+        `model ${printable(model.id, 48)} at effort ${model.effort?.type ?? "unset"}, ${kept} of ${offered} custom tools, ` +
+        `a budget of ${cents(session.budget?.max_list_cost) ?? "none"} cents after the turn, labelled ${printable(session.metadata?.app, 32) || "nothing"}`);
+    });
+
+    // 2. Two tools that only read, asked for together.
+    await attempt("reading Discord and the settings", async () => {
+      const turn = await say(
+        "Call the read_messages tool with limit 3 for this channel, and the get_bot_settings tool. " +
+        "Then reply with only the content of the newest message that read_messages returned.");
+      const read = turn.rest.find((call) => call.method === "get" && call.path === `/channels/${DISCORD.channel}/messages`);
+      step("reading Discord and the settings", ok(turn, "read_messages", "get_bot_settings") && read?.query === "limit=3" && turn.reply.includes(codes.read),
+        `${ranText(turn)}; read_messages asked Discord for ${read ? printable(read.query, 40) || "no limit" : "nothing"}; ` +
+        `the reply ${turn.reply.includes(codes.read) ? "has" : "does not have"} the newest message's content`);
+    });
+
+    // 3. Two tools that change something, one after the other.
+    await attempt("posting and reacting", async () => {
+      const turn = await say(
+        `Call the send_message tool with the content ${codes.sent} for this channel. When it has returned, call the add_reaction tool ` +
+        `for this channel with message_id ${DISCORD.newest} and the emoji 👍. Then reply with the single word: posted`);
+      const post = turn.rest.findIndex((call) => call.method === "post" && call.path === `/channels/${DISCORD.channel}/messages` && !call.files.length);
+      const react = turn.rest.findIndex((call) => call.method === "put" && call.path.startsWith(`/channels/${DISCORD.channel}/messages/${DISCORD.newest}/reactions/`));
+      const body = turn.rest[post]?.body;
+      const quiet = JSON.stringify(body?.allowed_mentions) === '{"parse":[]}';
+      const emoji = decodeURIComponent(turn.rest[react]?.path.split("/").at(-2) ?? "");
+      step("posting and reacting",
+        ok(turn, "send_message", "add_reaction") && body?.content === codes.sent && quiet && post >= 0 && post < react && emoji === "👍",
+        `${ranText(turn)}; send_message ${post < 0 ? "posted nothing"
+          : `posted ${body?.content === codes.sent ? "the content asked for" : "another content"}, with mentions ${quiet ? "switched off" : "left on"}`}; ` +
+        `add_reaction ${react < 0 ? "sent nothing" : `put ${emoji === "👍" ? "the emoji asked for" : "another emoji"} ${post < react ? "after" : "before"} the post`}`);
+    });
+
+    // 4. A file from the container to the channel: the session's shell, then
+    // the bot's own send_file, which finds the file through the Files API.
+    await attempt("send_file from the container", async () => {
+      const turn = await say(
+        `Do these three things in order. First, with the bash tool, run: printf '%s' '${codes.file}' > ${out(FILE)}\n` +
+        `Second, call the send_file tool with path ${out(FILE)}\n` +
+        "Third, reply with only the message_id from that tool's result.");
+      const posted = turn.rest.find((call) => call.method === "post" && call.files.length);
+      const file = posted?.files[0];
+      step("send_file from the container",
+        ok(turn, "send_file") && turn.builtins.includes("bash") && file?.name === FILE && file.data.toString() === codes.file && turn.reply.includes(DISCORD.posted),
+        `${ranText(turn)}; built-in calls: ${turn.builtins.map((name) => printable(name, 24)).join(", ") || "none"}; ` +
+        (file ? `posted ${printable(file.name, 64)} with ${file.data.toString() === codes.file ? "the bytes that were written" : "other bytes"}` : "no file was posted") +
+        `; the reply ${turn.reply.includes(DISCORD.posted) ? "uses" : "does not use"} the result`);
+    });
+
+    // 5. A call the person may not make. The registry refuses it, nothing is
+    // asked of Discord, and the session is told so as a failed result.
+    await attempt("a channel the person cannot read", async () => {
+      const turn = await say(
+        `Call the read_messages tool with channel_id ${DISCORD.hidden} and limit 1. ` +
+        "If the tool returns an error, reply with the single word REFUSED. If it returns messages, reply with the single word READ.");
+      const call = turn.ran.find((c) => c.name === "read_messages");
+      const asked = turn.rest.some((c) => c.path.startsWith(`/channels/${DISCORD.hidden}`));
+      const told = turn.results.some((result) => result.error && result.accepted);
+      step("a channel the person cannot read", !!call && !call.ok && !asked && told && /REFUSED/.test(turn.reply),
+        `${ranText(turn)}; Discord was ${asked ? "" : "not "}asked about the channel; a failed result was ${told ? "sent and accepted" : "not sent"}; ` +
+        `the reply ${/REFUSED/.test(turn.reply) ? "says it was refused" : "does not say it was refused"}`);
+    });
+
+    // 6. The container's other tools, which never come to the bot.
+    await attempt("the container's file and web tools", async () => {
+      const page = "https://example.com/";
+      const turn = await say(
+        `Use the write tool to create the file ${out(WRITTEN)} with exactly this content: ${codes.written}\n` +
+        "Then use the read tool to read that file back." +
+        (web ? ` Then use the web_fetch tool on ${page}\nReply with two things on one line: what the read tool returned, and the title of that page.`
+          : "\nReply with only what the read tool returned."));
+      const used = new Map<string, number>();
+      for (const name of turn.builtins) bump(used, name);
+      const fetched = !web || (turn.builtins.includes("web_fetch") && /example domain/i.test(turn.reply));
+      step("the container's file and web tools",
+        turn.builtins.includes("write") && turn.builtins.includes("read") && turn.reply.includes(codes.written) && fetched && !turn.ran.length,
+        `called ${tally(used)}; ${turn.ran.length} call(s) came to the bot; the reply ${turn.reply.includes(codes.written) ? "has" : "does not have"} the file's content` +
+        (web ? ` and ${/example domain/i.test(turn.reply) ? "has" : "does not have"} the page's title` : "; web tools are switched off here"));
+    });
+
+    // What the bot's ledger holds against its limits, next to what the
+    // session itself reports. The ledger may count more, never less.
+    await attempt("the bot's ledger", async () => {
+      const own = sessionTotals((await client.beta.sessions.retrieve(row.sessionId, {}, abortable)).usage);
+      const day = hibana.workspace.usage.limitCents("day");
+      const line = hibana.workspace.usageLine();
+      step("the bot's ledger", own.cost && day >= own.totals.list_cost_cents && !!line,
+        `the session reports ${own.cost ? `a list cost of ${own.totals.list_cost_cents} cents` : "no list cost"} after ${turns} turn(s); ` +
+        `the bot holds ${day} cents against the day's limit of ${budgetCents}; /usage ${line ? "has a line for the Workspace" : "has no line"}`);
+    });
+    step("the bot's Messages API client", modelRequests === 0, `${modelRequests} request(s) were tried through it`);
+
+    // 7. `/clear`: the conversation ends, and the bot removes its session.
+    await attempt("the bot removes a cleared conversation's session", async () => {
+      hibana.history.clear(DISCORD.channel);
+      await hibana.workspace.sweep();
+      let status: number | undefined, archived = false;
+      try {
+        archived = !!(await client.beta.sessions.retrieve(row.sessionId, {}, abortable)).archived_at;
+      } catch (error) {
+        if (!(error instanceof APIError) || !error.status) throw error;
+        status = error.status;
+      }
+      if (status === 404) made.sessions.delete(row.sessionId);
+      step("the bot removes a cleared conversation's session", status === 404 && !hibana.workspace.sessions.get(DISCORD.channel),
+        status === 404 ? "deleted: the session is gone from the API and from the bot's table"
+          : status ? `the session could not be read (HTTP ${status})` : `the session is still there${archived ? ", archived" : ""}`);
+    });
+  } finally {
+    await hibana.close().catch(() => {});
+    globalThis.fetch = network;
+    // Replies and status lines alike: what a person would have seen.
+    note("what the bot showed in the channel", `${discord.shown.length} message text(s) over ${turns} turn(s), ${discord.shown.filter((text) => !text.trim()).length} of them empty`);
+    if (blocked.size) note("requests the bot's part refused", tally(blocked));
+  }
+}
+
 // ── Putting everything away ───────────────────────────────────────────────
 
 /** `--cleanup`: what earlier runs left behind, found by its metadata.
@@ -1151,8 +1498,9 @@ async function cleanup() {
 try {
   if (option("--cleanup")) await leftovers();
   else {
-    await plain();
+    if (!option("--bot-only")) await plain();
     if (option("--ultra")) await ultra();
+    if (option("--bot") || option("--bot-only")) await bot();
   }
 } catch (error) {
   step("run", false, stop.signal.aborted ? "stopped by a signal" : describe(error));
@@ -1162,7 +1510,7 @@ try {
 }
 const frames = [...wire.frames.values()].reduce((sum, n) => sum + n, 0);
 if (frames || wire.comments)
-  note("the event stream", `${frames} frames with an SSE event name (${tally(wire.frames)}), ${wire.comments} comment line(s)`);
+  note("the event stream", `${frames} frames with an SSE event name (${tally(wire.frames)}), ${wire.comments} comment line(s); events by their type: ${tally(wire.events)}`);
 const failures = steps.filter((s) => !s.ok).length;
 console.log(`${wire.requests} requests, ${steps.length - failures}/${steps.length} steps passed`);
 process.exit(failures ? 1 : 0);

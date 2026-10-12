@@ -121,8 +121,9 @@ export class Hibana {
   constructor(
     readonly config: Config,
     private log: Logger,
-    /** Tests reach the Workspace API through their own `fetch`. */
-    options: { workspace?: Pick<WorkspaceDeps, "fetch" | "now" | "sleep" | "limits"> } = {},
+    /** Tests reach the Workspace API through their own `fetch`; the smoke
+     *  script names what its bot creates (`identity`). */
+    options: { workspace?: Pick<WorkspaceDeps, "fetch" | "now" | "sleep" | "limits" | "identity"> } = {},
   ) {
     this.client = new Client({
       intents: [

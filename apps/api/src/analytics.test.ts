@@ -29,7 +29,7 @@ function upstream(pages: (object | Response)[]) {
 }
 
 describe("summarize", () => {
-  test("the daily guideline is the budget over the month's days", () => {
+  test("the daily guideline is the budget over the billing month's days", () => {
     const now = at("2027-01-01T00:00:00Z");
     expect(MONTHLY_BUDGET_USD).toBe(200);
     expect(summarize("2026-10", new Map(), now, now).daily_guideline_usd).toBeCloseTo(200 / 31, 10);
@@ -40,12 +40,12 @@ describe("summarize", () => {
   });
 
   test("a day is over only when it is strictly above the guideline", () => {
-    const now = at("2026-10-01T00:00:00Z");
+    const now = at("2026-10-05T00:00:00Z");
     const guideline = 200 / 30;
     const costs = new Map([
-      ["2026-09-01", guideline],
-      ["2026-09-02", guideline + 0.01],
-      ["2026-09-03", 0],
+      ["2026-09-05", guideline],
+      ["2026-09-06", guideline + 0.01],
+      ["2026-09-07", 0],
     ]);
     const { days } = summarize("2026-09", costs, now, now);
     expect(days.slice(0, 3).map((d) => d.over)).toEqual([false, true, false]);
@@ -54,39 +54,70 @@ describe("summarize", () => {
   test("a running month lists the days that have ended and what is left of the budget", () => {
     const now = at("2026-10-09T03:00:00Z");
     const costs = new Map([
-      ["2026-10-01", 10],
-      ["2026-10-02", 2.5],
+      // The 4th is the last day of the billing month before; it is not counted here.
+      ["2026-10-04", 99],
+      ["2026-10-05", 10],
+      ["2026-10-06", 2.5],
       ["2026-10-08", 1.25],
     ]);
     const m = summarize("2026-10", costs, now, now);
     expect(m.current).toBe(true);
     expect(m.today).toBe("2026-10-09");
-    expect(m.days.map((d) => d.date)).toEqual([
-      "2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04",
-      "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08",
-    ]);
+    expect(m.days.map((d) => d.date)).toEqual(["2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08"]);
     expect(m.spent_usd).toBeCloseTo(13.75, 10);
     expect(m.remaining_usd).toBeCloseTo(186.25, 10);
-    expect(m.pace_usd).toBeCloseTo((200 / 31) * 8, 10);
-    // 9th through 31st: today is still ahead, since it has no figure yet.
-    expect(m.days_left).toBe(23);
+    expect(m.pace_usd).toBeCloseTo((200 / 31) * 4, 10);
+    // 9 October through 4 November: today is still ahead, since it has no figure yet.
+    expect(m.days_left).toBe(27);
+  });
+
+  test("the 1st to the 4th belong to the billing month that began on the 5th before", () => {
+    const now = at("2026-11-03T03:00:00Z");
+    const costs = new Map([
+      ["2026-10-05", 1],
+      ["2026-11-01", 2],
+      ["2026-11-02", 4],
+    ]);
+    const m = summarize("2026-10", costs, now, now);
+    expect(m.current).toBe(true);
+    expect(m.days_in_month).toBe(31);
+    expect(m.days).toHaveLength(29);
+    expect(m.days[0].date).toBe("2026-10-05");
+    expect(m.days.at(-1)?.date).toBe("2026-11-02");
+    expect(m.spent_usd).toBeCloseTo(7, 10);
+    // 3 and 4 November.
+    expect(m.days_left).toBe(2);
+  });
+
+  test("a billing month that starts in December ends on 4 January", () => {
+    const now = at("2027-01-05T00:00:00Z");
+    const m = summarize("2026-12", new Map([["2027-01-04", 3]]), now, now);
+    expect(m.current).toBe(false);
+    expect(m.days).toHaveLength(31);
+    expect(m.days[0].date).toBe("2026-12-05");
+    expect(m.days.at(-1)).toEqual({ date: "2027-01-04", cost_usd: 3, over: false });
   });
 
   test("a day the report did not return is unknown, not zero", () => {
-    const now = at("2026-10-03T12:00:00Z");
-    const m = summarize("2026-10", new Map([["2026-10-01", 0]]), now, now);
+    const now = at("2026-10-07T12:00:00Z");
+    const m = summarize("2026-10", new Map([["2026-10-05", 0]]), now, now);
     expect(m.days).toEqual([
-      { date: "2026-10-01", cost_usd: 0, over: false },
-      { date: "2026-10-02", cost_usd: null, over: false },
+      { date: "2026-10-05", cost_usd: 0, over: false },
+      { date: "2026-10-06", cost_usd: null, over: false },
     ]);
   });
 
   test("a past month is complete and can end over budget", () => {
     const now = at("2026-10-09T00:00:00Z");
-    const costs = new Map(Array.from({ length: 30 }, (_, i) => [`2026-09-${String(i + 1).padStart(2, "0")}`, 7] as const));
+    // 5 September to 4 October.
+    const first = at("2026-09-05T00:00:00Z");
+    const costs = new Map(
+      Array.from({ length: 30 }, (_, i) => [new Date(first + i * 86_400_000).toISOString().slice(0, 10), 7] as const),
+    );
     const m = summarize("2026-09", costs, now, now);
     expect(m.current).toBe(false);
     expect(m.days).toHaveLength(30);
+    expect(m.days.at(-1)?.date).toBe("2026-10-04");
     expect(m.days.every((d) => d.over)).toBe(true);
     expect(m.spent_usd).toBeCloseTo(210, 10);
     expect(m.remaining_usd).toBeCloseTo(-10, 10);
@@ -97,11 +128,18 @@ describe("summarize", () => {
 
 describe("parseMonth", () => {
   const now = at("2026-10-09T03:00:00Z");
-  test("defaults to the current UTC month", () => {
+  test("defaults to the current billing month, which starts on the 5th in UTC", () => {
     expect(parseMonth(undefined, now)).toBe("2026-10");
     expect(parseMonth("", now)).toBe("2026-10");
-    // 08:59 JST on the 1st is still the previous month in UTC.
-    expect(parseMonth(undefined, at("2026-09-30T23:59:00Z"))).toBe("2026-09");
+    // 08:59 JST on the 5th is still the 4th in UTC: the billing month before.
+    expect(parseMonth(undefined, at("2026-10-04T23:59:59Z"))).toBe("2026-09");
+    expect(parseMonth(undefined, at("2026-10-05T00:00:00Z"))).toBe("2026-10");
+    expect(parseMonth(undefined, at("2027-01-03T00:00:00Z"))).toBe("2026-12");
+  });
+  test("a month whose 5th has not come yet has not started", () => {
+    const fourth = at("2026-10-04T12:00:00Z");
+    expect(parseMonth("2026-10", fourth)).toBeNull();
+    expect(parseMonth("2026-09", fourth)).toBe("2026-09");
   });
   test("accepts a past or current month and nothing else", () => {
     expect(parseMonth("2026-10", now)).toBe("2026-10");
@@ -116,12 +154,13 @@ describe("CostReport", () => {
     const { calls, fetcher } = upstream([
       {
         data: [
-          bucket("2026-09-01", ["123.45"]),
+          bucket("2026-09-05", ["123.45"]),
           // Grouped reports return several items for a day; they add up.
-          bucket("2026-09-02", ["1000", "250.5"]),
-          bucket("2026-09-03", []),
-          // Not part of the month that was asked for.
-          bucket("2026-10-01", ["99999"]),
+          bucket("2026-09-06", ["1000", "250.5"]),
+          bucket("2026-09-07", []),
+          // Not part of the billing month that was asked for: the day before it and the day after.
+          bucket("2026-09-04", ["99999"]),
+          bucket("2026-10-05", ["99999"]),
         ],
         has_more: false,
         next_page: null,
@@ -134,31 +173,32 @@ describe("CostReport", () => {
     const { url, headers } = calls[0];
     expect(url.origin + url.pathname).toBe("https://api.anthropic.com/v1/organizations/cost_report");
     expect(Object.fromEntries(url.searchParams)).toEqual({
-      starting_at: "2026-09-01T00:00:00Z",
-      ending_at: "2026-10-01T00:00:00Z",
+      starting_at: "2026-09-05T00:00:00Z",
+      ending_at: "2026-10-05T00:00:00Z",
       bucket_width: "1d",
       limit: "31",
     });
     expect(headers.get("x-api-key")).toBe(ADMIN_KEY);
     expect(headers.get("anthropic-version")).toBe("2023-06-01");
 
-    expect(m.days[0]).toEqual({ date: "2026-09-01", cost_usd: 1.2345, over: false });
-    expect(m.days[1]).toEqual({ date: "2026-09-02", cost_usd: 12.505, over: true });
-    expect(m.days[2]).toEqual({ date: "2026-09-03", cost_usd: 0, over: false });
+    expect(m.days[0]).toEqual({ date: "2026-09-05", cost_usd: 1.2345, over: false });
+    expect(m.days[1]).toEqual({ date: "2026-09-06", cost_usd: 12.505, over: true });
+    expect(m.days[2]).toEqual({ date: "2026-09-07", cost_usd: 0, over: false });
     expect(m.days[3].cost_usd).toBeNull();
     expect(m.spent_usd).toBeCloseTo(13.7395, 10);
   });
 
-  test("December ends at the next year's January", async () => {
+  test("December's billing month ends at the next year's 5 January", async () => {
     const { calls, fetcher } = upstream([{ data: [], has_more: false, next_page: null }]);
     await new CostReport(ADMIN_KEY, fetcher, () => at("2026-10-09T00:00:00Z")).month("2025-12");
-    expect(calls[0].url.searchParams.get("ending_at")).toBe("2026-01-01T00:00:00Z");
+    expect(calls[0].url.searchParams.get("starting_at")).toBe("2025-12-05T00:00:00Z");
+    expect(calls[0].url.searchParams.get("ending_at")).toBe("2026-01-05T00:00:00Z");
   });
 
   test("follows next_page until the report is complete", async () => {
     const { calls, fetcher } = upstream([
-      { data: [bucket("2026-09-01", ["100"])], has_more: true, next_page: "page_2" },
-      { data: [bucket("2026-09-02", ["200"])], has_more: false, next_page: null },
+      { data: [bucket("2026-09-05", ["100"])], has_more: true, next_page: "page_2" },
+      { data: [bucket("2026-09-06", ["200"])], has_more: false, next_page: null },
     ]);
     const m = await new CostReport(ADMIN_KEY, fetcher, () => at("2026-10-09T00:00:00Z")).month("2026-09");
     expect(calls.map((c) => c.url.searchParams.get("page"))).toEqual([null, "page_2"]);
@@ -175,8 +215,8 @@ describe("CostReport", () => {
   test("serves a month from cache for a minute, then asks again", async () => {
     let now = at("2026-10-09T00:00:00Z");
     const { calls, fetcher } = upstream([
-      { data: [bucket("2026-09-01", ["100"])], has_more: false, next_page: null },
-      { data: [bucket("2026-09-01", ["900"])], has_more: false, next_page: null },
+      { data: [bucket("2026-09-05", ["100"])], has_more: false, next_page: null },
+      { data: [bucket("2026-09-05", ["900"])], has_more: false, next_page: null },
     ]);
     const report = new CostReport(ADMIN_KEY, fetcher, () => now);
     const [a, b] = await Promise.all([report.month("2026-09"), report.month("2026-09")]);
@@ -198,7 +238,7 @@ describe("CostReport", () => {
   test("a failure is not cached", async () => {
     const { calls, fetcher } = upstream([
       new Response("{}", { status: 500 }),
-      { data: [bucket("2026-09-01", ["100"])], has_more: false, next_page: null },
+      { data: [bucket("2026-09-05", ["100"])], has_more: false, next_page: null },
     ]);
     const report = new CostReport(ADMIN_KEY, fetcher, () => at("2026-10-09T00:00:00Z"));
     await expect(report.month("2026-09")).rejects.toThrow("HTTP 500");
@@ -232,10 +272,10 @@ describe("CostReport", () => {
 
   test("refuses to sum what it cannot read as dollars", async () => {
     const pages = [
-      { data: [bucket("2026-09-01", ["100"], "EUR")], has_more: false, next_page: null },
-      { data: [bucket("2026-09-01", ["abc"])], has_more: false, next_page: null },
-      { data: [{ starting_at: "2026-09-01T00:00:00Z", results: [{ amount: 100, currency: "USD" }] }], has_more: false },
-      { data: [{ starting_at: "2026-09-01T00:00:00Z" }], has_more: false },
+      { data: [bucket("2026-09-05", ["100"], "EUR")], has_more: false, next_page: null },
+      { data: [bucket("2026-09-05", ["abc"])], has_more: false, next_page: null },
+      { data: [{ starting_at: "2026-09-05T00:00:00Z", results: [{ amount: 100, currency: "USD" }] }], has_more: false },
+      { data: [{ starting_at: "2026-09-05T00:00:00Z" }], has_more: false },
       { results: [] },
       [],
     ];
@@ -286,31 +326,28 @@ describe("the report as Anthropic answers it", () => {
     const { calls, fetcher } = realReport(now, { "2026-10-08": "40.922816" });
     const m = await new CostReport(ADMIN_KEY, fetcher, () => now).month("2026-10");
     expect(m.today).toBe("2026-10-09");
-    expect(m.days.map((d) => d.date)).toEqual([
-      "2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04",
-      "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08",
-    ]);
+    expect(m.days.map((d) => d.date)).toEqual(["2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08"]);
     // Every listed day has a figure; none is waiting on a day that is still running.
     expect(m.days.every((d) => d.cost_usd !== null)).toBe(true);
     expect(m.days.at(-1)?.cost_usd).toBeCloseTo(0.40922816, 10);
     expect(m.spent_usd).toBeCloseTo(0.40922816, 10);
-    expect(m.pace_usd).toBeCloseTo((200 / 31) * 8, 10);
-    // The 9th is not counted yet, so it is still ahead: 9th to 31st.
-    expect(m.days_left).toBe(23);
+    expect(m.pace_usd).toBeCloseTo((200 / 31) * 4, 10);
+    // The 9th is not counted yet, so it is still ahead: 9 October to 4 November.
+    expect(m.days_left).toBe(27);
     // Only finished days are asked for.
     expect(calls).toHaveLength(1);
-    expect(calls[0].searchParams.get("starting_at")).toBe("2026-10-01T00:00:00Z");
+    expect(calls[0].searchParams.get("starting_at")).toBe("2026-10-05T00:00:00Z");
     expect(calls[0].searchParams.get("ending_at")).toBe("2026-10-09T00:00:00Z");
   });
 
-  test("on the first day of a month nothing has finished: an empty month and no request", async () => {
-    const now = at("2026-10-01T03:00:00Z");
+  test("on the first day of a billing month nothing has finished: an empty month and no request", async () => {
+    const now = at("2026-10-05T03:00:00Z");
     const { calls, fetcher } = realReport(now, {});
     const m = await new CostReport(ADMIN_KEY, fetcher, () => now).month("2026-10");
     expect(calls).toHaveLength(0);
     expect(m).toMatchObject({
       current: true,
-      today: "2026-10-01",
+      today: "2026-10-05",
       days: [],
       spent_usd: 0,
       remaining_usd: 200,
@@ -321,12 +358,26 @@ describe("the report as Anthropic answers it", () => {
 
   test("a finished month is unchanged: every day of it", async () => {
     const now = at("2026-10-09T14:24:00Z");
-    const { calls, fetcher } = realReport(now, { "2026-09-30": "700" });
+    const { calls, fetcher } = realReport(now, { "2026-10-04": "700" });
     const m = await new CostReport(ADMIN_KEY, fetcher, () => now).month("2026-09");
     expect(m.days).toHaveLength(30);
-    expect(m.days.at(-1)).toEqual({ date: "2026-09-30", cost_usd: 7, over: true });
+    expect(m.days.at(-1)).toEqual({ date: "2026-10-04", cost_usd: 7, over: true });
     expect(m.days_left).toBe(0);
-    expect(calls[0].searchParams.get("ending_at")).toBe("2026-10-01T00:00:00Z");
+    expect(calls[0].searchParams.get("starting_at")).toBe("2026-09-05T00:00:00Z");
+    expect(calls[0].searchParams.get("ending_at")).toBe("2026-10-05T00:00:00Z");
+  });
+
+  test("early in a calendar month the running billing month reaches back to the 5th before", async () => {
+    const now = at("2026-11-03T10:00:00Z");
+    const { calls, fetcher } = realReport(now, { "2026-10-31": "100", "2026-11-02": "250" });
+    const m = await new CostReport(ADMIN_KEY, fetcher, () => now).month("2026-10");
+    expect(m.current).toBe(true);
+    expect(m.days).toHaveLength(29);
+    expect(m.days.every((d) => d.cost_usd !== null)).toBe(true);
+    expect(m.spent_usd).toBeCloseTo(3.5, 10);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].searchParams.get("starting_at")).toBe("2026-10-05T00:00:00Z");
+    expect(calls[0].searchParams.get("ending_at")).toBe("2026-11-03T00:00:00Z");
   });
 });
 
@@ -356,7 +407,7 @@ describe("GET /api/analytics/cost", () => {
     return { get, calls: api.calls };
   }
 
-  const september = { data: [bucket("2026-09-01", ["700"]), bucket("2026-09-02", ["100"])], has_more: false, next_page: null };
+  const september = { data: [bucket("2026-09-05", ["700"]), bucket("2026-09-06", ["100"])], has_more: false, next_page: null };
 
   test("only the administrator may read it", async () => {
     const { get, calls } = await setup(ADMIN_KEY, [september]);
@@ -378,8 +429,8 @@ describe("GET /api/analytics/cost", () => {
       spent_usd: 8,
       remaining_usd: 192,
     });
-    expect(body.days[0]).toEqual({ date: "2026-09-01", cost_usd: 7, over: true });
-    expect(body.days[1]).toEqual({ date: "2026-09-02", cost_usd: 1, over: false });
+    expect(body.days[0]).toEqual({ date: "2026-09-05", cost_usd: 7, over: true });
+    expect(body.days[1]).toEqual({ date: "2026-09-06", cost_usd: 1, over: false });
     expect(JSON.stringify(body)).not.toContain(ADMIN_KEY);
   });
 
@@ -399,19 +450,19 @@ describe("GET /api/analytics/cost", () => {
     expect(calls).toHaveLength(0);
   });
 
-  test("defaults to the current UTC month", async () => {
+  test("defaults to the current billing month", async () => {
     const { get, calls } = await setup(ADMIN_KEY, [{ data: [bucket("2026-10-08", ["50"])], has_more: false, next_page: null }]);
     const body = await (await get("/api/analytics/cost", "admin-1")).json();
-    expect(body).toMatchObject({ month: "2026-10", current: true, today: "2026-10-09", days_left: 23 });
-    expect(body.days).toHaveLength(8);
+    expect(body).toMatchObject({ month: "2026-10", current: true, today: "2026-10-09", days_left: 27 });
+    expect(body.days).toHaveLength(4);
     expect(body.days.at(-1)).toEqual({ date: "2026-10-08", cost_usd: 0.5, over: false });
-    expect(calls[0].url.searchParams.get("starting_at")).toBe("2026-10-01T00:00:00Z");
+    expect(calls[0].url.searchParams.get("starting_at")).toBe("2026-10-05T00:00:00Z");
     expect(calls[0].url.searchParams.get("ending_at")).toBe("2026-10-09T00:00:00Z");
   });
 
   test("rejects a malformed or future month before calling Anthropic", async () => {
     const { get, calls } = await setup(ADMIN_KEY, [september]);
-    for (const month of ["2026-11", "202609", "2026-09-01", "next"]) {
+    for (const month of ["2026-11", "202609", "2026-09-05", "next"]) {
       const res = await get(`/api/analytics/cost?month=${month}`, "admin-1");
       expect(res.status).toBe(400);
     }

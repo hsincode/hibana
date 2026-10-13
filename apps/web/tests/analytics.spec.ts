@@ -5,10 +5,13 @@ import { expect, test, type Page } from "@playwright/test";
 // that response shape so the labels can be checked against known numbers.
 const BUDGET = 200;
 
+// A billing month runs from the 5th to the 4th of the next month (#81), so
+// the first cost is the 5th's.
 function monthFixture(month: string, daysInMonth: number, costs: (number | null)[], current: boolean) {
   const guideline = BUDGET / daysInMonth;
+  const first = Date.parse(`${month}-05T00:00:00Z`);
   const days = costs.map((cost, i) => ({
-    date: `${month}-${String(i + 1).padStart(2, "0")}`,
+    date: new Date(first + i * 86_400_000).toISOString().slice(0, 10),
     cost_usd: cost,
     over: cost !== null && cost > guideline,
   }));
@@ -17,7 +20,7 @@ function monthFixture(month: string, daysInMonth: number, costs: (number | null)
     configured: true,
     month,
     current,
-    today: "2026-10-09",
+    today: "2026-10-13",
     monthly_budget_usd: BUDGET,
     days_in_month: daysInMonth,
     daily_guideline_usd: guideline,
@@ -26,16 +29,16 @@ function monthFixture(month: string, daysInMonth: number, costs: (number | null)
     remaining_usd: BUDGET - spent,
     pace_usd: guideline * days.length,
     days_left: current ? daysInMonth - days.length : 0,
-    fetched_at: Date.parse("2026-10-09T03:00:00Z"),
+    fetched_at: Date.parse("2026-10-13T03:00:00Z"),
   };
 }
 
-// The cost report only has days that have ended, so on 9 October the month
-// runs to the 8th: three days above $6.45, five at or below it.
+// The cost report only has days that have ended, so on 13 October the billing
+// month runs from the 5th to the 12th: three days above $6.45, five at or below it.
 const october = monthFixture("2026-10", 31, [4.2, 7.9, 6.1, 0, 12.34, 3.3, 6.45, 8], true);
-// The first day of a month: nothing has ended yet.
+// The first day of a billing month (the 5th): nothing has ended yet.
 const firstDay = monthFixture("2026-10", 31, [], true);
-// A finished month that ran over the budget: 30 days at $3–$11.
+// A finished billing month (5 September to 4 October) that ran over the budget: 30 days at $3–$11.
 const september = monthFixture("2026-09", 30, Array.from({ length: 30 }, (_, i) => 3 + ((i * 7) % 9)), false);
 
 type CostReply = { status?: number; json: unknown };
@@ -71,8 +74,8 @@ async function mockApi(page: Page, cost: (month: string | null) => CostReply, ca
 const byMonth = (month: string | null): CostReply => ({ json: month === "2026-09" ? september : october });
 
 test.beforeEach(async ({ page }) => {
-  // "次の月" is disabled from the browser's UTC month, so pin the clock.
-  await page.clock.install({ time: new Date("2026-10-09T03:00:00Z") });
+  // "次の月" is disabled from the browser's billing month, so pin the clock.
+  await page.clock.install({ time: new Date("2026-10-13T03:00:00Z") });
 });
 
 for (const width of [1440, 390]) {
@@ -83,6 +86,8 @@ for (const width of [1440, 390]) {
 
     await expect(page.getByRole("heading", { name: "利用料", level: 1 })).toBeVisible();
     await expect(page.getByRole("group", { name: "表示する月" })).toContainText("2026年10月");
+    // The billing month is shown as dates too: it is not the calendar month.
+    await expect(page.getByRole("group", { name: "表示する月" })).toContainText("10/5〜11/4");
     await expect(page.getByRole("button", { name: "次の月" })).toBeDisabled();
 
     // $200 − $48.29, and the guideline $200 ÷ 31.
@@ -90,12 +95,12 @@ for (const width of [1440, 390]) {
     const stat = (label: string) =>
       page.locator(".stat").filter({ has: page.locator(".stat-label", { hasText: label }) });
     await expect(stat("今月の残り")).toContainText("$151.71");
-    await expect(stat("今月の残り")).toContainText("10/8 までの確定分");
+    await expect(stat("今月の残り")).toContainText("10/12 までの確定分");
     await expect(stat("今月の残り")).toContainText("残り 23 日");
     await expect(stat("今月の累計")).toContainText("$48.29");
     await expect(stat("今月の累計")).toContainText("目安以内");
     // The newest figure is yesterday's: the running day is never in the report.
-    await expect(stat("直近の確定日")).toContainText("10/8");
+    await expect(stat("直近の確定日")).toContainText("10/12");
     await expect(stat("直近の確定日")).toContainText("$8.00");
     await expect(stat("直近の確定日")).toContainText("目安超過");
     await expect(stat("1日の目安")).toContainText("$6.45");
@@ -106,8 +111,10 @@ for (const width of [1440, 390]) {
     await expect(rows).toHaveCount(8);
     await expect(rows.filter({ hasText: "目安超過" })).toHaveCount(3);
     await expect(rows.filter({ hasText: "目安以内" })).toHaveCount(5);
-    await expect(rows.first()).toContainText("10/8");
-    // 5 October: $12.34 against $6.45.
+    await expect(rows.first()).toContainText("10/12");
+    // The oldest row is the 5th, the first day of the billing month.
+    await expect(rows.last()).toContainText("10/5");
+    // 9 October: $12.34 against $6.45.
     await expect(rows.nth(3)).toContainText("$12.34");
     await expect(rows.nth(3)).toContainText("+$5.89");
     await expect(rows.nth(3)).toContainText("目安超過");
@@ -117,6 +124,8 @@ for (const width of [1440, 390]) {
 
     await expect(page.locator(".chart-bar")).toHaveCount(7);
     await expect(page.locator(".chart-bar.is-over")).toHaveCount(3);
+    // The axis starts on the 5th and crosses into the next calendar month.
+    await expect(page.locator(".chart svg text.chart-tick", { hasText: "/" })).toHaveText(["10/5", "11/1"]);
 
     // The chart answers to the keyboard as well as the pointer.
     const chart = page.getByRole("group", { name: /日毎の利用料のグラフ/ });
@@ -134,6 +143,8 @@ for (const width of [1440, 390]) {
 
     await page.getByRole("button", { name: "前の月" }).click();
     await expect(page.getByRole("group", { name: "表示する月" })).toContainText("2026年9月");
+    await expect(page.getByRole("group", { name: "表示する月" })).toContainText("9/5〜10/4");
+    await expect(rows.first()).toContainText("10/4");
     await expect(rows).toHaveCount(30);
     await expect(page.getByRole("button", { name: "次の月" })).toBeEnabled();
     // 30 days at $3–$11 come to $210: $10 over the budget.
@@ -157,6 +168,16 @@ test("analytics in the dark theme", async ({ page }) => {
   await page.locator(".chart").hover({ position: { x: 240, y: 100 } });
   await expect(page.locator(".chart-tip")).toBeVisible();
   await page.screenshot({ path: "test-results/analytics-dark.png", fullPage: true });
+});
+
+test("analytics before the 5th still shows the billing month that began the month before", async ({ page }) => {
+  // 4 November is the last day of the billing month that began on 5 October.
+  await page.clock.setSystemTime(new Date("2026-11-04T03:00:00Z"));
+  await mockApi(page, byMonth);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/analytics");
+  await expect(page.getByRole("group", { name: "表示する月" })).toContainText("2026年10月");
+  await expect(page.getByRole("button", { name: "次の月" })).toBeDisabled();
 });
 
 test("analytics on the first day of a month has the budget but no days yet", async ({ page }) => {

@@ -1,4 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { billingBounds, billingMonth } from "@hibana/shared/billing";
 import { api } from "./api";
 import { Alert, Badge, Empty, Icon, Section, Skeleton, useDocumentTitle } from "./ui";
 
@@ -6,6 +7,8 @@ import { Alert, Badge, Empty, Icon, Section, Skeleton, useDocumentTitle } from "
    利用料（Anthropic の cost report）
    金額・目安・超過の判定はすべて API（apps/api/src/analytics.ts）が計算する。
    ここは表示だけ。判定を二重に持つと、画面と API で食い違うため。
+   「月」は、クレジットが付与される 5日から翌月 4日までの期間（#81）。
+   始まる月の名前で呼ぶ。期間の計算は API と同じ packages/shared のものを使う。
    ============================================================ */
 
 type CostDay = { date: string; cost_usd: number | null; over: boolean };
@@ -58,7 +61,18 @@ function shiftMonth(month: string, by: number): string {
   return new Date(Date.UTC(year, mon - 1 + by, 1)).toISOString().slice(0, 7);
 }
 
-const utcMonth = () => new Date().toISOString().slice(0, 7);
+const DAY_MS = 86_400_000;
+const utcMonth = () => billingMonth(new Date().toISOString().slice(0, 10));
+/** 期間の i 日目（0 始まり）の日付。 */
+const dayOf = (month: string, i: number) =>
+  new Date(Date.parse(`${billingBounds(month).start}T00:00:00Z`) + i * DAY_MS).toISOString().slice(0, 10);
+
+/** 期間の最初の日と最後の日。「10/5〜11/4」 */
+function rangeLabel(month: string): string {
+  const { start, end } = billingBounds(month);
+  const last = new Date(Date.parse(`${end}T00:00:00Z`) - DAY_MS).toISOString().slice(0, 10);
+  return `${shortDay(start)}〜${shortDay(last)}`;
+}
 
 /** 目安との差を、色に頼らず文でも言う。 */
 function Verdict({ over }: { over: boolean }) {
@@ -66,7 +80,7 @@ function Verdict({ over }: { over: boolean }) {
 }
 
 export function AnalyticsPage() {
-  // null = 今月。どの月が「今月」かは API が UTC で決める。
+  // null = 今月。どの月が「今月」かは API が UTC で決める（5日より前は、前の月から続く期間）。
   const [month, setMonth] = useState<string | null>(null);
   const [reloads, setReloads] = useState(0);
   const [data, setData] = useState<CostResponse | null>(null);
@@ -108,7 +122,7 @@ export function AnalyticsPage() {
         <p className="lead">
           Anthropic の cost report（請求ベース・組織全体）を表示します。日付は UTC
           区切り（日本時間の 9:00 に切り替わり）で、載るのは終わった日までです。進行中の日のぶんは、次の
-          9:00 を過ぎてから表示されます。
+          9:00 を過ぎてから表示されます。月の集計は、クレジットが付与される毎月5日から翌月4日までです。
         </p>
       </header>
 
@@ -122,7 +136,10 @@ export function AnalyticsPage() {
           >
             <Icon.chevronLeft />
           </button>
-          <strong aria-live="polite">{monthLabel(shown)}</strong>
+          <strong aria-live="polite">
+            {monthLabel(shown)}
+            <small>{rangeLabel(shown)}</small>
+          </strong>
           <button
             type="button"
             className="icon-btn bordered"
@@ -515,11 +532,14 @@ function CostChart({ m }: { m: CostMonth }) {
             <text className="chart-guide-label" x={LEFT + plotW + 8} y={y(guideline)} dy="0.32em">
               目安
             </text>
-            {Array.from({ length: m.days_in_month }, (_, i) => i + 1)
-              .filter((n) => n === 1 || n % 5 === 0)
-              .map((n) => (
-                <text key={n} className="chart-tick" x={center(n - 1)} y={base + 17} textAnchor="middle">
-                  {n}
+            {/* 横軸は 5日から翌月 4日まで。期間の初日と月が変わる 1日には月も書く。
+                30日は、隣の 1日のラベルと当たるので書かない。 */}
+            {Array.from({ length: m.days_in_month }, (_, i) => ({ i, date: dayOf(m.month, i) }))
+              .map(({ i, date }) => ({ i, date, n: Number(date.slice(8, 10)) }))
+              .filter(({ i, n }) => i === 0 || n === 1 || (n % 5 === 0 && n <= 25))
+              .map(({ i, date, n }) => (
+                <text key={date} className="chart-tick" x={center(i)} y={base + 17} textAnchor="middle">
+                  {i === 0 || n === 1 ? shortDay(date) : n}
                 </text>
               ))}
           </svg>

@@ -45,7 +45,7 @@ make sandbox-smoke      # Docker隔離・ファイル操作の確認
 - `/switch`、`/temperature`、`/exa`、`/verify`、`/fast`、`/clear`、`/context`、`/retry`。
 - 会話履歴と Auto Routing の経路は `HIBANA_DATA_DIR/conversations.db`（SQLite）に保存し、bot の再起動（デプロイ）をまたいで続ける。`/clear`・モデルの変更・guild の設定変更で消える（#59、[ADR-0008](docs/adr/0008-keep-conversations-across-restarts.md)）。
 - `/usage`（owner のみ）: Anthropic API の推計利用額を、当日・当月・モデル別・直近7日で表示。応答の `usage` に `packages/shared` の単価表を掛けた推計で、請求額とは一致しない。日付は UTC。集計は `HIBANA_DATA_DIR/anthropic_usage.json` に約400日分を保存（#44）。Anthropic Workspace の分はこの推計に入らず、別の行で、セッションが報告する list cost（公開単価での額）の合計を出す。集計は `HIBANA_DATA_DIR/anthropic_workspace_usage.json`（#76）。
-- Web の `/analytics`（administrator のみ）: Anthropic の Admin API の cost report から、日毎の利用料を表示。1日の目安（月 $200 ÷ その月の日数）を超えた日と、予算の残りが分かる。請求ベースで組織全体が対象。API の環境変数 `ANTHROPIC_ADMIN_API_KEY`（Admin API キーなど、cost report を読めるキー）が必要で、未設定ならページにその旨を表示する。日付は UTC（#48）。
+- Web の `/analytics`（administrator のみ）: Anthropic の Admin API の cost report から、日毎の利用料を表示。1日の目安（月 $200 ÷ その月の日数）を超えた日と、予算の残りが分かる。月の集計は、クレジットが付与される毎月5日から翌月4日まで（#81）。請求ベースで組織全体が対象。API の環境変数 `ANTHROPIC_ADMIN_API_KEY`（Admin API キーなど、cost report を読めるキー）が必要で、未設定ならページにその旨を表示する。日付は UTC（#48）。
 - Chat Completions / Responses / Anthropic Messages / Claude Managed Agents（Anthropic Workspace、#76）。プロバイダーの認証情報を分離。
 - [Jev 判定と行動選択モード](docs/jev.md)。根拠照合・分類と、Jev がファイル操作・検索などの各行動を選ぶ実行モードを別々に ON / OFF。
 - Discord操作、ファイル編集・配信、Exa検索、外部MCP、スキルCRUD、静的サイト公開。

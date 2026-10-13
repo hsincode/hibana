@@ -6,15 +6,23 @@
 // SDKs, hence the plain HTTP call. Days are UTC: the report has no other
 // granularity or time zone. It only covers days that have ended; the running
 // day is absent until UTC midnight (checked against the real API, #48).
+//
+// A "month" here is a billing month: from the 5th, when the monthly credit is
+// granted, to the 4th of the next month (decision record: #81). It is named
+// after the calendar month it starts in, so `2026-10` is 5 October to
+// 4 November.
+
+import { billingBounds, billingMonth } from "@hibana/shared/billing";
 
 const ENDPOINT = "https://api.anthropic.com/v1/organizations/cost_report";
 
-/** The owner's monthly budget. The daily guideline is this over the month's days. */
+/** The owner's monthly budget. The daily guideline is this over the billing month's days. */
 export const MONTHLY_BUDGET_USD = 200;
 
 // Anthropic asks for at most one poll a minute and for dashboards to cache.
 const CACHE_MS = 60_000;
-// One month fits in a single page (limit 31). More pages than this means the
+// A billing month is as long as the calendar month it starts in, so it fits
+// in a single page (limit 31). More pages than this means the
 // report is not answering the question that was asked.
 const MAX_PAGES = 4;
 const DAY_MS = 86_400_000;
@@ -34,6 +42,7 @@ export type CostDay = {
 
 export type CostMonth = {
   configured: true;
+  /** The billing month, `YYYY-MM`: the calendar month its first day (the 5th) is in. */
   month: string;
   /** The month contains `today`, so it has days the report does not cover yet. */
   current: boolean;
@@ -57,21 +66,15 @@ export type CostMonth = {
 const utcDate = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const utcTimestamp = (ms: number) => `${new Date(ms).toISOString().slice(0, 19)}Z`;
 
-const pad = (n: number, width: number) => String(n).padStart(width, "0");
-
-/** Start and end (exclusive) of a `YYYY-MM` month in UTC. */
+/** Start and end (exclusive) of a `YYYY-MM` billing month in UTC. */
 function bounds(month: string) {
-  const [year, mon] = month.split("-").map(Number);
-  const next = mon === 12 ? `${pad(year + 1, 4)}-01` : `${pad(year, 4)}-${pad(mon + 1, 2)}`;
-  return {
-    start: Date.parse(`${month}-01T00:00:00Z`),
-    end: Date.parse(`${next}-01T00:00:00Z`),
-  };
+  const { start, end } = billingBounds(month);
+  return { start: Date.parse(`${start}T00:00:00Z`), end: Date.parse(`${end}T00:00:00Z`) };
 }
 
-/** `YYYY-MM`, defaulting to the current UTC month. null for anything else, including a month that has not started. */
+/** `YYYY-MM`, defaulting to the current billing month. null for anything else, including a month that has not started. */
 export function parseMonth(raw: string | undefined, now: number): string | null {
-  const current = utcDate(now).slice(0, 7);
+  const current = billingMonth(utcDate(now));
   if (raw === undefined || raw === "") return current;
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(raw)) return null;
   return raw <= current ? raw : null;
@@ -88,7 +91,7 @@ export function summarize(
   const daysInMonth = Math.round((end - start) / DAY_MS);
   const guideline = MONTHLY_BUDGET_USD / daysInMonth;
   const today = utcDate(now);
-  const current = today.startsWith(month);
+  const current = billingMonth(today) === month;
   const days: CostDay[] = [];
   let spent = 0;
   for (let t = start; t < end; t += DAY_MS) {
@@ -126,7 +129,7 @@ function addPage(costs: Map<string, number>, month: string, page: Page) {
   for (const bucket of page.data as { starting_at?: unknown; results?: unknown }[]) {
     if (typeof bucket?.starting_at !== "string" || !Array.isArray(bucket.results)) throw malformed();
     const date = bucket.starting_at.slice(0, 10);
-    if (!date.startsWith(month)) continue;
+    if (billingMonth(date) !== month) continue;
     // An empty `results` is a day with no cost, which still counts as reported.
     let cents = 0;
     for (const item of bucket.results as { amount?: unknown; currency?: unknown }[]) {
@@ -178,7 +181,7 @@ export class CostReport {
     const costs = new Map<string, number>();
     // The report stops at the last day that has ended, whatever `ending_at`
     // says, and answers 400 when the range holds no such day. So ask only for
-    // finished days, and on the first day of a month do not ask at all.
+    // finished days, and on the first day of a billing month do not ask at all.
     const until = Math.min(end, Math.floor(now / DAY_MS) * DAY_MS);
     if (until <= start) return costs;
     let page: string | null = null;

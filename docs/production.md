@@ -191,8 +191,9 @@ Admin API は個人アカウントでは使えません。Console の組織が I
 
 - 日付は UTC 区切りです（cost report が UTC の日単位でしか返さないため）。日本時間では 9:00 に切り替わります
 - 載るのは終わった日（UTC）までです。cost report は進行中の日の行を返さないため、当日ぶんは次の 9:00（日本時間）を過ぎてから表示されます。「今月の残り」も、前日までの確定分で計算した値です
-- 月の1日目（UTC）は、終わった日がないため Anthropic へ問い合わせず、空の月を表示します。範囲に終わった日がない問い合わせに、cost report は400を返すためです
-- 月の予算 $200 は `apps/api/src/analytics.ts` の `MONTHLY_BUDGET_USD` です。1日の目安はこれをその月の日数で割った額です
+- 月の集計は、暦月ではなく、クレジットが付与される毎月5日から翌月4日まで（UTC）です（[#81](https://github.com/hsincode/hibana/issues/81)、2026-10-14）。期間は始まる月の名前で呼びます（10月5日〜11月4日が「2026年10月」、`?month=2026-10`）。1日〜4日に開くと、前の月の5日から続く期間が「今月」です。開始日は `packages/shared/src/billing.ts` の `BILLING_START_DAY` です。クレジットが付与される時刻とタイムゾーンは確かめていないので、期間の端の1日は、実際の付与と最大で1日ぶんずれることがあります
+- 期間の1日目（5日、UTC）は、終わった日がないため Anthropic へ問い合わせず、空の月を表示します。範囲に終わった日がない問い合わせに、cost report は400を返すためです
+- 月の予算 $200 は `apps/api/src/analytics.ts` の `MONTHLY_BUDGET_USD` です。1日の目安はこれを期間の日数（始まる月の日数と同じ）で割った額です
 - APIは同じ月の結果を、インスタンスごとに1分間メモリに保持します。Anthropic が継続的な取得を1分に1回までとしているためです
 - Priority Tier の費用は cost report に含まれません
 
@@ -202,6 +203,7 @@ Admin API は個人アカウントでは使えません。Console の組織が I
 - Admin API キーで実際の cost report を手元から呼び、応答の形（`data`・`has_more`・`next_page`、`amount` はセントの文字列、通貨は USD）が公式ドキュメントのとおりであること、APIのルートを通した結果を画面に描画できることを確かめました
 - Individual Org の個人キーでは403（`permission_error: Missing permissions`）でした（同じキーで `GET /v1/organizations/me` は200）
 - 未確認: Console の Cost の表示との照合、本番（Vercel）での動作、日付が変わってから前日の行が載るまでの時間
+- 5日始まりの集計（#81、2026-10-14）は、手元のテスト（代用の応答）だけで確かめています。実際の cost report を使った確認と、Console のクレジットの表示との照合はしていません
 
 ## 会話履歴と Auto Routing の経路の保存（2026-10-10）
 

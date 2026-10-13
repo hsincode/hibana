@@ -14,6 +14,10 @@
     "./audit": {
       "types": "./src/audit.ts",
       "default": "./dist/audit.js"
+    },
+    "./billing": {
+      "types": "./src/billing.ts",
+      "default": "./dist/billing.js"
     }
   },
   "dependencies": {
@@ -21,6 +25,6 @@
   },
   "scripts": {
     "typecheck": "bun check",
-    "build": "bun build src/audit.ts src/catalog.ts src/settings.ts --target=bun --outdir=dist --packages=external"
+    "build": "bun build src/audit.ts src/billing.ts src/catalog.ts src/settings.ts --target=bun --outdir=dist --packages=external"
   }
 }

@@ -8,7 +8,8 @@ import {
 } from "@hibana/shared/catalog";
 import type { Selection } from "./config";
 import type { ConversationStore } from "./conversation-store";
-import type { JevClient } from "./jev";
+import { decideWithImageFallback, type JevClient } from "./jev";
+import type { JevImage } from "./jev-images";
 import { triageInput } from "./jev-triage";
 import type { Message, Usage } from "./types";
 
@@ -64,8 +65,8 @@ const questions = {
 };
 
 /** The request and a little context, exactly what the triage sends. */
-export function routeInput(messages: readonly Message[]) {
-  return { state: triageInput(messages).state, questions };
+export function routeInput(messages: readonly Message[], images: readonly JevImage[] = []) {
+  return { state: triageInput(messages, images).state, questions };
 }
 
 /** `max` is never sent for a routed selection, whatever asked for it. */
@@ -101,10 +102,12 @@ export async function evaluateRoute(
   messages: readonly Message[],
   decide: JevClient["decide"],
   signal: AbortSignal,
-): Promise<{ level: number; requested?: Family; selection: Selection; usage: Usage }> {
-  const input = routeInput(messages);
-  if (!input.state.latest_user_request.trim()) throw new Error("No user request to route");
-  const result = await decide(input, signal);
+  images: readonly JevImage[] = [],
+): Promise<{ level: number; requested?: Family; selection: Selection; usage: Usage; images: number }> {
+  if (!routeInput(messages).state.latest_user_request.trim()) throw new Error("No user request to route");
+  // The questions stay as calibrated on text (#35); only the state gains images.
+  const { result, images: seen } = await decideWithImageFallback(
+    decide, (sent) => routeInput(messages, sent), images, signal);
   const answer = result.answers.difficulty;
   if (answer?.type !== "score") throw new Error("Invalid Jev route decision");
   // Jev scores a position on the scale with a fraction; the nearest level wins.
@@ -113,7 +116,7 @@ export async function evaluateRoute(
   if (named?.type !== "choice") throw new Error("Invalid Jev route decision");
   const requested = named.choice in families ? named.choice as Family : undefined;
   return {
-    level, requested, usage: result.usage,
+    level, requested, usage: result.usage, images: seen,
     selection: requested ? routeRequested(requested, level) : routeLevel(level),
   };
 }

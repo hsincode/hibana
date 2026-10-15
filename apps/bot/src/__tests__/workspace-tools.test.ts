@@ -1006,3 +1006,21 @@ describe("send_file", () => {
     } finally { await refusing.close(); }
   });
 });
+
+describe("run_jev's images in a session (#83)", () => {
+  test("a file in the container is refused before anything reaches Jev", async () => {
+    const { tools, close } = registry(full);
+    let calls = 0, notices = 0;
+    tools.jev.decide = async () => { calls++; throw new Error("unreachable"); };
+    try {
+      const { call } = queued(tools);
+      const result = await call("run_jev", {
+        state: { screen: "{{image:1}}" }, questions: { q: { type: "noul", instructions: "Is it red?" } }, images: ["outputs/shot.png"],
+      }, context({ notify: async () => { notices++; } }));
+      expect(result.is_error).toBe(true);
+      expect(text(result)).toContain("a file in the container cannot be passed");
+      expect(notices).toBe(0);
+      expect(calls).toBe(0);
+    } finally { await close(); }
+  });
+});

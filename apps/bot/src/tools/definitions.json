@@ -3,12 +3,12 @@
     "type": "function",
     "function": {
       "name": "run_jev",
-      "description": "Call Jev (~typesafe/jev-latest) as a bounded judgment subagent. Use proactively when a source-grounded claim check, candidate relevance ranking, rubric score, or batch classification materially helps. Jev returns typed decisions and probabilities, not prose, tools, search, arithmetic, or general reasoning. Send concise evidence in state and one independent judgment per questions entry; batch related independent questions in one call. choice needs mutually exclusive labels including unknown/insufficient_evidence when appropriate. score is a probability-weighted zero-based position on an ordered rubric. noul is the probability of yes (0–1), not a separate confidence score. Confidence and probabilities are fallible signals, not authority; review ambiguity or gather evidence yourself. Do not repeatedly call to force agreement. Posts a persistent Discord 'サブ: Jev を呼び出します' notice before the API call. Obeys Jev enable/disable settings and the subagent concurrency limit; cannot spawn or use tools. A fixed chat subagent model does not change this dedicated evaluator. On failure continue the task yourself without claiming Jev verification.",
+      "description": "Call Jev (~typesafe/jev-latest) as a bounded judgment subagent. Use proactively when a source-grounded claim check, candidate relevance ranking, rubric score, or batch classification materially helps. Jev returns typed decisions and probabilities, not prose, tools, search, arithmetic, or general reasoning. Send concise evidence in state, and up to 4 images in images when the judgment is about what they show and one independent judgment per questions entry; batch related independent questions in one call. choice needs mutually exclusive labels including unknown/insufficient_evidence when appropriate. score is a probability-weighted zero-based position on an ordered rubric. noul is the probability of yes (0–1), not a separate confidence score. Confidence and probabilities are fallible signals, not authority; review ambiguity or gather evidence yourself. Do not repeatedly call to force agreement. Posts a persistent Discord 'サブ: Jev を呼び出します' notice before the API call. Obeys Jev enable/disable settings and the subagent concurrency limit; cannot spawn or use tools. A fixed chat subagent model does not change this dedicated evaluator. On failure continue the task yourself without claiming Jev verification.",
       "parameters": {
         "type": "object",
         "properties": {
           "state": {
-            "description": "Relevant material to judge: source excerpts plus claim/draft, or candidates with IDs. No full history, secrets, raw images, or URLs without their content. Total input at most 60,000 characters.",
+            "description": "Relevant material to judge: source excerpts plus claim/draft, or candidates with IDs. No full history, secrets, pasted image data, or URLs without their content; pass pictures in images instead. Total input at most 60,000 characters.",
             "anyOf": [
               {
                 "type": "string"
@@ -67,6 +67,16 @@
               ],
               "additionalProperties": false
             }
+          },
+          "images": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            },
+            "description": "Optional pictures for Jev to look at (experimental). Each item is a workspace PNG/JPEG path, an https image URL such as a Discord attachment, or attachment:N for the Nth image attached to the user's current message. Refer to them in state, instructions or criteria as {{image:1}}, {{image:2}}… in this order; each must be referenced. Images must be 256–1568 px per side (larger Discord attachments are scaled down when possible). If an image cannot be sent or Jev rejects it, the call fails: then inspect it with view_image and send what it shows as text."
           },
           "status": {
             "type": "string",

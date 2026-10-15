@@ -1,4 +1,5 @@
-import type { JevClient } from "./jev";
+import { decideWithImageFallback, type JevClient } from "./jev";
+import type { JevImage } from "./jev-images";
 import type { Message, Usage } from "./types";
 
 // One batched Decisions call before the orchestrator's first model request.
@@ -48,10 +49,20 @@ export type Triage = Record<keyof typeof questions, number>;
 const actualUser = (m: Message) => m.role === "user" && !m.internal &&
   !m.content?.startsWith("# AGENTS.md instructions");
 
-/** Only the visible request and a little context; no instructions or tool output. */
-export function triageInput(messages: readonly Message[]) {
+const latestIndex = (messages: readonly Message[]) => {
   const fromEnd = [...messages].reverse().findIndex(actualUser);
-  const last = fromEnd < 0 ? -1 : messages.length - fromEnd - 1;
+  return fromEnd < 0 ? -1 : messages.length - fromEnd - 1;
+};
+
+/** The request triage and routing judge; its images are the ones they see. */
+export const latestRequest = (messages: readonly Message[]): Message | undefined =>
+  messages[latestIndex(messages)];
+
+/** Only the visible request and a little context; no instructions or tool
+ *  output. Images are the request's own, prepared for Jev (#83); without them
+ *  the input is exactly what it was before. */
+export function triageInput(messages: readonly Message[], images: readonly JevImage[] = []) {
+  const last = latestIndex(messages);
   const request = messages[last];
   const clip = (text: string | null | undefined, max: number) => (text ?? "").slice(0, max);
   const prior = messages.slice(0, Math.max(0, last))
@@ -63,6 +74,8 @@ export function triageInput(messages: readonly Message[]) {
       // bot.ts appends attachment metadata to the message text itself.
       latest_user_request: clip(request?.content, 4000),
       attached_images: request?.images?.length ?? 0,
+      // Each reference is replaced by its image on Jev's side.
+      ...(images.length ? { attached_image_contents: images.map((i) => i.reference) } : {}),
       prior_conversation: prior,
     },
     questions,
@@ -73,17 +86,18 @@ export async function evaluateTriage(
   messages: readonly Message[],
   decide: JevClient["decide"],
   signal: AbortSignal,
-): Promise<{ triage: Triage; usage: Usage }> {
-  const input = triageInput(messages);
-  if (!input.state.latest_user_request.trim()) throw new Error("No user request to triage");
-  const result = await decide(input, signal);
+  images: readonly JevImage[] = [],
+): Promise<{ triage: Triage; usage: Usage; images: number }> {
+  if (!triageInput(messages).state.latest_user_request.trim()) throw new Error("No user request to triage");
+  const { result, images: seen } = await decideWithImageFallback(
+    decide, (sent) => triageInput(messages, sent), images, signal);
   const triage = {} as Triage;
   for (const key of Object.keys(questions) as (keyof Triage)[]) {
     const answer = result.answers[key];
     if (answer?.type !== "noul") throw new Error("Invalid Jev triage decision");
     triage[key] = answer.noul;
   }
-  return { triage, usage: result.usage };
+  return { triage, usage: result.usage, images: seen };
 }
 
 export function shouldPrestartExplorer(triage: Triage): boolean {

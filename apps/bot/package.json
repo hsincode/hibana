@@ -9,6 +9,7 @@
     "typecheck": "bun check",
     "test": "bun test src",
     "route-eval": "bun src/route-eval.ts",
+    "jev-image-check": "bun src/jev-image-check.ts",
     "workspace-smoke": "bun src/workspace/smoke.ts"
   },
   "dependencies": {

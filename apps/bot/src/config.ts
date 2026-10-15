@@ -324,6 +324,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     jevTaskEnabled: flag(env, "JEV_TASK_ENABLED", false),
     // Jev uses a dedicated Decisions API key; never borrow a chat provider's quota.
     jevApiKey: env.JEV_API_KEY || "",
+    // Jev's image input is experimental (#83); this turns it off without a deploy.
+    jevImagesEnabled: flag(env, "JEV_IMAGES_ENABLED", true),
     siteEnabled: flag(env, "STATIC_SITE_ENABLED", false),
     siteBind: env.STATIC_SITE_BIND || "127.0.0.1:8080",
     siteBase: env.STATIC_SITE_BASE_URL || env.STATIC_SITE_PUBLIC_BASE_URL || "",

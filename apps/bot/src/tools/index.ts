@@ -1,6 +1,7 @@
 import type { Logger } from "pino";
 import { MODEL_PRESETS } from "@hibana/shared/catalog";
 import { readFile, mkdir, writeFile, lstat } from "node:fs/promises";
+import { z } from "zod";
 import { dirname, join, relative } from "node:path";
 import { Client as DiscordClient } from "discord.js";
 import Ajv from "ajv";
@@ -27,14 +28,18 @@ import {
 } from "../workflow/prompts";
 import { evaluateRoute, isAutoRoute, ROUTE_TIMEOUT_MS } from "../auto-route";
 type RouteDecision = Awaited<ReturnType<typeof evaluateRoute>>;
-import { evaluateTriage, shouldPrestartExplorer, TRIAGE_TIMEOUT_MS, type Triage } from "../jev-triage";
+import { evaluateTriage, latestRequest, shouldPrestartExplorer, TRIAGE_TIMEOUT_MS, type Triage } from "../jev-triage";
+import {
+  downloadImage, JEV_IMAGE_PREP_TIMEOUT_MS, MAX_JEV_IMAGE_BYTES, MAX_JEV_IMAGES, placeImages, prepareJevImages,
+  type Download, type JevImage,
+} from "../jev-images";
 import definitions from "./definitions.json";
 import codexDefinitions from "./codex-definitions.json";
 import { childPresets, collaborationNames, collaborationTools, collaborationValidationSchema, teamTools } from "../multi-agent-policy";
 import { Runtime } from "../runtime";
 import { Agent } from "../agent";
 import { nativeSearchFor } from "../llm";
-import { JevClient, JEV_NOTICE_HEADER, jevInputSchema } from "../jev";
+import { JevClient, JevImagesRejected, JEV_NOTICE_HEADER, jevInputSchema } from "../jev";
 import { jevTaskSchema, jevTaskTool, jevRequiredActionTools, runJevTask } from "../jev-task";
 import { Semaphore, withAbort } from "../io";
 import { triggerWords } from "../triggers";
@@ -88,6 +93,8 @@ export class ToolRegistry {
   readonly web: WebTools;
   readonly image: ImageTools;
   readonly jev: JevClient;
+  /** How images for Jev are fetched; tests replace it to stay offline. */
+  jevImageDownload: Download = downloadImage;
   private maintenance?: ReturnType<typeof setInterval>;
   private sweeping = false;
   readonly waiting = new Set<string>();
@@ -175,12 +182,14 @@ export class ToolRegistry {
     ]);
     const started = performance.now();
     let verdict = "unavailable";
-    let result: { triage: Triage; usage: Usage } | undefined;
+    let result: { triage: Triage; usage: Usage; images: number } | undefined;
+    // Images load while the call waits for the shared Jev slot.
+    const images = this.requestImages(messages, signal);
     try {
       result = await withAbort(this.subagents.run(async () => {
         signal.throwIfAborted();
         if (!enabled()) return undefined;
-        return evaluateTriage(messages, this.jev.decide.bind(this.jev), signal);
+        return evaluateTriage(messages, this.jev.decide.bind(this.jev), signal, await images);
       }), signal);
       verdict = result ? "classified" : "disabled";
       return result && enabled() ? result : undefined;
@@ -195,11 +204,46 @@ export class ToolRegistry {
         ...(result ? {
           needs_research: round(result.triage.needs_research),
           needs_artifact_work: round(result.triage.needs_artifact_work), needs_review: round(result.triage.needs_review),
-          prestart_explorer: shouldPrestartExplorer(result.triage),
+          prestart_explorer: shouldPrestartExplorer(result.triage), images: result.images,
         } : {}),
         elapsed_ms: Math.round(performance.now() - started),
       }, "Jev triage finished");
     }
+  }
+  /** The latest request's images that fit Jev's limits (#83). Never throws:
+   *  an image Jev cannot take leaves the judgment to the text, as before. */
+  private async requestImages(messages: readonly Message[], signal: AbortSignal): Promise<JevImage[]> {
+    const urls = latestRequest(messages)?.images ?? [];
+    if (!this.runtime.config.jevImagesEnabled || !urls.length) return [];
+    const images = await prepareJevImages(urls, signal, this.jevImageDownload)
+      .catch((): (JevImage | undefined)[] => []);
+    return images.filter((i): i is JevImage => !!i);
+  }
+  /** run_jev's images, all or nothing: a judgment about a picture must not
+   *  quietly run without it. */
+  private async runJevImages(sources: readonly string[], ctx: Context): Promise<JevImage[]> {
+    const urls = await Promise.all(sources.map(async (source) => {
+      const attached = /^attachment:(\d+)$/i.exec(source);
+      if (attached) {
+        const url = ctx.images?.[Number(attached[1]) - 1];
+        if (!url) throw new Error(`${source}: the current message has no such image`);
+        return url;
+      }
+      if (/^https:\/\//i.test(source)) return source;
+      // An Anthropic Workspace turn's files are in Anthropic's container (#76).
+      if (ctx.harness === "workspace")
+        throw new Error(`${source}: a file in the container cannot be passed; deliver it with send_file and use the attachment's https URL`);
+      if (!/\.(png|jpe?g)$/i.test(source)) throw new Error(`${source}: Jev reads PNG or JPEG images only`);
+      const full = await this.sandbox.path(ctx, source);
+      if ((await lstat(full)).size > MAX_JEV_IMAGE_BYTES) throw new Error(`${source}: image too large for Jev`);
+      // The format comes from the file's header, not this media type.
+      return `data:application/octet-stream;base64,${(await readFile(full)).toString("base64")}`;
+    }));
+    const images = await prepareJevImages(urls, ctx.signal, this.jevImageDownload);
+    const failed = images.findIndex((i) => !i);
+    if (failed >= 0)
+      throw new Error(`${sources[failed]}: Jev cannot take this image (PNG or JPEG, 256–1568 px per side, at most ${MAX_JEV_IMAGE_BYTES / 1048576} MiB, loaded within ${JEV_IMAGE_PREP_TIMEOUT_MS / 1000} s). Inspect it with view_image and send what it shows as text.`);
+    return images as JevImage[];
   }
   /** Auto routing: Jev scores the request's difficulty once, before the turn.
    *  Silent like the triage. Any failure returns undefined and the caller
@@ -221,9 +265,10 @@ export class ToolRegistry {
         ...(ctx.signal ? [ctx.signal] : []),
         AbortSignal.timeout(ROUTE_TIMEOUT_MS),
       ]);
+      const images = this.requestImages(messages, signal);
       result = await withAbort(this.subagents.run(async () => {
         signal.throwIfAborted();
-        return evaluateRoute(messages, this.jev.decide.bind(this.jev), signal);
+        return evaluateRoute(messages, this.jev.decide.bind(this.jev), signal, await images);
       }), signal);
       verdict = "classified";
       return result;
@@ -234,7 +279,7 @@ export class ToolRegistry {
       // The level only; never the request text or the API response body.
       this.log?.info({
         channel: ctx.channelId, message_id: ctx.messageId, verdict,
-        ...(result ? { level: result.level, requested: result.requested ?? null, model: result.selection.model, effort: result.selection.effort } : {}),
+        ...(result ? { level: result.level, requested: result.requested ?? null, model: result.selection.model, effort: result.selection.effort, images: result.images } : {}),
         elapsed_ms: Math.round(performance.now() - started),
       }, "Jev route finished");
     }
@@ -526,6 +571,11 @@ export class ToolRegistry {
       // action. The evaluator may select a prepared action, never invent one.
       const task = name === "run_jev_task" ? jevTaskSchema.parse(a) : null;
       const input = task ? null : jevInputSchema.parse(a);
+      const sources = task ? [] : z.array(z.string().min(1).max(2000)).max(MAX_JEV_IMAGES).default([]).parse(a.images);
+      if (sources.length && !this.runtime.config.jevImagesEnabled)
+        throw new Error("Jev image input is disabled (JEV_IMAGES_ENABLED=false); send what the images show as text");
+      // Placeholders are checked with the rest of the input, before any fetch.
+      if (input) placeImages(input, sources);
       const validateAction = (tool: string, args: Json) => {
         const normalized = normalizeTool(tool, args);
         const definition = this.taskActionDefinitions(ctx).find((t) => t.function.name === normalized.name);
@@ -564,6 +614,9 @@ export class ToolRegistry {
             decide: this.jev.decide.bind(this.jev),
             assertEnabled,
             report: ctx.jevTaskProgress,
+            ...(this.runtime.config.jevImagesEnabled
+              ? { prepareImages: (urls: string[], signal: AbortSignal) => prepareJevImages(urls, signal, this.jevImageDownload) }
+              : {}),
             execute: async (tool, args, actionCtx) => {
               actionCtx.signal?.throwIfAborted();
               assertEnabled();
@@ -578,10 +631,20 @@ export class ToolRegistry {
           throw new Error("Jev requires a Discord notification channel");
         // Persistent evaluation notices survive parent progress edits.
         const executions = ctx.jevExecutions ??= { count: 0 };
+        // Load the images first: a call that cannot send them fails before
+        // the notice, without a judgment made blind to what it was about.
+        const images = sources.length ? await this.runJevImages(sources, ctx) : [];
+        const placed = placeImages(input!, images.map((i) => i.reference));
         await ctx.notify(`${JEV_NOTICE_HEADER}(${++executions.count}回目)`);
-        const result = await this.jev.decide(input!, ctx.signal);
-        ctx.recordToolUsage?.(result.usage);
-        return result;
+        try {
+          const result = await this.jev.decide(placed, ctx.signal, images);
+          ctx.recordToolUsage?.(result.usage);
+          return result;
+        } catch (error) {
+          if (error instanceof JevImagesRejected)
+            throw new Error("Jev did not accept the images (its image input is experimental). Inspect them with view_image and send what they show as text.");
+          throw error;
+        }
       });
     }
     if (name === WORKFLOW_TOOL || name === TASK_STOP_TOOL) {

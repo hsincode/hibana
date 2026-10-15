@@ -41,10 +41,34 @@ const firstDay = monthFixture("2026-10", 31, [], true);
 // A finished billing month (5 September to 4 October) that ran over the budget: 30 days at $3–$11.
 const september = monthFixture("2026-09", 30, Array.from({ length: 30 }, (_, i) => 3 + ((i * 7) % 9)), false);
 
+// Today's estimate (#85) on 13 October at 03:00 UTC: below the $6.45 guideline.
+const todayFixture = {
+  configured: true,
+  date: "2026-10-13",
+  through: "2026-10-13T02:59:00Z",
+  last_usage_at: "2026-10-13T02:57:00Z",
+  cost_usd: 3.21,
+  daily_guideline_usd: BUDGET / 31,
+  over: false,
+  unpriced: [],
+  fetched_at: Date.parse("2026-10-13T03:00:00Z"),
+};
+
 type CostReply = { status?: number; json: unknown };
 
-async function mockApi(page: Page, cost: (month: string | null) => CostReply, canView = true) {
+type MockOptions = {
+  canView?: boolean;
+  today?: () => CostReply;
+  me?: Record<string, unknown>;
+};
+
+async function mockApi(
+  page: Page,
+  cost: (month: string | null) => CostReply,
+  { canView = true, today = () => ({ json: todayFixture }), me = {} }: MockOptions = {},
+) {
   const months: (string | null)[] = [];
+  const todays = { count: 0 };
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/api/me")
@@ -56,6 +80,7 @@ async function mockApi(page: Page, cost: (month: string | null) => CostReply, ca
           role: "administrator",
           can_manage_users: true,
           ...(canView ? { can_view_analytics: true } : {}),
+          ...me,
         },
       });
     if (url.pathname === "/api/guilds") return route.fulfill({ json: { guilds: [] } });
@@ -66,9 +91,13 @@ async function mockApi(page: Page, cost: (month: string | null) => CostReply, ca
       months.push(month);
       return route.fulfill(cost(month));
     }
+    if (url.pathname === "/api/analytics/today") {
+      todays.count++;
+      return route.fulfill(today());
+    }
     throw new Error(`Unexpected API request: ${url.pathname}`);
   });
-  return months;
+  return { months, todays };
 }
 
 const byMonth = (month: string | null): CostReply => ({ json: month === "2026-09" ? september : october });
@@ -80,7 +109,7 @@ test.beforeEach(async ({ page }) => {
 
 for (const width of [1440, 390]) {
   test(`analytics shows each day against the guideline and what is left: ${width}px`, async ({ page }) => {
-    const months = await mockApi(page, byMonth);
+    const { months } = await mockApi(page, byMonth);
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/analytics");
 
@@ -97,8 +126,14 @@ for (const width of [1440, 390]) {
     await expect(stat("今月の残り")).toContainText("$151.71");
     await expect(stat("今月の残り")).toContainText("10/12 までの確定分");
     await expect(stat("今月の残り")).toContainText("残り 23 日");
+    // $151.71 − today's $3.21.
+    await expect(stat("今月の残り")).toContainText("今日の推計を含めると残り $148.50");
     await expect(stat("今月の累計")).toContainText("$48.29");
     await expect(stat("今月の累計")).toContainText("目安以内");
+    // The running day comes from the usage report, apart from the confirmed days.
+    await expect(stat("今日の推計")).toContainText("$3.21");
+    await expect(stat("今日の推計")).toContainText("目安以内");
+    await expect(stat("今日の推計")).toContainText("UTC の 10/13 0:00 から");
     // The newest figure is yesterday's: the running day is never in the report.
     await expect(stat("直近の確定日")).toContainText("10/12");
     await expect(stat("直近の確定日")).toContainText("$8.00");
@@ -151,6 +186,9 @@ for (const width of [1440, 390]) {
     await expect(stat("予算の残り")).toContainText("−$10.00");
     await expect(stat("予算の残り")).toContainText("予算超過");
     await expect(stat("直近の確定日")).toHaveCount(0);
+    // Today is not in a past month.
+    await expect(stat("今日の推計")).toHaveCount(0);
+    await expect(stat("予算の残り")).not.toContainText("今日の推計");
     // The dev server's StrictMode runs the first load twice, hence the set.
     expect([...new Set(months)]).toEqual([null, "2026-09"]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -193,17 +231,67 @@ test("analytics on the first day of a month has the budget but no days yet", asy
 });
 
 test("analytics is not offered to an account that may not view it", async ({ page }) => {
-  const months = await mockApi(page, byMonth, false);
+  // Every role may view it since #85; an API that does not say so is still obeyed.
+  const { months, todays } = await mockApi(page, byMonth, { canView: false });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/analytics");
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByRole("navigation", { name: "メイン" }).getByRole("link", { name: "利用料" })).toHaveCount(0);
   expect(months).toEqual([]);
+  expect(todays.count).toBe(0);
+});
+
+test("any user finds analytics among the pages for everyone, not under 管理", async ({ page }) => {
+  await mockApi(page, byMonth, { me: { username: "member", role: "free", can_manage_users: false } });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  const nav = page.getByRole("navigation", { name: "メイン" });
+  await expect(nav.getByRole("link", { name: "利用料" })).toBeVisible();
+  await expect(nav.getByText("管理", { exact: true })).toHaveCount(0);
+  await nav.getByRole("link", { name: "利用料" }).click();
+  await expect(page).toHaveURL(/\/analytics$/);
+  // Matched on the tile's own label: the remaining tile's note mentions it too.
+  const card = page.locator(".stat").filter({ has: page.locator(".stat-label", { hasText: "今日の推計" }) });
+  await expect(card).toContainText("$3.21");
+});
+
+test("today's estimate is read again every minute and keeps its last figure through an error", async ({ page }) => {
+  let reply: CostReply = { json: todayFixture };
+  const { todays } = await mockApi(page, byMonth, { today: () => reply });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/analytics");
+  const card = page.locator(".stat").filter({ has: page.locator(".stat-label", { hasText: "今日の推計" }) });
+  await expect(card).toContainText("$3.21");
+  const before = todays.count;
+
+  reply = {
+    json: {
+      ...todayFixture,
+      through: "2026-10-13T03:00:00Z",
+      cost_usd: 7.5,
+      over: true,
+      unpriced: [{ model: "claude-opus-5-6", service_tier: "standard", tokens: 12345 }],
+    },
+  };
+  await page.clock.runFor(60_000);
+  await expect(card).toContainText("$7.50");
+  await expect(card).toContainText("目安超過");
+  await expect(card).toContainText("claude-opus-5-6");
+  await expect(card).toContainText("12,345 トークン");
+  expect(todays.count).toBeGreaterThan(before);
+
+  reply = { status: 429, json: { error: "利用料の取得が混み合っています。1 分ほど待って再読み込みしてください" } };
+  await page.clock.runFor(60_000);
+  await expect(card).toContainText("混み合っています");
+  await expect(card).toContainText("$7.50");
+  // The confirmed days do not depend on it.
+  await expect(page.locator(".cost-table tbody tr")).toHaveCount(8);
+  await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
 test("analytics explains a missing key and shows an upstream error", async ({ page }) => {
   let reply: CostReply = { json: { configured: false } };
-  await mockApi(page, () => reply);
+  await mockApi(page, () => reply, { today: () => ({ json: { configured: false } }) });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/analytics");
   await expect(page.getByText("Admin API のキーが未設定")).toBeVisible();

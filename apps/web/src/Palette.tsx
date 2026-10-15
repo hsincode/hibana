@@ -76,7 +76,7 @@ export function Palette({
       items.push({ group: "ページ", icon: <Icon.cpu />, label: "モデル", where: "管理", to: "/models" });
     }
     if (me.can_view_analytics)
-      items.push({ group: "ページ", icon: <Icon.gauge />, label: "利用料", where: "管理", to: "/analytics" });
+      items.push({ group: "ページ", icon: <Icon.gauge />, label: "利用料", where: "全体", to: "/analytics" });
     if (current) {
       for (const s of GUILD_SETTINGS) {
         const page = GUILD_PAGES.find((p) => p.path === s.page);

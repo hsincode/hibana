@@ -957,6 +957,22 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
       }
       return costReport.month(month);
     })
+    // The running UTC day, estimated from the usage report (#85). Same
+    // permission and caching as the cost report above.
+    .get("/api/analytics/today", async ({ cookie, set }) => {
+      set.headers["cache-control"] = "no-store";
+      const s = await requireSession(cookieSid(cookie as never));
+      if (!s) {
+        set.status = 401;
+        return { error: "unauthorized" };
+      }
+      if (!canViewAnalytics(s.role)) {
+        set.status = 403;
+        return { error: "forbidden" };
+      }
+      if (!costReport.configured) return { configured: false };
+      return costReport.today();
+    })
     .post("/internal/logs", async ({ request, set, body }) => {
       if (!requireInternal(request.headers.get("authorization") ?? undefined)) {
         set.status = 401;

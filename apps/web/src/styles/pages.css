@@ -40,10 +40,10 @@
 /* 読み込み中は前の月の表示を薄くして残す（枠が跳ねない） */
 .analytics-report.is-stale { opacity: 0.55; }
 .stats {
-  position: relative; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 0 20px;
+  /* 列の数は枠の数（今月かどうか、確定日や今日の推計があるか）で変わる。Analytics.tsx が --cols を渡す */
+  position: relative; display: grid; grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr)); padding: 0 20px;
   border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--card-shadow);
 }
-.stats.is-three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .stat { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: var(--sp-4) var(--sp-4) var(--sp-4) 0; }
 .stat + .stat { padding-left: var(--sp-4); border-left: 1px solid var(--line); }
 .stat-label { color: var(--muted); font-size: var(--fs-xs); }
@@ -51,6 +51,7 @@
 .stat-value { font-family: var(--font-mono); font-size: var(--fs-2xl); font-weight: 400; line-height: 1.2; letter-spacing: -0.03em; color: var(--ink); }
 .stat-value.is-neg { color: var(--danger); }
 .stat-note { color: var(--ink-2); font-size: var(--fs-xs); line-height: 1.65; }
+.stat-note.is-error { color: var(--danger); }
 /* メーター: 溝の全長に箔の帯があり、使った分だけ見える（使うほど暖かい色に届く） */
 .meter { position: relative; height: 12px; margin: 2px 0 4px; container-type: inline-size; }
 .meter::before { content: ""; position: absolute; left: 0; right: 0; top: 4px; height: 4px; border-radius: 4px; background: var(--well); box-shadow: inset 0 0 0 1px var(--line); }
@@ -91,12 +92,12 @@
 .cost-table td, .cost-table th { padding-top: 8px; padding-bottom: 8px; }
 
 @media (max-width: 900px) {
-  .stats, .stats.is-three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat:nth-child(odd) { padding-left: 0; border-left: 0; }
   .stat:nth-child(n + 3) { border-top: 1px solid var(--line); }
 }
 @media (max-width: 760px) {
-  .stats, .stats.is-three, .account-list, .chart-panel {
+  .stats, .account-list, .chart-panel {
     max-width: none; margin-inline: calc(var(--pad) * -1); padding-inline: var(--pad);
     border-left: 0; border-right: 0; border-radius: 0;
   }
@@ -107,7 +108,7 @@
   .cost-table { min-width: 340px; }
 }
 @media (max-width: 420px) {
-  .stats, .stats.is-three { grid-template-columns: minmax(0, 1fr); }
+  .stats { grid-template-columns: minmax(0, 1fr); }
   .stat, .stat + .stat { padding-left: 0; border-left: 0; }
   .stat + .stat { border-top: 1px solid var(--line); }
 }

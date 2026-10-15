@@ -41,7 +41,7 @@ export function commands(runtime: Runtime) {
     command("clear", "このチャンネルの会話履歴を消去"),
     command("context", "会話履歴とトークン使用量"),
     command("retry", "失敗した作業を再開"),
-    command("usage", "Anthropic API の利用額（推計と Workspace の公開単価。owner のみ）"),
+    command("usage", "Anthropic API の利用額（推計と Workspace の公開単価）"),
     command("switch", "このサーバーのモデルを切り替え", [
       { ...string("preset", "モデルのプリセット"), autocomplete: true },
       string("effort", "推論の深さ", [...REASONING_EFFORTS, "default"]),
@@ -192,10 +192,8 @@ export async function handleCommand(
         break;
       }
       case "usage":
-        // Spend covers every server the bot is in, so only the owner
-        // (`WEB_ADMIN_IDS`, role administrator) may read it (#44).
-        if (runtime.role(i.user.id) !== "administrator")
-          throw new Error("このコマンドは owner のみ使用できます。");
+        // Spend covers every server the bot is in. It was the owner's alone
+        // (#44); since #85 anyone may read it. Blocked users are refused above.
         result = usage.summary();
         // Workspace sessions report their own cost; it is not in the estimate.
         note = workspace?.usageLine();

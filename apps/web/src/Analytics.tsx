@@ -9,6 +9,8 @@ import { Alert, Badge, Empty, Icon, Section, Skeleton, useDocumentTitle } from "
    ここは表示だけ。判定を二重に持つと、画面と API で食い違うため。
    「月」は、クレジットが付与される 5日から翌月 4日までの期間（#81）。
    始まる月の名前で呼ぶ。期間の計算は API と同じ packages/shared のものを使う。
+   進行中の日（今日）は cost report に載らないので、usage report のトークン数から
+   API が推計した額を別に出し、今月を見ている間は 1 分ごとに読み直す（#85）。
    ============================================================ */
 
 type CostDay = { date: string; cost_usd: number | null; over: boolean };
@@ -28,6 +30,23 @@ type CostMonth = {
   fetched_at: number;
 };
 type CostResponse = CostMonth | { configured: false };
+type CostToday = {
+  configured: true;
+  date: string;
+  through: string;
+  last_usage_at: string | null;
+  cost_usd: number;
+  daily_guideline_usd: number;
+  over: boolean;
+  unpriced: { model: string | null; service_tier: string | null; tokens: number }[];
+  fetched_at: number;
+};
+type TodayResponse = CostToday | { configured: false };
+/** 今日の推計。取得に失敗しても、月の表示は出す。 */
+type TodayState = { data: CostToday | null; error: string | null };
+
+// API は今日の分を 1 分キャッシュするので、それより短い間隔で読んでも同じ値になる。
+const TODAY_REFRESH_MS = 60_000;
 
 const usdFormat = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 const usd = (n: number) => usdFormat.format(n);
@@ -111,6 +130,42 @@ export function AnalyticsPage() {
   const loaded = data?.configured ? data : null;
   // 取得に失敗しても月を移れるよう、月の表示と移動は応答に頼らない。
   const shown = month ?? loaded?.month ?? utcMonth();
+  const showingCurrent = shown === utcMonth();
+
+  // 今日の推計。今月を見ている間だけ、画面が見えているときに 1 分ごとに読み直す。
+  const [today, setToday] = useState<TodayState>({ data: null, error: null });
+  const todayDate = useRef<string | null>(null);
+  useEffect(() => {
+    if (!showingCurrent) return;
+    let cancelled = false;
+    const load = () => {
+      if (document.visibilityState !== "visible") return;
+      api<TodayResponse>("/api/analytics/today")
+        .then((r) => {
+          if (cancelled) return;
+          const fresh = r.configured ? r : null;
+          // UTC の日付が変わったら、昨日の確定額が cost report に載るので、月も読み直す。
+          if (fresh && todayDate.current !== null && todayDate.current !== fresh.date) setReloads((n) => n + 1);
+          todayDate.current = fresh?.date ?? null;
+          setToday({ data: fresh, error: null });
+        })
+        .catch((e) => {
+          if (!cancelled) setToday((t) => ({ data: t.data, error: String(e.message ?? e) }));
+        });
+    };
+    load();
+    const timer = setInterval(load, TODAY_REFRESH_MS);
+    // 別のタブから戻ったときは、次の 1 分を待たずに読む。
+    const onVisible = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [showingCurrent, reloads]);
   // 読み込み中は前の表示を薄くして残す（枠が跳ねない）。読み込みが終わったあとは、
   // 見出しの月と違う月の数字を出さない。
   const report = loaded && (loading || loaded.month === shown) ? loaded : null;
@@ -121,8 +176,9 @@ export function AnalyticsPage() {
         <h1>利用料</h1>
         <p className="lead">
           Anthropic の cost report（請求ベース・組織全体）を表示します。日付は UTC
-          区切り（日本時間の 9:00 に切り替わり）で、載るのは終わった日までです。進行中の日のぶんは、次の
-          9:00 を過ぎてから表示されます。月の集計は、クレジットが付与される毎月5日から翌月4日までです。
+          区切り（日本時間の 9:00 に切り替わり）で、cost report に載るのは終わった日までです。進行中の日のぶんは、usage
+          report のトークン数から推計した額を「今日の推計」に出します（数分遅れ、1 分ごとに更新）。確定額は、次の 9:00
+          を過ぎてから一覧に載ります。月の集計は、クレジットが付与される毎月5日から翌月4日までです。
         </p>
       </header>
 
@@ -176,12 +232,12 @@ export function AnalyticsPage() {
           body="API サーバーの環境変数 ANTHROPIC_ADMIN_API_KEY に、Anthropic の cost report を読めるキー（Admin API キーなど）を設定すると、ここに日毎の利用料が表示されます。"
         />
       )}
-      {report && <Report m={report} stale={loading} />}
+      {report && <Report m={report} stale={loading} today={report.current ? today : undefined} />}
     </div>
   );
 }
 
-function Report({ m, stale }: { m: CostMonth; stale: boolean }) {
+function Report({ m, stale, today }: { m: CostMonth; stale: boolean; today?: TodayState }) {
   const guideline = m.daily_guideline_usd;
   // cost report に載るのは終わった日までなので、進行中の月でも「今日」の行はない。
   // 今月は、いちばん新しい確定日を取り上げる。
@@ -191,6 +247,10 @@ function Report({ m, stale }: { m: CostMonth; stale: boolean }) {
   const overBudget = m.remaining_usd < 0;
   const paceDiff = m.spent_usd - m.pace_usd;
   const used = Math.min(Math.max(m.spent_usd / m.monthly_budget_usd, 0), 1);
+  // 今日の推計の枠は、今月で、推計か取得の失敗のどちらかがあるときに出す。
+  const showToday = Boolean(today && (today.data || today.error));
+  const estimate = today?.data ?? null;
+  const columns = 3 + (latest ? 1 : 0) + (showToday ? 1 : 0);
 
   // 新しい日を上に。累計はその日までの合計なので、古い順に足してから並べ替える。
   let running = 0;
@@ -203,7 +263,7 @@ function Report({ m, stale }: { m: CostMonth; stale: boolean }) {
 
   return (
     <div className={`analytics-report${stale ? " is-stale" : ""}`} aria-busy={stale}>
-      <div className={`stats${latest ? "" : " is-three"}`}>
+      <div className="stats" style={{ "--cols": columns } as CSSProperties}>
         <Stat
           label={m.current ? "今月の残り" : "予算の残り"}
           value={overBudget ? `−${usd(-m.remaining_usd)}` : usd(m.remaining_usd)}
@@ -228,6 +288,11 @@ function Report({ m, stale }: { m: CostMonth; stale: boolean }) {
             {m.current && until && `（${shortDay(until.date)} までの確定分）`}
             {m.current && `。残り ${m.days_left} 日（今日を含む）`}
           </p>
+          {estimate && (
+            <p className="stat-note">
+              今日の推計を含めると残り {signedRemaining(m.remaining_usd - estimate.cost_usd)}
+            </p>
+          )}
         </Stat>
 
         <Stat
@@ -241,6 +306,17 @@ function Report({ m, stale }: { m: CostMonth; stale: boolean }) {
               : "確定した日がまだありません"}
           </p>
         </Stat>
+
+        {showToday && (
+          <Stat
+            label="今日の推計"
+            value={estimate ? usd(estimate.cost_usd) : "—"}
+            badge={estimate ? <Verdict over={estimate.over} /> : undefined}
+          >
+            {estimate && <TodayNote t={estimate} />}
+            {today?.error && <p className="stat-note is-error">{today.error}</p>}
+          </Stat>
+        )}
 
         {latest && (
           <Stat
@@ -336,6 +412,32 @@ function Report({ m, stale }: { m: CostMonth; stale: boolean }) {
         </>
       )}
     </div>
+  );
+}
+
+/** 残りの額。予算を超えたら「−」を付ける。 */
+const signedRemaining = (n: number) => (n < 0 ? `−${usd(-n)}` : usd(n));
+const tokenFormat = new Intl.NumberFormat("ja-JP");
+
+/** 推計が何を数えて、何を数えていないか。 */
+function TodayNote({ t }: { t: CostToday }) {
+  const left = t.unpriced.reduce((sum, u) => sum + u.tokens, 0);
+  const models = [...new Set(t.unpriced.map((u) => u.model ?? "不明なモデル"))];
+  return (
+    <>
+      {/* 時刻は「取得」の時刻と同じく、ブラウザの時間帯で出す。日の始まりだけ UTC と書く。 */}
+      <p className="stat-note">
+        {timeFormat.format(Date.parse(t.through))} までの利用から単価表で計算した推計（UTC の {shortDay(t.date)} 0:00 から
+        {t.last_usage_at && `。最後の利用 ${timeFormat.format(Date.parse(t.last_usage_at))}`}
+        ）。反映は数分遅れます。
+      </p>
+      {left > 0 && (
+        <p className="stat-note">
+          単価の分からない利用（{models.slice(0, 2).join("、")}
+          {models.length > 2 && ` ほか ${models.length - 2} 件`}、{tokenFormat.format(left)} トークン）は含みません。
+        </p>
+      )}
+    </>
   );
 }
 

@@ -178,7 +178,7 @@ APIに届かない間、botは待ち時間を倍にしながら再試行しま�
 
 ## 利用料ページ（2026-10-09）
 
-Webの `/analytics` は、APIの `GET /api/analytics/cost` を通して Anthropic の Admin API の cost report（`GET /v1/organizations/cost_report`）を表示します（[#48](https://github.com/hsincode/hibana/issues/48)）。見られるのは administrator（`WEB_ADMIN_IDS`）だけです。
+Webの `/analytics` は、APIの `GET /api/analytics/cost` を通して Anthropic の Admin API の cost report（`GET /v1/organizations/cost_report`）を表示します（[#48](https://github.com/hsincode/hibana/issues/48)）。2026-10-15 から、ダッシュボードにログインした全員が見られます（[#85](https://github.com/hsincode/hibana/issues/85)。それまでは administrator だけでした）。
 
 APIのVercelプロジェクト（`hibana-api`）の環境変数に `ANTHROPIC_ADMIN_API_KEY` を設定します。botが使う `ANTHROPIC_API_KEY`（Anthropic Console の workspace に属するキー。プロバイダー「Anthropic Workspace」とは別の話です）とは別のもので、使えるのは次のどちらかです（[公式ドキュメント](https://platform.claude.com/docs/en/manage-claude/admin-api)）。
 
@@ -204,6 +204,24 @@ Admin API は個人アカウントでは使えません。Console の組織が I
 - Individual Org の個人キーでは403（`permission_error: Missing permissions`）でした（同じキーで `GET /v1/organizations/me` は200）
 - 未確認: Console の Cost の表示との照合、本番（Vercel）での動作、日付が変わってから前日の行が載るまでの時間
 - 5日始まりの集計（#81、2026-10-14）は、手元のテスト（代用の応答）だけで確かめています。実際の cost report を使った確認と、Console のクレジットの表示との照合はしていません
+
+### 今日の推計（2026-10-15）
+
+cost report に載らない進行中の日（UTC）は、APIの `GET /api/analytics/today` が Admin API の usage report（`GET /v1/organizations/usage_report/messages`）から推計します（[#85](https://github.com/hsincode/hibana/issues/85)）。usage report は1分単位で、反映は通常5分以内ですが、返すのはトークン数だけです（[公式ドキュメント](https://platform.claude.com/docs/en/manage-claude/usage-cost-api)）。
+
+- UTC の 0:00 から、終わった最後の1分までを、1回の問い合わせ（`bucket_width=1m`、`limit=1440`）で読みます。モデル・service tier・inference geo・context window ごとに分けて受け取ります
+- 額は、bot と同じ単価表（`packages/shared/src/catalog.ts` の `ANTHROPIC_PRICES`）に、[料金のページ](https://platform.claude.com/docs/en/about-claude/pricing)の倍率（5分キャッシュの書き込みは入力単価の1.25倍、Batch は50%、`inference_geo: "us"` は1.1倍、web search は1,000回で$10）を掛けた推計です。請求額とは一致しません
+- 単価表にないモデルと、Standard・Batch 以外の service tier の利用は、額に入れず、モデル名とトークン数を画面に出します
+- Claude Haiku 5.5 は、プロンプトが100,000トークンを超えたリクエストだけ高い単価です。usage report は200,000トークンでしか分けないので、100,000〜200,000トークンのリクエストは安い単価で数えます（推計が少なめに出ます）
+- fast mode、コード実行、Managed Agents のセッションの稼働時間は usage report に入らないので、推計に入りません
+- 翌日（日本時間の9:00以降）、その日の行は cost report の確定額に置き換わります
+- ページは、今月を表示している間、画面が見えていれば1分ごとに推計を読み直します。APIは推計も1分間メモリに保持します
+- APIから Anthropic への問い合わせ（cost report と usage report の合計）は、インスタンスごとに1分間に10回までです。超えると429で「1分ほど待って再読み込み」と返します。全員が見られるようになり、過去の月を次々に開くだけで Anthropic のリクエスト制限に当たるのを防ぐためです。Vercel が複数のインスタンスで動かすと、上限もインスタンスごとに数えます
+
+検証の範囲（2026-10-15）:
+
+- 手元のテスト（`apps/api/src/analytics.test.ts`、`apps/web/tests/analytics.spec.ts`）だけです。usage report の応答は公式の API リファレンスの形に合わせた代用です
+- 未確認: 実際の usage report の応答、進行中の1分・1時間が返るか、推計と翌日の確定額との差、本番（Vercel）での動作。手元に Admin API キーがないため、実 API は呼んでいません
 
 ## 会話履歴と Auto Routing の経路の保存（2026-10-10）
 
@@ -280,7 +298,7 @@ bot は、会話履歴と Auto Routing の経路を `/var/lib/hibana/conversatio
   - `Workspace session keeps an older tool list`: ツールの一覧が、そのセッションを作ったときから変わっている
   - `Workspace session removed` と、失敗時の `Workspace session could not be removed`（5 回失敗すると、次の起動まで試しません。workflow run が開いたままのセッションは、delete / archive が 400 で拒否されることがあります。下の `/clear` の項）
   - 警告: `workspace budget could not be lowered`、`workspace budget was not lowered: every value was rejected`、`workspace session has more than one workflow run open`、`workspace session multiagent differs from its variant`、`workspace tool result was not accepted`（Hibana のツールの結果を、セッションが受け取らなかった。届かなかった結果は送り直します）
-- `/usage`（owner のみ）に、従来の推計とは別の行で出ます。`/context` には `workspace`（`variant`、`created_at`、`container_until`）が出ます。`container_until` は作成から 30 日後で、その後はコンテナの中身が失われます
+- `/usage`に、従来の推計とは別の行で出ます。`/context` には `workspace`（`variant`、`created_at`、`container_until`）が出ます。`container_until` は作成から 30 日後で、その後はコンテナの中身が失われます
 - `/clear` は、会話に加えて、クラウドのセッションと作業ファイルも削除します。**Haiku Ultra で workflow run が開いたまま残っているセッションは、削除（モデルの変更では archive）が 400 で拒否されることがあります**（公開文書の記述。実 API では未確認）。その間は、会話と作業ファイルが Anthropic 側に残ります。`/clear` の返信は「削除を始めました」のままです。片付けは 60 秒ごとに 5 回試し、その後は次の bot の起動まで試しません。止まった run は、寿命（既定 24 時間）が過ぎるまで自分では終わりません
 - bot がサーバーから外されても（kick）、そのサーバーのセッションは片付けません。`workspace_sessions` の行と、Anthropic 側の会話・作業ファイルは残ります
 - 同じチャンネルのターンは、発言した人によらず 1 つずつ順に動きます（ほかのプロバイダーのターンと同じ、チャンネルごとのキュー）。待っている発言に、待ちの表示は出ません

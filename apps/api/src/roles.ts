@@ -83,9 +83,11 @@ export function canModerate(role: Role): boolean {
 }
 
 /**
- * Actor may read the Anthropic cost report. Billing is the owner's alone
- * (decision records #44 and #48), so moderators are left out on purpose.
+ * Actor may read the Anthropic spend (the cost report and today's estimate).
+ * It was the owner's alone (decision records #44 and #48); since #85 every
+ * role may read it. The figures are the organization's totals, so they say
+ * nothing about one server's conversations.
  */
-export function canViewAnalytics(role: Role): boolean {
-  return role === "administrator";
+export function canViewAnalytics(_role: Role): boolean {
+  return true;
 }

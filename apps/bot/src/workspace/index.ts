@@ -109,7 +109,7 @@ const CONTAINER_DAYS = 30;
 const MAX_IMAGES = 4;
 
 const SESSION_GONE = "クラウドのセッションが無くなっていたため、新しい会話として始めます。以前の作業ファイルは引き継がれません。";
-// No amount: what the bot has spent is the owner's to read (`/usage`, #44).
+// No amount: `/usage` shows what has been spent (#44, #85).
 const DAY_LIMIT = "Anthropic Workspace の 1 日の利用額の上限に達しているため、実行しませんでした。上限は UTC の 0 時に戻ります。";
 const MONTH_LIMIT = "Anthropic Workspace の今月の利用額の上限に達しているため、実行しませんでした。";
 const LEDGER_UNREAD = "Anthropic Workspace の利用額の記録を読み込めていないため、実行しませんでした。管理者に連絡してください。";

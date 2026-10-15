@@ -311,14 +311,15 @@ export function Shell({
               {link("/", <Icon.grid />, "サーバー一覧", true)}
               {link("/me", <Icon.user />, "マイ設定")}
               {link("/artifacts", <Icon.box />, "すべての成果物")}
+              {/* 利用料は全ユーザーが見られる（#85）。古い API はフラグを返さないことがある。 */}
+              {me.can_view_analytics && link("/analytics", <Icon.gauge />, "利用料")}
             </div>
-            {(me.can_manage_users || me.can_view_analytics) && (
+            {me.can_manage_users && (
               <>
                 <div className="nav-label">管理</div>
                 <div className="nav-group">
-                  {me.can_manage_users && link("/users", <Icon.users />, "ユーザー")}
-                  {me.can_manage_users && link("/models", <Icon.cpu />, "モデル")}
-                  {me.can_view_analytics && link("/analytics", <Icon.gauge />, "利用料")}
+                  {link("/users", <Icon.users />, "ユーザー")}
+                  {link("/models", <Icon.cpu />, "モデル")}
                 </div>
               </>
             )}

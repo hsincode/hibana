@@ -123,13 +123,13 @@ test("an Anthropic stream's usage reaches the ledger with cache reads and writes
   expect(ledger.summary().today).toEqual({ cost_usd: 2.06, requests: 1 });
 });
 
-test("/usage answers only the owner", async () => {
+test("/usage answers every user except a blocked one (#85)", async () => {
   const { handleCommand } = await import("../commands");
   const ledger = new UsageLedger(join(dir, "u.json"), at("2026-10-09T00:00:00Z"));
   ledger.record(record());
   const runtime = {
-    snapshot: { blocked_users: [] },
-    role: (id: string) => (id === "owner" ? "administrator" : "moderator"),
+    snapshot: { blocked_users: ["blocked-user"] },
+    role: (id: string) => (id === "owner" ? "administrator" : "free"),
   };
   const reply = async (userId: string) => {
     let text = "";
@@ -137,13 +137,14 @@ test("/usage answers only the owner", async () => {
       commandName: "usage", user: { id: userId }, guildId: "g1", channelId: "c1",
       client: { user: { id: "bot" } }, channel: { isThread: () => false },
       options: { getString: () => null, getBoolean: () => null },
-      deferReply: async () => {}, reply: async () => {},
+      deferReply: async () => {}, reply: async (r: { content: string }) => { text = r.content; },
       editReply: async (t: string) => { text = t; },
     };
     // Only the fields /usage touches are faked.
     await handleCommand(i as never, runtime as never, {} as never, {} as never, {} as never, async () => {}, ledger);
     return text;
   };
-  expect(await reply("moderator-user")).toBe("エラー: このコマンドは owner のみ使用できます。");
+  expect(await reply("free-user")).toContain('"cost_usd": 2.06');
   expect(await reply("owner")).toContain('"cost_usd": 2.06');
+  expect(await reply("blocked-user")).toBe("利用が無効になっています。");
 });

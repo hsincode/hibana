@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { CostReport, CostReportError, MONTHLY_BUDGET_USD, parseMonth, summarize } from "./analytics";
+import { CostReport, CostReportError, estimate, MAX_CALLS_PER_MINUTE, MONTHLY_BUDGET_USD, parseMonth, summarize, type UsageRow } from "./analytics";
 import { createApp } from "./create-app";
 import { loadTestEnv } from "./env";
 import { MemoryStore } from "./store";
@@ -409,12 +409,17 @@ describe("GET /api/analytics/cost", () => {
 
   const september = { data: [bucket("2026-09-05", ["700"]), bucket("2026-09-06", ["100"])], has_more: false, next_page: null };
 
-  test("only the administrator may read it", async () => {
+  test("every logged-in user may read it (#85), and no one else", async () => {
     const { get, calls } = await setup(ADMIN_KEY, [september]);
     expect((await get("/api/analytics/cost?month=2026-09")).status).toBe(401);
-    expect((await get("/api/analytics/cost?month=2026-09", "mod-1")).status).toBe(403);
-    expect((await get("/api/analytics/cost?month=2026-09", "free-1")).status).toBe(403);
     expect(calls).toHaveLength(0);
+    for (const user of ["mod-1", "free-1"]) {
+      const res = await get("/api/analytics/cost?month=2026-09", user);
+      expect(res.status).toBe(200);
+      expect((await res.json()).spent_usd).toBe(8);
+    }
+    // The three readers shared one request: the month is cached for a minute.
+    expect(calls).toHaveLength(1);
 
     const res = await get("/api/analytics/cost?month=2026-09", "admin-1");
     expect(res.status).toBe(200);
@@ -438,8 +443,8 @@ describe("GET /api/analytics/cost", () => {
     const { get } = await setup(ADMIN_KEY);
     const flag = async (session: string) => (await (await get("/api/me", session)).json()).can_view_analytics;
     expect(await flag("admin-1")).toBe(true);
-    expect(await flag("mod-1")).toBe(false);
-    expect(await flag("free-1")).toBe(false);
+    expect(await flag("mod-1")).toBe(true);
+    expect(await flag("free-1")).toBe(true);
   });
 
   test("without a key it reports that it is not set up and calls nothing", async () => {
@@ -476,5 +481,239 @@ describe("GET /api/analytics/cost", () => {
     const text = await res.text();
     expect(text).toContain("HTTP 401");
     expect(text).not.toContain(ADMIN_KEY);
+  });
+
+  test("today's estimate: any logged-in user, from the usage report, never cached by the browser", async () => {
+    const page = { data: [minute("2026-10-09T01:00:00Z", [usage({ model: "claude-opus-5-5", uncached_input_tokens: 1_000_000 })])], has_more: false, next_page: null };
+    const { get, calls } = await setup(ADMIN_KEY, [page]);
+    expect((await get("/api/analytics/today")).status).toBe(401);
+    expect(calls).toHaveLength(0);
+    const res = await get("/api/analytics/today", "free-1");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const body = await res.json();
+    expect(body).toMatchObject({ configured: true, date: "2026-10-09", cost_usd: 4, unpriced: [] });
+    expect(JSON.stringify(body)).not.toContain(ADMIN_KEY);
+    expect(calls[0].url.pathname).toBe("/v1/organizations/usage_report/messages");
+  });
+
+  test("today's estimate without a key reports that it is not set up and calls nothing", async () => {
+    const { get, calls } = await setup(null);
+    expect(await (await get("/api/analytics/today", "free-1")).json()).toEqual({ configured: false });
+    expect(calls).toHaveLength(0);
+  });
+});
+
+/** One result of the usage report as Anthropic documents it, grouped by model, tier, geo and context window. */
+function usage(over: Record<string, unknown> = {}) {
+  return {
+    account_id: null, api_key_id: null, service_account_id: null, workspace_id: null,
+    model: "claude-opus-5-5", service_tier: "standard", inference_geo: "global", context_window: "0-200k",
+    uncached_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0,
+    cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 0 },
+    server_tool_use: { web_search_requests: 0 },
+    ...over,
+  };
+}
+
+/** One 1-minute bucket of the usage report. */
+function minute(start: string, results: object[] = []) {
+  const end = new Date(at(start) + 60_000).toISOString().replace(".000Z", "Z");
+  return { starting_at: start, ending_at: end, results };
+}
+
+const row = (over: Partial<UsageRow> = {}): UsageRow => ({
+  model: "claude-opus-5-5", service_tier: "standard", inference_geo: "global", context_window: "0-200k",
+  uncached_input_tokens: 0, cache_read_input_tokens: 0, cache_write_5m_tokens: 0, cache_write_1h_tokens: 0,
+  output_tokens: 0, web_search_requests: 0,
+  ...over,
+});
+
+describe("estimate", () => {
+  // Expected figures are the pricing page's (read 2026-10-15), not the code's own table.
+  const M = 1_000_000;
+  const opus = { uncached_input_tokens: M, cache_write_5m_tokens: M, cache_write_1h_tokens: M, cache_read_input_tokens: M, output_tokens: M };
+
+  test("prices each kind of token at the pricing page's rate", () => {
+    expect(estimate([row({ uncached_input_tokens: M })]).cost_usd).toBeCloseTo(4, 10);
+    expect(estimate([row({ cache_write_5m_tokens: M })]).cost_usd).toBeCloseTo(5, 10);
+    expect(estimate([row({ cache_write_1h_tokens: M })]).cost_usd).toBeCloseTo(8, 10);
+    expect(estimate([row({ cache_read_input_tokens: M })]).cost_usd).toBeCloseTo(0.2, 10);
+    expect(estimate([row({ output_tokens: M })]).cost_usd).toBeCloseTo(20, 10);
+    expect(estimate([row({ model: "claude-sonnet-5-5", output_tokens: M })]).cost_usd).toBeCloseTo(10, 10);
+    expect(estimate([row(opus), row(opus)]).cost_usd).toBeCloseTo(2 * 37.2, 10);
+  });
+
+  test("Batch halves the price and US-only inference adds a tenth, together as well", () => {
+    expect(estimate([row({ ...opus, service_tier: "batch" })]).cost_usd).toBeCloseTo(18.6, 10);
+    expect(estimate([row({ ...opus, inference_geo: "us" })]).cost_usd).toBeCloseTo(40.92, 10);
+    expect(estimate([row({ ...opus, service_tier: "batch", inference_geo: "us" })]).cost_usd).toBeCloseTo(20.46, 10);
+  });
+
+  test("Haiku 5.5 takes its higher row only where the report says the prompt was over 200k", () => {
+    const haiku = { model: "claude-haiku-5-5", uncached_input_tokens: M, output_tokens: M };
+    expect(estimate([row({ ...haiku, context_window: "200k-1M" })]).cost_usd).toBeCloseTo(3, 10);
+    expect(estimate([row({ ...haiku, context_window: "0-200k" })]).cost_usd).toBeCloseTo(0.6, 10);
+  });
+
+  test("web searches are charged whatever the model", () => {
+    expect(estimate([row({ web_search_requests: 10 })]).cost_usd).toBeCloseTo(0.1, 10);
+    expect(estimate([row({ model: "claude-unknown", web_search_requests: 10 })]).cost_usd).toBeCloseTo(0.1, 10);
+  });
+
+  test("usage it cannot price is listed instead of guessed, largest first", () => {
+    const { cost_usd, unpriced } = estimate([
+      row({ model: "claude-opus-5-6", output_tokens: 600, uncached_input_tokens: 400 }),
+      row({ service_tier: "priority", output_tokens: 2000 }),
+      row({ model: "claude-opus-5-6", output_tokens: 500 }),
+      // A name that would otherwise reach Object.prototype.
+      row({ model: "constructor", output_tokens: 10 }),
+      row({ model: null, output_tokens: 0 }),
+    ]);
+    expect(cost_usd).toBe(0);
+    expect(unpriced).toEqual([
+      { model: "claude-opus-5-5", service_tier: "priority", tokens: 2000 },
+      { model: "claude-opus-5-6", service_tier: "standard", tokens: 1500 },
+      { model: "constructor", service_tier: "standard", tokens: 10 },
+    ]);
+  });
+});
+
+describe("CostReport.today", () => {
+  test("asks for today's whole minutes and prices them", async () => {
+    const now = at("2026-10-15T07:42:30Z");
+    const { calls, fetcher } = upstream([{
+      data: [
+        minute("2026-10-15T00:00:00Z", [usage({ uncached_input_tokens: 1_000_000 })]),
+        minute("2026-10-15T07:40:00Z", [usage({ model: "claude-sonnet-5-5", output_tokens: 100_000 })]),
+        minute("2026-10-15T07:41:00Z"),
+      ],
+      has_more: false,
+      next_page: null,
+    }]);
+    const t = await new CostReport(ADMIN_KEY, fetcher, () => now).today();
+
+    expect(calls).toHaveLength(1);
+    const { url, headers } = calls[0];
+    expect(url.origin + url.pathname).toBe("https://api.anthropic.com/v1/organizations/usage_report/messages");
+    expect(url.searchParams.get("starting_at")).toBe("2026-10-15T00:00:00Z");
+    expect(url.searchParams.get("ending_at")).toBe("2026-10-15T07:42:00Z");
+    expect(url.searchParams.get("bucket_width")).toBe("1m");
+    expect(url.searchParams.get("limit")).toBe("1440");
+    expect(url.searchParams.getAll("group_by[]")).toEqual(["model", "service_tier", "inference_geo", "context_window"]);
+    expect(headers.get("x-api-key")).toBe(ADMIN_KEY);
+
+    expect(t).toEqual({
+      configured: true,
+      date: "2026-10-15",
+      through: "2026-10-15T07:42:00Z",
+      last_usage_at: "2026-10-15T07:41:00Z",
+      cost_usd: 5,
+      daily_guideline_usd: 200 / 31,
+      over: false,
+      unpriced: [],
+      fetched_at: now,
+    });
+  });
+
+  test("the guideline is the billing month's, and spend above it is over", async () => {
+    // 2 December is in the billing month that started on 5 November: 30 days.
+    const now = at("2026-12-02T10:00:00Z");
+    const { fetcher } = upstream([{ data: [minute("2026-12-02T09:00:00Z", [usage({ output_tokens: 400_000 })])], has_more: false, next_page: null }]);
+    const t = await new CostReport(ADMIN_KEY, fetcher, () => now).today();
+    expect(t.daily_guideline_usd).toBeCloseTo(200 / 30, 10);
+    expect(t.cost_usd).toBeCloseTo(8, 10);
+    expect(t.over).toBe(true);
+  });
+
+  test("in the first minute of a day nothing has finished: zero and no request", async () => {
+    const { calls, fetcher } = upstream([]);
+    const t = await new CostReport(ADMIN_KEY, fetcher, () => at("2026-10-15T00:00:40Z")).today();
+    expect(calls).toHaveLength(0);
+    expect(t).toMatchObject({ date: "2026-10-15", through: "2026-10-15T00:00:00Z", last_usage_at: null, cost_usd: 0 });
+  });
+
+  test("serves today from cache for a minute, but never yesterday's figure after midnight", async () => {
+    let now = at("2026-10-15T23:58:30Z");
+    const { calls, fetcher } = upstream([
+      { data: [minute("2026-10-15T10:00:00Z", [usage({ uncached_input_tokens: 1_000_000 })])], has_more: false, next_page: null },
+      { data: [minute("2026-10-15T10:00:00Z", [usage({ uncached_input_tokens: 2_000_000 })])], has_more: false, next_page: null },
+    ]);
+    const report = new CostReport(ADMIN_KEY, fetcher, () => now);
+    const [a, b] = await Promise.all([report.today(), report.today()]);
+    expect(calls).toHaveLength(1);
+    expect(a.cost_usd).toBe(4);
+    expect(b.fetched_at).toBe(a.fetched_at);
+
+    now += 59_000;
+    expect((await report.today()).cost_usd).toBe(4);
+    expect(calls).toHaveLength(1);
+
+    now += 1_000;
+    expect((await report.today()).cost_usd).toBe(8);
+    expect(calls).toHaveLength(2);
+
+    // 16 October, 00:00:30: a new day, inside the cached minute.
+    now = at("2026-10-16T00:00:30Z");
+    const next = await report.today();
+    expect(next).toMatchObject({ date: "2026-10-16", cost_usd: 0, last_usage_at: null });
+    expect(calls).toHaveLength(2);
+  });
+
+  test("follows next_page, and a failure is not cached", async () => {
+    const { calls, fetcher } = upstream([
+      new Response("{}", { status: 500 }),
+      { data: [minute("2026-10-15T01:00:00Z", [usage({ uncached_input_tokens: 1_000_000 })])], has_more: true, next_page: "page_2" },
+      { data: [minute("2026-10-15T02:00:00Z", [usage({ uncached_input_tokens: 1_000_000 })])], has_more: false, next_page: null },
+    ]);
+    const report = new CostReport(ADMIN_KEY, fetcher, () => at("2026-10-15T07:00:00Z"));
+    const err = await report.today().catch((e) => e);
+    expect(err).toBeInstanceOf(CostReportError);
+    expect(err.message).toContain("usage report");
+    expect(err.message).toContain("HTTP 500");
+    const t = await report.today();
+    expect(t.cost_usd).toBe(8);
+    expect(t.last_usage_at).toBe("2026-10-15T02:01:00Z");
+    expect(calls.map((c) => c.url.searchParams.get("page"))).toEqual([null, null, "page_2"]);
+  });
+
+  test("a report of an unexpected shape is a 502, not a wrong figure", async () => {
+    for (const result of [
+      usage({ output_tokens: "12" }),
+      usage({ uncached_input_tokens: -1 }),
+      usage({ model: 5 }),
+      usage({ cache_creation: { ephemeral_5m_input_tokens: "7" } }),
+      usage({ server_tool_use: "none" }),
+      null,
+    ]) {
+      const { fetcher } = upstream([{ data: [minute("2026-10-15T01:00:00Z", [result as object])], has_more: false, next_page: null }]);
+      const err = await new CostReport(ADMIN_KEY, fetcher, () => at("2026-10-15T07:00:00Z")).today().catch((e) => e);
+      expect(err).toBeInstanceOf(CostReportError);
+      expect(err.status).toBe(502);
+      expect(err.message).toContain("usage report");
+    }
+  });
+});
+
+describe("the cap on requests to Anthropic", () => {
+  test("months and today share it; beyond it, a 429 without calling Anthropic, until a minute has passed", async () => {
+    let now = at("2026-10-15T07:00:00Z");
+    const { calls, fetcher } = upstream([{ data: [], has_more: false, next_page: null }]);
+    const report = new CostReport(ADMIN_KEY, fetcher, () => now);
+    // Each month a request of its own, as someone walking back through the months would cause.
+    for (let i = 1; i < MAX_CALLS_PER_MINUTE; i++) await report.month(`2025-${String(i).padStart(2, "0")}`);
+    await report.today();
+    expect(calls).toHaveLength(MAX_CALLS_PER_MINUTE);
+
+    const err = await report.month("2024-01").catch((e) => e);
+    expect(err).toBeInstanceOf(CostReportError);
+    expect(err.status).toBe(429);
+    expect(calls).toHaveLength(MAX_CALLS_PER_MINUTE);
+    // What is cached is still served.
+    expect((await report.month("2025-01")).month).toBe("2025-01");
+
+    now += 60_000;
+    expect((await report.month("2024-01")).month).toBe("2024-01");
+    expect(calls).toHaveLength(MAX_CALLS_PER_MINUTE + 1);
   });
 });

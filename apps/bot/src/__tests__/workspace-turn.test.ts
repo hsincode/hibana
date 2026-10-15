@@ -2151,8 +2151,9 @@ describe("the usage ledger and the sweep", () => {
       expect(long.startsWith("Anthropic Workspace（")).toBe(true);
       expect(long.endsWith("\n```")).toBe(true);
       expect(long.length).toBe(2000);
-      hibana.runtime.snapshot.user_roles["20"] = "premium";
-      expect(await slash(hibana, "usage")).toBe("エラー: このコマンドは owner のみ使用できます。");
+      // Anyone may read it since #85.
+      hibana.runtime.snapshot.user_roles["20"] = "free";
+      expect((await slash(hibana, "usage")).startsWith("Anthropic Workspace（")).toBe(true);
     } finally { await hibana.close(); }
   });
 

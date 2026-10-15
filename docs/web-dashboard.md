@@ -46,7 +46,7 @@ flowchart LR
 | `/artifacts` | すべての成果物 | 管理できるサーバー全部の公開サイト | ログイン済み |
 | `/users` | ユーザー | ロールの変更 | `can_manage_users` |
 | `/models` | モデル | ChatGPT マスターアカウント、プリセットの公開とプレミアム | `can_manage_users` |
-| `/analytics` | 利用料 | Anthropic の cost report | `can_view_analytics` |
+| `/analytics` | 利用料 | Anthropic の cost report と、今日の推計（usage report） | ログイン済み（`can_view_analytics`、#85） |
 
 ページの一覧は `apps/web/src/nav.ts` にあり、サイドバー・タブ帯・コマンドパレットが同じ一覧を使います。
 

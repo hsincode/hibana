@@ -89,7 +89,7 @@
   - この 2 つの表には、作った後で列を 1 つずつ足しています。`workspace_sessions.lease_settled`（残っている lease の印）と `workspace_disposals.allowed_cents`（片付けに回った時点で、まだ数えていなかった枠）です。使い方は「上限と費用」にあります
   - `CREATE TABLE IF NOT EXISTS` は既にある表を変えないので、bot は `conversations.db` を開くたびに `PRAGMA table_info` で列を確かめ、無い列だけを `ALTER TABLE … ADD COLUMN` で足します。列が空の行は、今までどおりに読みます（`workspace-sessions.test.ts` の「a file from before a lease's settlement was kept gains the two columns, and its rows read as they did」。足し方は AI の案、本人未確認。代案は、このブランチで作った表なので `CREATE TABLE` の文に入れる形です）
 - エージェント 2 つ（委譲なしの plain と、dynamic workflows を有効にした ultra）と、environment 1 つを使い回します。起動時には作らず、最初のターンで作って、ID を `HIBANA_DATA_DIR/anthropic_workspace_resources.json` に保存します。モデル・effort・システムプロンプト・ツールは、セッションを作るときに上書きして渡します。effort は常に明示します（`none` は `low` にします）
-- **セッションの設定は、作ったときに固定されます。** プロンプトやツールの説明を直して配信しても、既にあるセッションは前の内容のまま動きます。ツールの一覧が変わっていることは、ログに `Workspace session keeps an older tool list` と出るだけです。web 検索の有無も同じです
+- **セッションの設定は、作ったときに固定されます。** プロンプトやツールの説明を直して配信しても、既にあるセッションは前の内容のまま動きます。ツールの一覧が変わっていることは、ログに `Workspace session keeps an older tool list` と出るだけです。web 検索の有無も同じです。`run_jev` の `images`（#83）も、追加より前に作ったセッションには無く、そのセッションでは画像を渡せません
 - セッションを作り直すのは次のときです
 
   | きっかけ | 前のセッション |

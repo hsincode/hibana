@@ -527,8 +527,11 @@ test("site updates preserve URLs, enforce quotas and expire independently of wor
     await sites.start();
     await sandbox.write(ctx, "public/index.html", "first");
     const first = await sites.publish(ctx, "public");
-    expect(await (await sites.serve(new Request(first.url))).text()).toBe(
-      "first",
+    const shared = await sites.serve(new Request(first.url));
+    expect(await shared.text()).toBe("first");
+    // Every site shares this host, so storage would leak between sites.
+    expect(shared.headers.get("content-security-policy")).not.toContain(
+      "allow-same-origin",
     );
     await expect(sites.publish(ctx, "public")).rejects.toThrow("quota");
     await sandbox.write(ctx, "public/index.html", "second");
@@ -548,6 +551,76 @@ test("site updates preserve URLs, enforce quotas and expire independently of wor
     expect((await sandbox.read(ctx, "public/index.html")).content).toBe(
       "second",
     );
+  } finally {
+    sites.stop();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("sites on their own origins may use cookies and storage; shared-host URLs redirect there", async () => {
+  const { Sites } = await import("../tools/sites");
+  const dir = await mkdtemp(join(tmpdir(), "hibana-sites-"));
+  const env = {
+    HIBANA_DATA_DIR: dir,
+    STATIC_SITE_ENABLED: "true",
+    STATIC_SITE_BASE_URL: "https://sites.example.com",
+    STATIC_SITE_BIND: "127.0.0.1:0",
+  };
+  const sharedConfig = loadConfig(env),
+    ownConfig = loadConfig({
+      ...env,
+      STATIC_SITE_ORIGIN_TEMPLATE: "https://{token}.sites.example.com",
+    });
+  const sandbox = new Sandbox(sharedConfig);
+  let sites = new Sites(sharedConfig, sandbox);
+  try {
+    expect(
+      () =>
+        new Sites(
+          loadConfig({
+            ...env,
+            STATIC_SITE_ORIGIN_TEMPLATE: "https://sites.example.com",
+          }),
+          sandbox,
+        ),
+    ).toThrow("STATIC_SITE_ORIGIN_TEMPLATE");
+    await sites.load();
+    await sites.start();
+    await sandbox.write(ctx, "public/index.html", "home");
+    await sandbox.write(ctx, "public/docs/page.html", "page");
+    const old = await sites.publish(ctx, "public");
+    expect(old.url).toBe(`https://sites.example.com/s/${old.token}/`);
+    sites.stop();
+
+    // A site published on the shared host moves to its own origin on restart.
+    sites = new Sites(ownConfig, sandbox);
+    await sites.load();
+    await sites.start();
+    const own = `https://${old.token}.sites.example.com/`;
+    expect(sites.list()[0]!.url).toBe(own);
+    const home = await sites.serve(new Request(own));
+    expect(await home.text()).toBe("home");
+    expect(home.headers.get("content-security-policy")).toContain(
+      "allow-same-origin",
+    );
+    expect(
+      await (await sites.serve(new Request(`${own}docs/page.html`))).text(),
+    ).toBe("page");
+    const legacy = await sites.serve(
+      new Request(old.url + "docs/page.html?x=1"),
+    );
+    expect(legacy.status).toBe(308);
+    expect(legacy.headers.get("location")).toBe(`${own}docs/page.html?x=1`);
+
+    const updated = await sites.publish(ctx, "public", old.token);
+    expect(updated.url).toBe(own);
+    for (const url of [
+      `https://${"0".repeat(32)}.sites.example.com/`,
+      `https://${"0".repeat(32)}.sites.example.com/s/${old.token}/`,
+      `https://${old.token}.other.example.com/`,
+      `https://sites.example.com/s/${"0".repeat(32)}/`,
+    ])
+      expect((await sites.serve(new Request(url))).status).toBe(404);
   } finally {
     sites.stop();
     await rm(dir, { recursive: true, force: true });

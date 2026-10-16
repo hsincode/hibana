@@ -329,6 +329,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     siteEnabled: flag(env, "STATIC_SITE_ENABLED", false),
     siteBind: env.STATIC_SITE_BIND || "127.0.0.1:8080",
     siteBase: env.STATIC_SITE_BASE_URL || env.STATIC_SITE_PUBLIC_BASE_URL || "",
+    // e.g. https://{token}.example.com: each site gets its own origin (#87).
+    siteOriginTemplate: env.STATIC_SITE_ORIGIN_TEMPLATE || "",
     siteTtl: numberEnv(
       env,
       "STATIC_SITE_TTL_SECS",

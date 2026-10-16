@@ -20,20 +20,56 @@ export type Site = {
   bytes: number;
   file_count: number;
 };
+const TOKEN = /^[a-f0-9]{16,64}$/;
+// Splits STATIC_SITE_ORIGIN_TEMPLATE around {token}; the host must be matched
+// as text because "{token}" itself is not a valid URL host.
+function parseOrigin(template: string) {
+  const m = /^(https?):\/\/([a-z0-9.-]*)\{token\}([a-z0-9.-]*(?::\d+)?)\/?$/i.exec(
+    template.trim(),
+  );
+  if (!m)
+    throw new Error(
+      "STATIC_SITE_ORIGIN_TEMPLATE must look like https://{token}.example.com",
+    );
+  return {
+    scheme: m[1]!.toLowerCase(),
+    before: m[2]!.toLowerCase(),
+    after: m[3]!.toLowerCase(),
+  };
+}
 export class Sites {
   private rows: Site[] = [];
   private serial = new Serial();
   private server?: Server<undefined>;
+  // Set when each site is served on its own origin. Without it every site
+  // shares STATIC_SITE_BASE_URL's origin under /s/<token>/.
+  private origin?: ReturnType<typeof parseOrigin>;
   readonly root: string;
   constructor(
     private config: Config,
     private sandbox: Sandbox,
   ) {
     this.root = join(config.dataDir, "sites");
+    if (config.siteEnabled && config.siteOriginTemplate)
+      this.origin = parseOrigin(config.siteOriginTemplate);
   }
   async load() {
     this.rows = await readJson(join(this.root, "sites.json"), []);
+    // URLs follow the current configuration, so switching to per-site origins
+    // moves sites published earlier as well.
+    for (const site of this.rows) site.url = this.urlOf(site.token);
     await this.sweep();
+  }
+  private urlOf(token: string) {
+    return this.origin
+      ? `${this.origin.scheme}://${this.origin.before}${token}${this.origin.after}/`
+      : `${this.config.siteBase.replace(/\/$/, "")}/s/${token}/`;
+  }
+  private tokenOfHost(host: string) {
+    const o = this.origin;
+    if (!o || !host.startsWith(o.before) || !host.endsWith(o.after)) return;
+    const token = host.slice(o.before.length, host.length - o.after.length);
+    return TOKEN.test(token) ? token : undefined;
   }
   async sweep() {
     return this.serial.run(async () => {
@@ -68,7 +104,7 @@ export class Sites {
   }
   async start() {
     if (!this.config.siteEnabled) return;
-    if (!this.config.siteBase)
+    if (!this.config.siteBase && !this.origin)
       throw new Error("STATIC_SITE_BASE_URL is required");
     const u = new URL(`http://${this.config.siteBind}`);
     this.server = Bun.serve({
@@ -79,19 +115,31 @@ export class Sites {
   }
   async serve(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const match = /^\/s\/([a-f0-9]{16,64})(?:\/(.*))?$/.exec(url.pathname);
-    if (!match) return new Response("Not found", { status: 404 });
-    const site = this.list().find((s) => s.token === match[1]);
+    const hosted = this.tokenOfHost(url.host);
+    let token = hosted,
+      rest = url.pathname.slice(1);
+    if (!hosted) {
+      const match = /^\/s\/([a-f0-9]{16,64})(?:\/(.*))?$/.exec(url.pathname);
+      if (!match) return new Response("Not found", { status: 404 });
+      [, token, rest = ""] = match;
+    }
+    const site = this.list().find((s) => s.token === token);
     if (!site) return new Response("Not found", { status: 404 });
+    // URLs shared before the switch to per-site origins keep working, but
+    // they are not served on the shared host, where sites would share storage.
+    if (this.origin && !hosted)
+      return new Response(null, {
+        status: 308,
+        headers: { Location: this.urlOf(site.token) + rest + url.search },
+      });
     try {
       const root = join(this.root, site.directory ?? site.token);
       let file = await safePath(
         root,
-        decodeURIComponent(match[2] || "index.html"),
+        decodeURIComponent(rest || "index.html"),
       );
       const st = await lstat(file);
-      if (st.isDirectory())
-        file = await safePath(root, `${match[2]}/index.html`);
+      if (st.isDirectory()) file = await safePath(root, `${rest}/index.html`);
       const data = Bun.file(file);
       if (!(await data.exists()))
         return new Response("Not found", { status: 404 });
@@ -100,8 +148,11 @@ export class Sites {
           "Content-Type": data.type,
           "X-Content-Type-Options": "nosniff",
           "Referrer-Policy": "no-referrer",
-          "Content-Security-Policy":
-            "sandbox allow-scripts allow-forms allow-downloads; default-src 'self' data: blob: https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; frame-ancestors 'none'",
+          // allow-same-origin lets a site use cookies and localStorage. It is
+          // given only on a site's own origin: on the shared host it would let
+          // one site read another's storage. Sites on sibling subdomains still
+          // share cookies set with a parent Domain attribute.
+          "Content-Security-Policy": `sandbox allow-scripts allow-forms allow-downloads${hosted ? " allow-same-origin" : ""}; default-src 'self' data: blob: https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; frame-ancestors 'none'`,
         },
       });
     } catch {
@@ -161,7 +212,7 @@ export class Sites {
         scope: scopeOf(ctx),
         guild_id: ctx.guildId ?? null,
         channel_id: ctx.channelId,
-        url: `${this.config.siteBase.replace(/\/$/, "")}/s/${token}/`,
+        url: this.urlOf(token),
         source_path: path,
         created_at_unix: old?.created_at_unix ?? now,
         updated_at_unix: old ? now : null,

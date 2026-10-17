@@ -18,6 +18,13 @@ export const SNAPSHOT_POLL_MS = 30_000;
 /** Longest wait between attempts while the settings API keeps failing. */
 export const SNAPSHOT_RETRY_MAX_MS = 300_000;
 
+/**
+ * How often the bot asks the settings API whether the month's budget is low
+ * (#89). The API answers from the cost report and the usage report, which it
+ * caches for a minute, so this adds at most one call of each per two minutes.
+ */
+export const BUDGET_POLL_MS = 120_000;
+
 /** Wait before the next poll: the interval, doubled per consecutive failure. */
 export function retryDelay(failures: number, pollMs: number, maxMs: number) {
   return Math.min(pollMs * 2 ** failures, maxMs);
@@ -35,12 +42,44 @@ export class WebSync {
   private announced = false;
   /** Digests of the lists the API last accepted. */
   private published: { sites?: string; skills?: string } = {};
+  /** When `/internal/budget` was last asked, answered or not. */
+  private budgetAsked = -Infinity;
   constructor(
     private runtime: Runtime,
     private tools: ToolRegistry,
     private onError: (e: unknown) => void,
-    private timing = { pollMs: SNAPSHOT_POLL_MS, maxMs: SNAPSHOT_RETRY_MAX_MS },
+    private timing: { pollMs: number; maxMs: number; budgetMs?: number } = { pollMs: SNAPSHOT_POLL_MS, maxMs: SNAPSHOT_RETRY_MAX_MS },
+    private now: () => number = Date.now,
   ) {}
+  /**
+   * Asks the settings API whether Anthropic API turns should run on the
+   * fallback model (#89), at most once per `budgetMs`. Never throws: a failed
+   * request is reported and the last answer is kept, so a blip neither starts
+   * nor ends the fallback. An API without an Admin API key answers that it
+   * cannot tell, which turns the fallback off.
+   */
+  async checkBudget() {
+    if (!this.runtime.config.webApiUrl) return;
+    const now = this.now();
+    if (now - this.budgetAsked < (this.timing.budgetMs ?? BUDGET_POLL_MS)) return;
+    this.budgetAsked = now;
+    try {
+      const body = (await this.runtime.remote("/internal/budget", "GET", undefined, this.abort.signal)) as {
+        configured?: unknown;
+        low?: unknown;
+        remaining_after_today_usd?: unknown;
+      };
+      if (body.configured === false) {
+        await this.runtime.setBudget({ low: false, remaining_after_today_usd: null, checked_at: now });
+        return;
+      }
+      if (typeof body.low !== "boolean" || typeof body.remaining_after_today_usd !== "number")
+        throw new Error("Budget status: unexpected response");
+      await this.runtime.setBudget({ low: body.low, remaining_after_today_usd: body.remaining_after_today_usd, checked_at: now });
+    } catch (e) {
+      if (!this.abort.signal.aborted) this.onError(e);
+    }
+  }
   async pull() {
     return this.queue.run(async () => {
       const c = this.runtime.config;
@@ -163,6 +202,7 @@ export class WebSync {
       this.onError(e);
       failures = 1;
     }
+    await this.checkBudget();
     void this.watch(failures);
   }
   /** One round: the snapshot, then what this process still owes the API. */
@@ -191,6 +231,7 @@ export class WebSync {
         failures++;
         if (!this.abort.signal.aborted) this.onError(e);
       }
+      await this.checkBudget();
     }
   }
   stop() {

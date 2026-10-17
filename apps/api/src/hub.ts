@@ -22,6 +22,11 @@ export type CachedSnapshot = {
    * Dashboard is the writer (`preset_premium` meta); PUT must not replace this.
    */
   premium_presets: string[];
+  /**
+   * The model Anthropic API turns switch to while the budget is low (#89).
+   * Dashboard is the writer (`budget_fallback` meta); PUT must not replace this.
+   */
+  budget_fallback: import("@hibana/shared/budget").BudgetFallback;
   /** Dashboard pin/unpin/month-extend waiting for the bot. */
   artifact_commands: {
     id: number;

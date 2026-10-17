@@ -399,7 +399,13 @@ export type RequestRecord = {
   latency_ms: number;
   prefix?: PrefixReport;
 };
-export type LlmHooks = RequestHooks & { onCompletion?: (record: RequestRecord) => void };
+export type LlmHooks = RequestHooks & {
+  onCompletion?: (record: RequestRecord) => void;
+  /** Swaps the model of a request just before it is sent: the budget
+   *  fallback (#89). Every request goes through here, children and history
+   *  compaction included. */
+  budgetSelection?: (selection: Selection) => Selection;
+};
 export class LlmClient {
   private audit = new PrefixAudit();
   constructor(
@@ -426,6 +432,7 @@ export class LlmClient {
     } = {},
   ): Promise<Completion> {
     selection = concreteSelection(selection);
+    if (this.hooks.budgetSelection) selection = this.hooks.budgetSelection(selection);
     const isChatgpt = selection.provider === "chatgpt";
     // This provider only uses registered master credentials. Never reuse an
     // environment API key or a configurable endpoint for ChatGPT OAuth tokens.

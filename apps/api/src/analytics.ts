@@ -19,6 +19,7 @@
 // may run more than one instance; each has its own cache and cap.
 
 import { billingBounds, billingMonth } from "@hibana/shared/billing";
+import { budgetLow, BUDGET_FALLBACK_THRESHOLD_USD } from "@hibana/shared/budget";
 import { ANTHROPIC_PRICES } from "@hibana/shared/catalog";
 
 const ENDPOINT = "https://api.anthropic.com/v1/organizations/cost_report";
@@ -225,6 +226,23 @@ export function estimate(rows: readonly UsageRow[]): { cost_usd: number; unprice
   return { cost_usd: cost, unpriced: [...unpriced.values()].sort((a, b) => b.tokens - a.tokens) };
 }
 
+/** Whether Anthropic API turns run on the fallback model (#89). */
+export type BudgetStatus = {
+  configured: true;
+  /** The billing month the figures are for. */
+  month: string;
+  /** "今月の残り": the budget minus the days the cost report has. */
+  remaining_usd: number;
+  /** "今日の推計". */
+  today_usd: number;
+  remaining_after_today_usd: number;
+  threshold_usd: number;
+  /** remaining_after_today_usd is below threshold_usd. */
+  low: boolean;
+  /** When the older of the two figures was read from Anthropic. */
+  fetched_at: number;
+};
+
 type Page = { data?: unknown; has_more?: unknown; next_page?: unknown };
 type TodayUsage = { rows: UsageRow[]; through: string; last: string | null };
 
@@ -330,6 +348,30 @@ export class CostReport {
       });
     }
     return summarize(month, await entry.costs, now, entry.at);
+  }
+
+  /**
+   * The current billing month's remaining budget with today's estimate taken
+   * off, as "今日の推計を含めると残り" on the page, and whether that is below
+   * the fallback threshold (#89). It reads the same caches as the page, so a
+   * caller polling it every few minutes adds at most one call of each report
+   * per minute. Either report failing fails the whole status: half of it would
+   * overstate what is left.
+   */
+  async budget(): Promise<BudgetStatus> {
+    const month = billingMonth(utcDate(this.now()));
+    const [m, t] = await Promise.all([this.month(month), this.today()]);
+    const after = m.remaining_usd - t.cost_usd;
+    return {
+      configured: true,
+      month,
+      remaining_usd: m.remaining_usd,
+      today_usd: t.cost_usd,
+      remaining_after_today_usd: after,
+      threshold_usd: BUDGET_FALLBACK_THRESHOLD_USD,
+      low: budgetLow(after),
+      fetched_at: Math.min(m.fetched_at, t.fetched_at),
+    };
   }
 
   /** The running UTC day, estimated from the usage report. */

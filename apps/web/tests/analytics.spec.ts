@@ -56,19 +56,40 @@ const todayFixture = {
 
 type CostReply = { status?: number; json: unknown };
 
+// The budget fallback (#89): $151.71 left, $3.21 today, so not switched.
+const budgetFixture = (over: Record<string, unknown> = {}) => ({
+  fallback: { preset: "anthropic-haiku-5-5", effort: "high" },
+  threshold_usd: 10,
+  presets: [
+    { id: "anthropic-haiku-5-5", label: "Anthropic / Claude Haiku 5.5", published: true },
+    { id: "anthropic-sonnet-5-5", label: "Anthropic / Claude Sonnet 5.5", published: true },
+    { id: "anthropic-opus-5-5", label: "Anthropic / Claude Opus 5.5", published: true },
+    { id: "anthropic-opus-5-6", label: "Anthropic / Claude Opus 5.6", published: false },
+  ],
+  efforts: ["low", "medium", "high", "xhigh", "max"],
+  can_edit: true,
+  status: {
+    configured: true, month: "2026-10", remaining_usd: 151.71, today_usd: 3.21, remaining_after_today_usd: 148.5,
+    threshold_usd: 10, low: false, fetched_at: Date.parse("2026-10-13T03:00:00Z"),
+  },
+  ...over,
+});
+
 type MockOptions = {
   canView?: boolean;
   today?: () => CostReply;
   me?: Record<string, unknown>;
+  budget?: () => CostReply;
 };
 
 async function mockApi(
   page: Page,
   cost: (month: string | null) => CostReply,
-  { canView = true, today = () => ({ json: todayFixture }), me = {} }: MockOptions = {},
+  { canView = true, today = () => ({ json: todayFixture }), me = {}, budget = () => ({ json: budgetFixture() }) }: MockOptions = {},
 ) {
   const months: (string | null)[] = [];
   const todays = { count: 0 };
+  const budgetWrites: unknown[] = [];
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/api/me")
@@ -95,9 +116,17 @@ async function mockApi(
       todays.count++;
       return route.fulfill(today());
     }
+    if (url.pathname === "/api/budget-fallback") {
+      if (route.request().method() === "PUT") {
+        const body = route.request().postDataJSON();
+        budgetWrites.push(body);
+        return route.fulfill({ json: { fallback: body } });
+      }
+      return route.fulfill(budget());
+    }
     throw new Error(`Unexpected API request: ${url.pathname}`);
   });
-  return { months, todays };
+  return { months, todays, budgetWrites };
 }
 
 const byMonth = (month: string | null): CostReply => ({ json: month === "2026-09" ? september : october });
@@ -306,4 +335,68 @@ test("analytics explains a missing key and shows an upstream error", async ({ pa
   await page.getByRole("button", { name: "再読み込み" }).click();
   await expect(page.locator(".cost-table tbody tr")).toHaveCount(8);
   await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test.describe("budget fallback (#89)", () => {
+  const panel = (page: Page) => page.locator(".budget-panel");
+
+  for (const width of [1440, 390]) {
+    test(`staff see the state and change the model: ${width}px`, async ({ page }) => {
+      const { budgetWrites } = await mockApi(page, byMonth);
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto("/analytics");
+      await expect(panel(page).getByRole("heading", { name: "予算が少ないときのモデル" })).toBeVisible();
+      await expect(panel(page)).toContainText("通常のモデル");
+      await expect(panel(page)).toContainText("今日の推計を含めた残り $148.50");
+      await expect(panel(page)).toContainText("（今月の残り $151.71 − 今日の推計 $3.21）");
+      await expect(panel(page)).toContainText("$10.00 を切ると");
+      const save = panel(page).getByRole("button", { name: "保存" });
+      await expect(save).toBeDisabled();
+
+      await panel(page).getByRole("combobox", { name: "フォールバックモデル" }).click();
+      // A hidden preset is not offered unless it is the stored one.
+      await expect(page.getByRole("option", { name: /Opus 5\.6/ })).toHaveCount(0);
+      await page.getByRole("option", { name: "Anthropic / Claude Sonnet 5.5" }).click();
+      await panel(page).getByRole("combobox", { name: "フォールバックの effort" }).click();
+      await page.getByRole("option", { name: "Medium" }).click();
+      await expect(save).toBeEnabled();
+      await save.click();
+      await expect.poll(() => budgetWrites).toEqual([{ preset: "anthropic-sonnet-5-5", effort: "medium" }]);
+      await expect(page.getByText("フォールバックモデルを保存しました")).toBeVisible();
+      await expect(save).toBeDisabled();
+
+      // Nothing sticks out of a narrow screen.
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      expect(overflow).toBeLessThanOrEqual(0);
+    });
+  }
+
+  test("everyone else sees the model without controls, and the switch when it is on", async ({ page }) => {
+    await mockApi(page, byMonth, {
+      budget: () => ({
+        json: budgetFixture({
+          can_edit: false,
+          status: { configured: true, month: "2026-10", remaining_usd: 12, today_usd: 4.5, remaining_after_today_usd: 7.5, threshold_usd: 10, low: true, fetched_at: 0 },
+        }),
+      }),
+    });
+    await page.goto("/analytics");
+    await expect(panel(page)).toContainText("切り替え中");
+    await expect(panel(page)).toContainText("今日の推計を含めた残り $7.50");
+    await expect(panel(page)).toContainText("いまフォールバックモデルで動いています");
+    await expect(panel(page)).toContainText("Anthropic / Claude Haiku 5.5 · High");
+    await expect(panel(page)).toContainText("変更できるのは Administrator / Moderator です");
+    await expect(panel(page).getByRole("combobox")).toHaveCount(0);
+    await expect(panel(page).getByRole("button", { name: "保存" })).toHaveCount(0);
+  });
+
+  test("says when it cannot tell, and why", async ({ page }) => {
+    await mockApi(page, byMonth, {
+      budget: () => ({ json: budgetFixture({ status: { configured: true, error: "Anthropic の cost report が HTTP 500 を返しました" } }) }),
+    });
+    await page.goto("/analytics");
+    await expect(panel(page)).toContainText("判定できません");
+    await expect(panel(page)).toContainText("HTTP 500");
+    await expect(panel(page)).toContainText("最後に読めた判定のまま");
+  });
 });

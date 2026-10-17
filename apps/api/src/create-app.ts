@@ -70,6 +70,13 @@ import {
 import { guildId, guildSkills, skillAction, skillRow } from "./skills";
 import { ChatgptAccounts, ChatgptError } from "./chatgpt";
 import { CostReport, CostReportError, parseMonth } from "./analytics";
+import {
+  BUDGET_FALLBACK_EFFORTS,
+  BUDGET_FALLBACK_THRESHOLD_USD,
+  budgetFallbackSchema,
+  isBudgetFallbackPreset,
+  parseBudgetFallback,
+} from "@hibana/shared/budget";
 
 async function loadSnapshot(
   store: Store,
@@ -100,6 +107,7 @@ async function loadSnapshot(
   const premium_presets = premiumPresetIds(
     parsePremiumOverrides(await store.getMeta("preset_premium")),
   );
+  const budget_fallback = parseBudgetFallback(await store.getMeta("budget_fallback"));
   const artifact_commands = (await store.listArtifactCommands()).map((c) => ({
     id: c.id,
     token: c.token,
@@ -119,6 +127,7 @@ async function loadSnapshot(
     user_roles,
     unpublished_presets,
     premium_presets,
+    budget_fallback,
     artifact_commands,
     skill_commands,
     chatgpt_available: await chatgpt?.available() ?? false,
@@ -972,6 +981,84 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
       }
       if (!costReport.configured) return { configured: false };
       return costReport.today();
+    })
+    // The model Anthropic API turns switch to while the month's budget is
+    // nearly spent, and whether they do now (#89). Everyone who may read the
+    // cost may read this; only those who may manage the model catalog change it.
+    .get("/api/budget-fallback", async ({ cookie, set }) => {
+      set.headers["cache-control"] = "no-store";
+      const s = await requireSession(cookieSid(cookie as never));
+      if (!s) {
+        set.status = 401;
+        return { error: "unauthorized" };
+      }
+      if (!canViewAnalytics(s.role)) {
+        set.status = 403;
+        return { error: "forbidden" };
+      }
+      const unpublished = await loadUnpublished(store);
+      // A failed status still shows the setting: the page says why instead.
+      let status: unknown = { configured: false };
+      if (costReport.configured) {
+        try {
+          status = await costReport.budget();
+        } catch (e) {
+          if (!(e instanceof CostReportError)) throw e;
+          status = { configured: true, error: e.message };
+        }
+      }
+      return {
+        fallback: parseBudgetFallback(await store.getMeta("budget_fallback")),
+        threshold_usd: BUDGET_FALLBACK_THRESHOLD_USD,
+        // Unpublished presets may not have a live wire id yet, so they are
+        // not offered. One stored before it was hidden is listed so the
+        // page can name it; the bot runs the default instead (runtime.ts).
+        presets: SELECTABLE_PRESETS.filter((p) => isBudgetFallbackPreset(p.id)).map((p) => ({
+          id: p.id,
+          label: p.label,
+          published: !unpublished.includes(p.id),
+        })),
+        efforts: BUDGET_FALLBACK_EFFORTS,
+        can_edit: canManageUsers(s.role),
+        status,
+      };
+    })
+    .put("/api/budget-fallback", async ({ cookie, set, body }) => {
+      const s = await requireSession(cookieSid(cookie as never));
+      if (!s) {
+        set.status = 401;
+        return { error: "unauthorized" };
+      }
+      if (!canManageUsers(s.role)) {
+        set.status = 403;
+        return { error: "forbidden" };
+      }
+      const parsed = budgetFallbackSchema.safeParse(body);
+      if (!parsed.success) {
+        set.status = 400;
+        return { error: parsed.error.issues.map((i) => i.message).join("; ") };
+      }
+      if ((await loadUnpublished(store)).includes(parsed.data.preset)) {
+        set.status = 400;
+        return { error: "unpublished preset" };
+      }
+      await store.setMeta("budget_fallback", JSON.stringify(parsed.data));
+      // The snapshot carries it to the bot; bump so it is not answered 304.
+      await store.bumpVersion();
+      await publish();
+      return { fallback: parsed.data };
+    })
+    // The bot asks this every few minutes (#89). It has no Admin API key: the
+    // decision is made here, from the same figures the page shows.
+    .get("/internal/budget", async ({ request, set }) => {
+      if (!requireInternal(request.headers.get("authorization") ?? undefined)) {
+        set.status = 401;
+        return { error: "unauthorized" };
+      }
+      if (!costReport.configured) return { configured: false };
+      // A CostReportError becomes its status (502/429) in onError; the bot
+      // keeps the last answer it had.
+      return costReport.budget();
     })
     .post("/internal/logs", async ({ request, set, body }) => {
       if (!requireInternal(request.headers.get("authorization") ?? undefined)) {

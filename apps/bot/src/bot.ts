@@ -36,7 +36,8 @@ import {
   type FailurePhase,
 } from "./failure";
 import { addUsage, emptyUsage, type Context, type Message, type Usage } from "./types";
-import { isAutoRoute, namesModel, routeFallback, routeHeader, RouteMemory } from "./auto-route";
+import { budgetHeader, isAutoRoute, namesModel, routeFallback, routeHeader, RouteMemory } from "./auto-route";
+import { BUDGET_FALLBACK_PROVIDER } from "@hibana/shared/budget";
 import {
   hasUltracodeKeyword,
   systemReminder,
@@ -98,6 +99,8 @@ export class Hibana {
   readonly workspace: Workspace;
   routes: RouteMemory;
   private fallbackAnnounced = new Set<string>();
+  /** Channels told that the budget fallback is on (#89), until it ends. */
+  private budgetAnnounced = new Set<string>();
   readonly tools: ToolRegistry;
   readonly sync: WebSync;
   readonly voice: Voice;
@@ -135,6 +138,7 @@ export class Hibana {
       (e) => this.report(e),
     );
     this.llm = new LlmClient(config, fetch, {
+      budgetSelection: selection => this.runtime.budgetSelection(selection),
       onRetry: notice => this.log.warn(notice, "LLM reconnecting"),
       onCompletion: record => {
         this.log.info(record, "LLM request completed");
@@ -157,6 +161,11 @@ export class Hibana {
       (e) => this.report(e),
     );
     this.runtime.onChange = (id) => this.history.clearGuild(id);
+    this.runtime.onBudgetChange = (state) => {
+      if (!state.low) this.budgetAnnounced.clear();
+      this.log.info({ ...state, fallback: state.low ? this.runtime.budgetFallback() : null },
+        state.low ? "Budget fallback started" : "Budget fallback ended");
+    };
     this.workspace = new Workspace(config, {
       runtime: this.runtime, tools: this.tools, store: this.conversations, log: this.log,
       report: (e) => this.report(e), shutdown: this.shutdown.signal, ...options.workspace,
@@ -608,15 +617,21 @@ export class Hibana {
     // agent is fixed, and no other provider's turns continue it.
     const key = conversationKey(settings.selection, harness, workspaceVariant(settings));
     const ultracode = settings.ultracode;
+    // While the month's budget is low, an Anthropic API turn runs on the
+    // fallback (#89), auto preset included: Jev is not asked for a route the
+    // request would not use. LlmClient swaps every request the same way; this
+    // only makes the turn's log and notice say so.
+    const budgetFallback = !workspace && settings.selection.provider === BUDGET_FALLBACK_PROVIDER &&
+      this.runtime.budgetLow() ? this.runtime.budgetFallback() : undefined;
     // An auto preset is replaced below, once the history is known.
-    let selection = turnSelection(settings.selection, ultracode);
+    let selection = budgetFallback ?? turnSelection(settings.selection, ultracode);
     const started = Date.now();
     this.log.info({ channel: ctx.channelId, message_id: ctx.messageId,
       settings_version: this.runtime.snapshot.version, provider: selection.provider,
       model: selection.model, effort: selection.effort ?? null, subagent_enabled: settings.subagent_enabled,
       ultra_mode: settings.ultra_mode, multi_agent: settings.multi_agent, ultracode,
       workflow_keyword: !!ctx.workflowKeyword, jev_enabled: settings.jev_enabled,
-      jev_task_enabled: settings.jev_task_enabled }, "Turn started");
+      jev_task_enabled: settings.jev_task_enabled, budget_fallback: Boolean(budgetFallback) }, "Turn started");
     // A Workspace turn works in the session's container, not in the sandbox.
     const releaseWorkspace = workspace ? () => {} : this.tools.sandbox.lease(ctx);
     let failurePhase: FailurePhase = "history_read";
@@ -663,7 +678,11 @@ export class Hibana {
         );
       }
       let routeUsage: Usage | undefined;
-      if (isAutoRoute(settings.selection)) {
+      if (budgetFallback && !this.budgetAnnounced.has(ctx.channelId)) {
+        this.budgetAnnounced.add(ctx.channelId);
+        await send(budgetHeader(budgetFallback));
+      }
+      if (isAutoRoute(settings.selection) && !budgetFallback) {
         const route = await this.autoRoute(ctx, text, prior, pending);
         routeUsage = route.usage;
         selection = turnSelection(route.selection, ultracode);

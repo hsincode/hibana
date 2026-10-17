@@ -90,6 +90,20 @@
 .chart-guide-label { font-family: var(--font-mono); font-size: 11px; fill: var(--ink-2); }
 .chart-active { fill: color-mix(in oklch, var(--f1) 16%, transparent); }
 .cost-table td, .cost-table th { padding-top: 8px; padding-bottom: 8px; }
+/* 予算が少ないときのモデル（#89） */
+.budget-panel { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); }
+.budget-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px var(--sp-3); }
+.budget-head h2 { font-size: var(--fs-md); font-weight: 600; }
+.budget-desc { margin-top: calc(var(--sp-2) * -1); color: var(--ink-2); font-size: var(--fs-sm); }
+.budget-amount { font-family: var(--font-mono); font-weight: 400; color: var(--ink); }
+.budget-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-3); }
+.budget-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: var(--muted); font-size: var(--fs-xs); }
+.budget-field:first-child { flex: 1 1 280px; max-width: 420px; }
+.budget-field:nth-child(2) { flex: 0 1 160px; }
+.budget-actions { display: flex; gap: var(--sp-2); }
+.budget-actions .btn { min-height: 36px; padding-inline: 18px; }
+.budget-current { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; color: var(--muted); font-size: var(--fs-xs); }
+.budget-current strong { color: var(--ink); font-size: var(--fs-sm); font-weight: 500; overflow-wrap: anywhere; }
 
 @media (max-width: 900px) {
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -97,11 +111,14 @@
   .stat:nth-child(n + 3) { border-top: 1px solid var(--line); }
 }
 @media (max-width: 760px) {
-  .stats, .account-list, .chart-panel {
+  .stats, .account-list, .chart-panel, .budget-panel {
     max-width: none; margin-inline: calc(var(--pad) * -1); padding-inline: var(--pad);
     border-left: 0; border-right: 0; border-radius: 0;
   }
-  .chart-panel.frame::before { inset: -1px 0; }
+  .chart-panel.frame::before, .budget-panel.frame::before { inset: -1px 0; }
+  .budget-field:first-child, .budget-field:nth-child(2) { flex-basis: 100%; max-width: none; }
+  .budget-actions { width: 100%; }
+  .budget-actions .btn { flex: 1; min-height: 40px; }
   .guild-grid { gap: var(--sp-4); }
   .month-meta { width: 100%; justify-content: space-between; }
   .chart-panel { padding-block: var(--sp-3); }

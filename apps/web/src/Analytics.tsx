@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { billingBounds, billingMonth } from "@hibana/shared/billing";
 import { api } from "./api";
+import { BudgetFallbackPanel } from "./BudgetFallback";
 import { Alert, Badge, Empty, Icon, Section, Skeleton, useDocumentTitle } from "./ui";
 
 /* ============================================================
@@ -233,6 +234,9 @@ export function AnalyticsPage() {
         />
       )}
       {report && <Report m={report} stale={loading} today={report.current ? today : undefined} />}
+      {/* 判定は今月のものなので、過去の月を見ている間も同じ内容を出す。今日の推計が
+          読み直されるたびに、この枠の状態も読み直す。 */}
+      <BudgetFallbackPanel reloadKey={`${reloads}:${today.data?.fetched_at ?? ""}`} />
     </div>
   );
 }

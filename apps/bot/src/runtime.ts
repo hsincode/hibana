@@ -23,6 +23,13 @@ import {
   type GuildPatch,
   type UserOverrideRow,
 } from "@hibana/shared/settings";
+import {
+  BUDGET_FALLBACK_PROVIDER,
+  DEFAULT_BUDGET_FALLBACK,
+  budgetFallbackSelection,
+  parseBudgetFallback,
+  type BudgetFallback,
+} from "@hibana/shared/budget";
 import type { Config, Selection } from "./config";
 import { atomicJson, readJson, Serial } from "./io";
 import { ultracodeActive, workflowsEnabled } from "./ultracode";
@@ -38,6 +45,13 @@ export type Snapshot = {
   user_roles: Record<string, string>;
   unpublished_presets: string[];
   premium_presets: string[];
+  /** The model Anthropic API turns switch to while the budget is low (#89).
+   *  The dashboard writes it; absent before the API served one. */
+  budget_fallback?: BudgetFallback;
+  /** Written by the bot, not the API: the last answer of `/internal/budget`.
+   *  A snapshot from the API never carries it, so `replace` keeps it, and it
+   *  is in the state file, so a restart keeps the last decision (#89). */
+  budget?: BudgetState;
   artifact_commands?: {
     id: number;
     token: string;
@@ -51,6 +65,15 @@ export type Snapshot = {
     args: Record<string, unknown>;
   }[];
 };
+/** What the settings API last said about this month's budget (#89). */
+export type BudgetState = {
+  low: boolean;
+  /** The remaining budget with today's estimate taken off; null when the API has no Admin API key. */
+  remaining_after_today_usd: number | null;
+  /** When the bot received the answer (epoch ms). */
+  checked_at: number;
+};
+
 export class Runtime {
   snapshot: Snapshot = {
     guilds: {},
@@ -63,6 +86,8 @@ export class Runtime {
   };
   private serial = new Serial();
   onChange?: (guildId?: string) => void;
+  /** Called when the fallback starts or ends (#89). */
+  onBudgetChange?: (state: BudgetState) => void;
   constructor(readonly config: Config) {}
   async load() {
     if (this.config.statePath) {
@@ -195,6 +220,37 @@ export class Runtime {
     return provider === "chatgpt"
       ? Boolean(this.config.webApiUrl && this.snapshot.chatgpt_available)
       : Boolean(this.config.endpoints[provider]?.apiKey);
+  }
+  /** Records an answer of `/internal/budget`. Only an answer is recorded: a
+   *  failed request leaves the last one in place (#89). */
+  async setBudget(state: BudgetState) {
+    const before = this.snapshot.budget;
+    this.snapshot.budget = state;
+    // Saved when the decision changes, not on every poll.
+    if (before?.low !== state.low) {
+      this.onBudgetChange?.(state);
+      await this.persist();
+    }
+  }
+  /** Whether Anthropic API turns run on the fallback now. */
+  budgetLow(): boolean {
+    return this.snapshot.budget?.low === true;
+  }
+  /** The selection the fallback runs as. A stored preset that was hidden
+   *  since (it may not have a live wire id) runs the default instead. */
+  budgetFallback(): Selection {
+    let fallback = parseBudgetFallback(this.snapshot.budget_fallback);
+    if (this.snapshot.unpublished_presets.includes(fallback.preset)) fallback = DEFAULT_BUDGET_FALLBACK;
+    return budgetFallbackSelection(fallback);
+  }
+  /** What an `anthropic` request runs as (#89): the fallback while the budget
+   *  is low, whatever model, effort or route it was going to use. Every other
+   *  provider, Anthropic Workspace included, is returned as given. Only the
+   *  request changes: history and checkpoints stay filed under the stored
+   *  model, so the conversation continues there once the budget is back. */
+  budgetSelection(selection: Selection): Selection {
+    if (selection.provider !== BUDGET_FALLBACK_PROVIDER || !this.budgetLow()) return selection;
+    return this.budgetFallback();
   }
   resolve(guildId?: string, userId?: string) {
     const guild = this.guild(guildId);

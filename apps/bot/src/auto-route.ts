@@ -1,3 +1,4 @@
+import { BUDGET_FALLBACK_THRESHOLD_USD } from "@hibana/shared/budget";
 import {
   AUTO_ROUTE_FALLBACK,
   AUTO_ROUTE_LEVELS,
@@ -121,15 +122,25 @@ export async function evaluateRoute(
   };
 }
 
-const effortNames: Record<string, string> = { low: "Low", medium: "Medium", high: "High", xhigh: "XHigh" };
+const effortNames: Record<string, string> = { low: "Low", medium: "Medium", high: "High", xhigh: "XHigh", max: "Max" };
+
+/** "Opus 5.5 Medium": the preset's model name without the provider or "Claude". */
+function modelName(selection: Selection, effort: string): string {
+  const preset = MODEL_PRESETS.find((p) => p.provider === selection.provider && p.model === selection.model);
+  const model = preset ? preset.label.split("/").slice(1).join("/").trim().replace(/^Claude /, "") : selection.model;
+  return [model, effortNames[effort] ?? effort].filter(Boolean).join(" ");
+}
 
 /** Notice posted once a turn's route is known, e.g. "Auto Routing: **Opus 5.5
  *  Medium**". Discord only: it is not stored in the history. */
 export function routeHeader(selection: Selection): string {
-  const preset = MODEL_PRESETS.find((p) => p.provider === selection.provider && p.model === selection.model);
-  const model = preset ? preset.label.split("/").slice(1).join("/").trim().replace(/^Claude /, "") : selection.model;
-  const effort = routedEffort(selection.effort) ?? "";
-  return `Auto Routing: **${[model, effortNames[effort] ?? effort].filter(Boolean).join(" ")}**`;
+  return `Auto Routing: **${modelName(selection, routedEffort(selection.effort) ?? "")}**`;
+}
+
+/** Notice posted in a channel the first time one of its turns runs on the
+ *  budget fallback (#89). Discord only, like `routeHeader`. */
+export function budgetHeader(selection: Selection): string {
+  return `今月の利用料の残りが $${BUDGET_FALLBACK_THRESHOLD_USD} を切ったため、**${modelName(selection, selection.effort ?? "")}** で応答します`;
 }
 
 type Route = { selection: Selection; at: number };

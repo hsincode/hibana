@@ -6,6 +6,7 @@
     "GET /api/analytics/today",
     "GET /api/artifacts",
     "GET /api/blocked",
+    "GET /api/budget-fallback",
     "GET /api/catalog",
     "GET /api/chatgpt/accounts",
     "GET /api/github/status",
@@ -23,6 +24,7 @@
     "GET /auth/discord",
     "GET /auth/discord/callback",
     "GET /healthz",
+    "GET /internal/budget",
     "GET /internal/events",
     "GET /internal/skills/commands",
     "GET /internal/snapshot",
@@ -52,6 +54,7 @@
     "POST /internal/skills",
     "POST /internal/skills/ack",
     "POST /internal/skills/chunk",
+    "PUT /api/budget-fallback",
     "PUT /internal/snapshot"
   ],
   "guildPatchKeys": [
@@ -102,6 +105,7 @@
   "snapshotKeys": [
     "artifact_commands",
     "blocked_users",
+    "budget_fallback",
     "chatgpt_available",
     "guilds",
     "premium_presets",

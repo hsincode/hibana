@@ -40,6 +40,8 @@ function settingsApi() {
     guilds: {} as Record<string, unknown>,
     /** Paths that answer 500 once. */
     failOnce: new Set<string>(),
+    /** What `/internal/budget` answers (#89); a number is an HTTP status. */
+    budget: { configured: false } as unknown,
     count: (method: string, path: string, status?: number) =>
       api.seen.filter(
         (s) => s.method === method && s.path === path && (status === undefined || s.status === status),
@@ -70,6 +72,8 @@ function settingsApi() {
         { headers: { ETag: etag } },
       );
     }
+    if (request.method === "GET" && path === "/internal/budget")
+      return typeof api.budget === "number" ? new Response("{}", { status: api.budget }) : Response.json(api.budget);
     if (path === "/internal/events")
       return new Response('event: hello\ndata: {"version":1}\n\n', {
         headers: { "content-type": "text/event-stream" },
@@ -101,7 +105,7 @@ afterEach(() => {
   for (const fn of cleanup.splice(0)) fn();
 });
 
-function fixture(timing = { pollMs: 10, maxMs: 40 }) {
+function fixture(timing: { pollMs: number; maxMs: number; budgetMs?: number } = { pollMs: 10, maxMs: 40 }) {
   const api = settingsApi();
   const runtime = new Runtime(
     loadConfig({
@@ -172,7 +176,9 @@ describe("settings sync", () => {
     runtime.snapshot.blocked_users = ["9"];
     api.down = true;
     await sync.start();
-    expect(errors).toEqual(["Settings snapshot HTTP 402"]);
+    // The budget status (#89) is asked separately and fails the same way;
+    // the last decision restored from the file stays.
+    expect(errors).toEqual(["Settings snapshot HTTP 402", "Settings API GET /internal/budget: HTTP 402"]);
     expect(runtime.snapshot.blocked_users).toEqual(["9"]);
   });
 
@@ -288,5 +294,51 @@ describe("asset publishing", () => {
     expect(api.count("POST", "/internal/artifacts")).toBe(1);
     await sync.publishAssets();
     expect(api.count("POST", "/internal/skills")).toBe(2);
+  });
+});
+
+describe("budget status (#89)", () => {
+  const low = { configured: true, low: true, remaining_after_today_usd: 9.5 };
+
+  test("asks the API, and keeps the last answer while asking fails", async () => {
+    const { api, runtime, errors, sync } = fixture({ pollMs: 10, maxMs: 40, budgetMs: 0 });
+    api.budget = low;
+    await sync.start();
+    await until(() => runtime.budgetLow());
+    expect(runtime.snapshot.budget?.remaining_after_today_usd).toBe(9.5);
+    // A failed request neither ends the fallback nor stops the snapshot poll.
+    api.budget = 502;
+    const asked = api.count("GET", "/internal/budget");
+    await until(() => api.count("GET", "/internal/budget") >= asked + 2);
+    expect(runtime.budgetLow()).toBe(true);
+    expect(errors.some((e) => e.includes("/internal/budget"))).toBe(true);
+    // An answer with a shape the bot does not know is a failure too.
+    api.budget = { configured: true, low: "yes" };
+    const again = api.count("GET", "/internal/budget");
+    await until(() => api.count("GET", "/internal/budget") >= again + 2);
+    expect(runtime.budgetLow()).toBe(true);
+    // The budget is back above the threshold.
+    api.budget = { configured: true, low: false, remaining_after_today_usd: 40 };
+    await until(() => !runtime.budgetLow());
+    expect(api.count("GET", "/internal/snapshot", 200)).toBeGreaterThan(0);
+  });
+
+  test("an API without an Admin API key cannot tell, which turns the fallback off", async () => {
+    const { api, runtime, sync } = fixture({ pollMs: 10, maxMs: 40, budgetMs: 0 });
+    api.budget = low;
+    await sync.start();
+    await until(() => runtime.budgetLow());
+    api.budget = { configured: false };
+    await until(() => !runtime.budgetLow());
+    expect(runtime.snapshot.budget?.remaining_after_today_usd).toBeNull();
+  });
+
+  test("is asked once per interval, not on every snapshot poll", async () => {
+    const { api, runtime, sync } = fixture();
+    api.budget = low;
+    await sync.start();
+    await until(() => api.count("GET", "/internal/snapshot") >= 5);
+    expect(api.count("GET", "/internal/budget")).toBe(1);
+    expect(runtime.budgetLow()).toBe(true);
   });
 });

@@ -18,3 +18,11 @@ for (const app of ["api", "web"]) {
     expect(rule!.missing).toEqual([{ type: "header", key: "x-vercel-protection-bypass" }]);
   });
 }
+
+// The API's database (Supabase) and the bot (VPS) are both in Tokyo, and every
+// API request makes several queries in a row, so the functions run there too
+// (#93). On Vercel's default (iad1) each query would cross the Pacific.
+test("api: functions run in Tokyo, next to the database", async () => {
+  const config = (await Bun.file(join(import.meta.dir, "../apps/api/vercel.json")).json()) as { regions?: string[] };
+  expect(config.regions).toEqual(["hnd1"]);
+});

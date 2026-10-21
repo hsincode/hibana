@@ -5,7 +5,8 @@
 | 対象 | 配置 |
 | --- | --- |
 | Web | https://bot.hsincode.com （Vercel `hsincode/hibana-web`、Root Directory `apps/web`。既定URLは https://hibana-web-mu.vercel.app） |
-| API | https://api.bot.hsincode.com （Vercel `hsincode/hibana-api`、Root Directory `apps/api`。既定URLは https://hibana-api.vercel.app） |
+| API | https://api.bot.hsincode.com （Vercel `hsincode/hibana-api`、Root Directory `apps/api`。既定URLは https://hibana-api.vercel.app。関数は `hnd1`） |
+| API の DB | Supabase（東京）の Postgres。2026-10 に Neon から移した（[database.md](database.md)、#93） |
 | bot | 既存VPSの `/opt/hibana`、`hibana.service` |
 | bot設定 | `/etc/hibana/bot.env` |
 | botデータ | `/var/lib/hibana` |
@@ -18,7 +19,7 @@
 
 旧botは停止し、自動起動を無効にしました。Hibanaは専用ユーザー `hibana` で稼働し、Dockerグループに所属します。公開サイトは既存のCaddy経由で `127.0.0.1:8787` に接続します。旧VPNコンテナを `hibana-vpn` に改名し、既存接続を継続しています。VOICEVOXサービスは既存のものを利用します。公開サイト3件はVPS内の配信でHTTP 200を確認しましたが、旧ドメイン `artifacts.xuanling.me` 経由の外部アクセスはHTTP 403のため、旧ドメイン側の確認が別途必要です。
 
-APIには新しいNeon DBを使用し、VPSに残っていた16サーバー分の設定・個人設定を取り込みました。旧APIはHTTP 402で取得できず、旧DB固有のユーザーロール・セッション・利用停止リスト・監査ログはこの取り込みに含まれません。管理者にはDiscordアプリ所有者を設定しています。ユーザーは新Webで再ログインしてください。
+APIには新しいNeon DBを使用し（2026-10 に Supabase へ移した。[database.md](database.md)）、VPSに残っていた16サーバー分の設定・個人設定を取り込みました。旧APIはHTTP 402で取得できず、旧DB固有のユーザーロール・セッション・利用停止リスト・監査ログはこの取り込みに含まれません。管理者にはDiscordアプリ所有者を設定しています。ユーザーは新Webで再ログインしてください。
 
 Discord OAuth2 Redirectsには `https://api.bot.hsincode.com/auth/discord/callback` を登録します。VPSのSSH接続先・サービス名・設定パスはgit管理対象外の `.local/deployment.json` を参照します。Botはリダイレクトを拒否するため、VPSの `/etc/hibana/bot.env` の `WEB_API_URL` も `https://api.bot.hsincode.com` に合わせます。APIの `WEB_PUBLIC_BASE_URL` / `FRONTEND_ORIGIN` と Webの `VITE_API_BASE_URL` / `VITE_SITE_URL` は上記カスタムドメインに合わせます。
 

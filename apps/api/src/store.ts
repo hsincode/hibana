@@ -667,6 +667,22 @@ export class PostgresStore implements Store {
         .sql`CREATE INDEX IF NOT EXISTS logs_user_id_desc ON logs (user_id, id DESC)`;
       await this.sql`CREATE INDEX IF NOT EXISTS logs_at ON logs (at)`;
     }
+    // Supabase's Data API serves tables in `public` to anyone holding the
+    // project's public key unless row level security is on (#93). With RLS on
+    // and no policy, those roles see no rows. The API connects as the tables'
+    // owner, which RLS does not apply to, so its own queries are unchanged.
+    await this.sql`ALTER TABLE meta ENABLE ROW LEVEL SECURITY`;
+    await this.sql`ALTER TABLE skill_commands ENABLE ROW LEVEL SECURITY`;
+    await this.sql`ALTER TABLE guilds ENABLE ROW LEVEL SECURITY`;
+    await this.sql`ALTER TABLE users ENABLE ROW LEVEL SECURITY`;
+    await this.sql`ALTER TABLE sessions ENABLE ROW LEVEL SECURITY`;
+    await this.sql`ALTER TABLE oauth_pending ENABLE ROW LEVEL SECURITY`;
+    await this.sql`ALTER TABLE user_contexts ENABLE ROW LEVEL SECURITY`;
+    await this.sql`ALTER TABLE user_overrides ENABLE ROW LEVEL SECURITY`;
+    await this.sql`ALTER TABLE blocked_users ENABLE ROW LEVEL SECURITY`;
+    await this.sql`ALTER TABLE artifacts ENABLE ROW LEVEL SECURITY`;
+    await this.sql`ALTER TABLE artifact_commands ENABLE ROW LEVEL SECURITY`;
+    if (this.logs) await this.sql`ALTER TABLE logs ENABLE ROW LEVEL SECURITY`;
     if (!(await this.getMeta("snapshot_version"))) {
       await this.setMeta("snapshot_version", "0");
     }

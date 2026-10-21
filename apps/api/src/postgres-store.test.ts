@@ -191,6 +191,30 @@ describe.skipIf(!local)("PostgresStore against Postgres", () => {
     expect(await store.getMeta("personal_inherit_v1")).toBe("1");
   });
 
+  test("every table has row level security on, so Supabase's Data API cannot read it", async () => {
+    const rows = (await admin`
+      SELECT relname, relrowsecurity FROM pg_class
+      WHERE relkind = 'r' AND relnamespace = 'public'::regnamespace
+      ORDER BY relname`) as { relname: string; relrowsecurity: boolean }[];
+    expect(rows.map((r) => r.relname).sort()).toEqual([...TABLES].sort());
+    expect(rows.filter((r) => !r.relrowsecurity)).toEqual([]);
+  });
+
+  test("a role without a policy sees no rows, while the owner still does", async () => {
+    await store.setMeta("rls_probe", "secret");
+    await admin.unsafe(`DROP ROLE IF EXISTS hibana_anon_probe`);
+    await admin.unsafe(`CREATE ROLE hibana_anon_probe`);
+    await admin.unsafe(`GRANT SELECT ON meta TO hibana_anon_probe`);
+    const seen = await admin.begin(async (tx) => {
+      await tx.unsafe(`SET LOCAL ROLE hibana_anon_probe`);
+      return tx`SELECT value FROM meta WHERE key = 'rls_probe'`;
+    });
+    expect(seen.length).toBe(0);
+    expect(await store.getMeta("rls_probe")).toBe("secret");
+    await admin.unsafe(`REVOKE ALL ON meta FROM hibana_anon_probe`);
+    await admin.unsafe(`DROP ROLE hibana_anon_probe`);
+  });
+
   test("meta, compareMeta and the version counter", async () => {
     await store.setMeta("k", "a");
     expect(await store.getMeta("k")).toBe("a");

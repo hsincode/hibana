@@ -9,6 +9,7 @@
 - `prepare: false` にしています。Supabase のプーラー（Supavisor）の transaction モード（ポート 6543）は、トランザクションごとに別のサーバー接続へ渡すので、名前つきの prepared statement を使えないためです
 - `DATABASE_URL` のホストが手元（`localhost`・`127.0.0.1`）でなければ、`sslmode=require`・`verify-ca`・`verify-full` のどれかが必要です。無いと、API は起動時に止まります（Bun は `sslmode` が無いと TLS を使わず、パスワードが平文で流れるため）。エラー文に URL は出しません
 - `sslmode=require` は暗号化するだけで、証明書を検証しません（Bun のドキュメントの表のとおり）。Supabase の CA 証明書で検証する `verify-full` は、まだ設定していません
+- Supabase の Data API は、`public` スキーマのテーブルを、プロジェクトの公開鍵（anon / publishable）で REST から読めるようにする。Hibana は Data API を使わないので、ダッシュボードで公開を止める（手順 2）。加えて、API は起動時に、作ったテーブルすべてで RLS（row level security）を有効にする。ポリシーは作らないので、持ち主以外のロールには行が見えない。API はテーブルの持ち主として接続するので、RLS の影響を受けない（#93）
 - Vercel は、アイドルのインスタンスを、タイマーを動かさずに休止させます。その間にサーバー側が接続を閉じると、起きた直後の最初のクエリが、閉じた接続に当たって失敗します。Bun 1.4.3 と Postgres 17 で測ると、FATAL の 57P01 と、`ERR_POSTGRES_CONNECTION_CLOSED` が続けて返り、どちらもクエリがサーバーに届く前に失敗していました。そこで、この 2 種類のエラーのときだけ、プールを作り直して、同じクエリを最大 3 回まで実行します。ほかのエラー（SQL の誤り、認証の失敗、接続のタイムアウト）はリトライしません
   - 残るリスク: クエリを送った後に接続が切れた場合も `ERR_POSTGRES_CONNECTION_CLOSED` になりうるので、その書き込みは 2 回実行されることがあります（ログの 1 行やコマンドの 1 件が重複する程度）。この場合は手元では再現していません
 
@@ -28,20 +29,21 @@ Neon は無料枠を使い切って、HTTP 402 で読み出せません（#92）
 
 ### 手順
 
-1. （本人）Supabase でプロジェクトを作る。リージョンは Northeast Asia (Tokyo)。DB のパスワードは控えておく
-2. （本人）Supabase の Connect 画面で、Transaction pooler（ポート 6543）の接続文字列を取り、末尾に `?sslmode=require` を付ける
-3. （本人か、本人の承認を得た AI）手元で復元を流す。snapshot は SSH で読むだけで、手元のディスクには保存しない。出力は件数だけ
+1. Supabase でプロジェクトを作る。リージョンは Northeast Asia (Tokyo)。作った後には変えられない
+2. Integrations → Data API → Settings で、「Automatically expose new tables」をオフにし、Exposed schemas から `public` を外す
+3. Supabase の Connect 画面で、Transaction pooler（ポート 6543）の接続文字列を取り、末尾に `?sslmode=require` を付ける
+4. 手元で復元を流す。snapshot は SSH で読むだけで、手元のディスクには保存しない。出力は件数だけ
 
    ```sh
    ssh <VPS> 'cat /var/lib/hibana/runtime_state.json' \
-     | DATABASE_URL='<手順 2 の接続文字列>' bun scripts/import-bot-snapshot.ts -
+     | DATABASE_URL='<手順 3 の接続文字列>' bun scripts/import-bot-snapshot.ts -
    ```
 
    テーブルは、このスクリプトが最初に作ります（API の起動時と同じ `migrate()`）。DB にサーバー設定かユーザーが既にあれば止まります。上書きするときだけ `--force` を付けます
-4. （本人）Vercel の `hibana-api` の Production の `DATABASE_URL` を、手順 2 の接続文字列に替える
-5. この PR をマージして、API を配信する（`regions: ["hnd1"]` もここで効く）
-6. bot を再起動する（公開サイト・スキル・使えるプリセットを API に送り直すため）
-7. 確かめる: `/healthz` が 200 になる。bot のログに snapshot の取得失敗が出ない。ダッシュボードにログインでき、サーバー設定が以前の値のまま見える。公開サイトとスキルの一覧が出る
+5. Vercel の `hibana-api` の Production の `DATABASE_URL` を、手順 3 の接続文字列に替える
+6. この PR をマージして、API を配信する（`regions: ["hnd1"]` もここで効く）
+7. bot を再起動する（公開サイト・スキル・使えるプリセットを API に送り直すため）
+8. 確かめる: `/healthz` が 200 になる。bot のログに snapshot の取得失敗が出ない。ダッシュボードにログインでき、サーバー設定が以前の値のまま見える。公開サイトとスキルの一覧が出る
 
 ### 戻し方
 

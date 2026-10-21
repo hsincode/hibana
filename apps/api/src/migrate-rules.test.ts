@@ -6,10 +6,13 @@ import { join } from "node:path";
 // the schema the newer one left behind, so a migration may only add: no drops,
 // renames or type changes, and no new column an older INSERT would violate.
 // A destructive change is made in two deploys and is not written here.
+// Turning on row level security is allowed: it repeats safely, and the API
+// connects as the tables' owner, so no older build's query changes (#93).
 const ADDITIVE = [
   /^CREATE TABLE IF NOT EXISTS /,
   /^CREATE (UNIQUE )?INDEX IF NOT EXISTS /,
   /^ALTER TABLE \w+ ADD COLUMN IF NOT EXISTS /,
+  /^ALTER TABLE \w+ ENABLE ROW LEVEL SECURITY$/,
 ];
 
 /** The SQL statements inside PostgresStore.migrate(), with whitespace collapsed. */

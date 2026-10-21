@@ -1,4 +1,4 @@
-import { neon } from "@neondatabase/serverless";
+import { SQL } from "bun";
 import type { SkillRow, SkillCommand } from "./skills";
 import type { BlockedRow, LogEntry, LogQuery, LogRow } from "./audit";
 import { DEFAULT_ROLE, parseRole, type Role } from "./roles";
@@ -394,10 +394,64 @@ export class MemoryStore implements Store {
   }
 }
 
-type Sql = ReturnType<typeof neon>;
+/** A tagged-template query that resolves to its rows. */
+type Sql = (strings: TemplateStringsArray, ...values: unknown[]) => Promise<any[]>;
 
-/** Reject garbage env so `neon()` never echoes the string (it includes it in Error). */
-function assertPostgresUrl(databaseUrl: string): string {
+/** The part of Bun's `SQL` client this store calls, so tests can stand in for it. */
+export type SqlClient = {
+  (strings: TemplateStringsArray, ...values: unknown[]): PromiseLike<any[]>;
+  close(options?: { timeout?: number }): Promise<void>;
+};
+
+/**
+ * Pool settings for one API instance (#93).
+ *
+ * - `prepare: false`: Supabase's pooler in transaction mode (port 6543) hands
+ *   each transaction to any server connection, so a named prepared statement
+ *   made on one would be missing on the next.
+ * - `idleTimeout: 5` (seconds): Vercel suggests a short idle timeout for pools
+ *   in Fluid compute. A poll every 30 s then opens a fresh connection, which is
+ *   cheap with the pooler in the same region.
+ * - `max: 5`: Fluid serves several requests on one instance at once, and
+ *   Vercel advises against a pool of one.
+ */
+const POOL = { max: 5, idleTimeout: 5, connectionTimeout: 10, prepare: false } as const;
+
+/** Attempts per query while pooled connections turn out to be closed. */
+const STALE_ATTEMPTS = 3;
+
+/**
+ * Whether a query failed because its pooled connection was already gone.
+ *
+ * Vercel suspends an idle instance without running its timers, so the server
+ * or the pooler can close a pooled connection while the instance sleeps. After
+ * it wakes, Bun reports that on the first queries it puts on the dead
+ * connection: the FATAL 57P0x the server sent before closing, then
+ * ERR_POSTGRES_CONNECTION_CLOSED (measured with Bun 1.4.3 and Postgres 17, by
+ * stopping the process while its connection was terminated). Both come back
+ * before the query reaches a server, so the query is retried on a fresh pool.
+ */
+export function isStaleConnection(e: unknown): boolean {
+  const err = e as { code?: unknown; errno?: unknown; severity?: unknown } | null;
+  if (!err || typeof err !== "object") return false;
+  if (err.code === "ERR_POSTGRES_CONNECTION_CLOSED") return true;
+  return (
+    err.severity === "FATAL" &&
+    typeof err.errno === "string" &&
+    err.errno.startsWith("57P")
+  );
+}
+
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+const TLS_MODES = new Set(["require", "verify-ca", "verify-full"]);
+
+/**
+ * Reject a DATABASE_URL that is not Postgres, or that would send the password
+ * to a remote host in plain text: Bun reads `sslmode` from the URL and, without
+ * one, does not use TLS at all. Messages never echo the URL, which carries the
+ * password.
+ */
+export function assertPostgresUrl(databaseUrl: string): string {
   let parsed: URL;
   try {
     parsed = new URL(databaseUrl);
@@ -407,11 +461,63 @@ function assertPostgresUrl(databaseUrl: string): string {
   if (parsed.protocol !== "postgres:" && parsed.protocol !== "postgresql:") {
     throw new Error("DATABASE_URL must be a postgres URL");
   }
+  const sslmode = parsed.searchParams.get("sslmode") ?? "";
+  if (!LOCAL_HOSTS.has(parsed.hostname) && !TLS_MODES.has(sslmode)) {
+    throw new Error(
+      "DATABASE_URL for a remote host must set sslmode=require (or verify-ca / verify-full)",
+    );
+  }
   return databaseUrl;
 }
 
-export class NeonStore implements Store {
+export class PostgresStore implements Store {
   readonly defaults: GuildRow;
+  private db: SqlClient;
+  private readonly url: string;
+  private readonly connect: (url: string) => SqlClient;
+  /** When false, skip the logs table/indexes so a cold start does not pay for an unused feature. */
+  private logs: boolean;
+  private readonly sql: Sql = (strings, ...values) => this.query(strings, values);
+
+  constructor(
+    databaseUrl: string,
+    opts: {
+      logs?: boolean;
+      defaults?: GuildRow;
+      /** Opens a pool. Tests pass a stand-in; the default is Bun's `SQL`. */
+      connect?: (url: string) => SqlClient;
+    } = {},
+  ) {
+    this.url = assertPostgresUrl(databaseUrl);
+    this.connect = opts.connect ?? ((url) => new SQL(url, POOL) as unknown as SqlClient);
+    this.db = this.connect(this.url);
+    this.logs = opts.logs ?? false;
+    this.defaults = opts.defaults ?? emptyGuild();
+  }
+
+  /** Closes the pool. For scripts and tests; the API keeps it for the instance's life. */
+  async close() {
+    await this.db.close({ timeout: 5 });
+  }
+
+  private async query(strings: TemplateStringsArray, values: unknown[]) {
+    for (let attempt = 1; ; attempt++) {
+      const db = this.db;
+      try {
+        return await db(strings, ...values);
+      } catch (e) {
+        if (!isStaleConnection(e) || attempt >= STALE_ATTEMPTS) throw e;
+        // Every idle connection of the pool slept as long as this one, so drop
+        // the whole pool rather than meet them one failed query at a time. A
+        // concurrent query that already swapped it leaves the new pool alone.
+        if (this.db === db) {
+          this.db = this.connect(this.url);
+          void db.close({ timeout: 5 }).catch(() => {});
+        }
+      }
+    }
+  }
+
   async replaceSkills(rows: SkillRow[]) {
     await this.setMeta("skill_catalog", JSON.stringify(rows));
   }
@@ -439,14 +545,6 @@ export class NeonStore implements Store {
     await this
       .sql`DELETE FROM skill_commands WHERE result IS NOT NULL AND created_at < NOW() - INTERVAL '1 day'`;
     await this.bumpVersion();
-  }
-  private sql: Sql;
-  /** When false, skip the logs table/indexes so a cold start does not pay for an unused feature. */
-  private logs: boolean;
-  constructor(databaseUrl: string, opts: { logs?: boolean; defaults?: GuildRow } = {}) {
-    this.sql = neon(assertPostgresUrl(databaseUrl));
-    this.logs = opts.logs ?? false;
-    this.defaults = opts.defaults ?? emptyGuild();
   }
 
   async migrate() {
@@ -569,6 +667,22 @@ export class NeonStore implements Store {
         .sql`CREATE INDEX IF NOT EXISTS logs_user_id_desc ON logs (user_id, id DESC)`;
       await this.sql`CREATE INDEX IF NOT EXISTS logs_at ON logs (at)`;
     }
+    // Supabase's Data API serves tables in `public` to anyone holding the
+    // project's public key unless row level security is on (#93). With RLS on
+    // and no policy, those roles see no rows. The API connects as the tables'
+    // owner, which RLS does not apply to, so its own queries are unchanged.
+    await this.sql`ALTER TABLE meta ENABLE ROW LEVEL SECURITY`;
+    await this.sql`ALTER TABLE skill_commands ENABLE ROW LEVEL SECURITY`;
+    await this.sql`ALTER TABLE guilds ENABLE ROW LEVEL SECURITY`;
+    await this.sql`ALTER TABLE users ENABLE ROW LEVEL SECURITY`;
+    await this.sql`ALTER TABLE sessions ENABLE ROW LEVEL SECURITY`;
+    await this.sql`ALTER TABLE oauth_pending ENABLE ROW LEVEL SECURITY`;
+    await this.sql`ALTER TABLE user_contexts ENABLE ROW LEVEL SECURITY`;
+    await this.sql`ALTER TABLE user_overrides ENABLE ROW LEVEL SECURITY`;
+    await this.sql`ALTER TABLE blocked_users ENABLE ROW LEVEL SECURITY`;
+    await this.sql`ALTER TABLE artifacts ENABLE ROW LEVEL SECURITY`;
+    await this.sql`ALTER TABLE artifact_commands ENABLE ROW LEVEL SECURITY`;
+    if (this.logs) await this.sql`ALTER TABLE logs ENABLE ROW LEVEL SECURITY`;
     if (!(await this.getMeta("snapshot_version"))) {
       await this.setMeta("snapshot_version", "0");
     }
@@ -837,8 +951,8 @@ export class NeonStore implements Store {
 
   async appendLogs(entries: LogEntry[]) {
     if (!this.logs) return 0;
-    // Row-at-a-time: the bot batches at most a handful per flush, and the neon
-    // HTTP driver has no multi-row bind that keeps the tagged-template escaping.
+    // Row-at-a-time: the bot sends one entry per turn, and every query goes
+    // through `this.sql` so a stale pooled connection is retried (see query()).
     for (const e of entries) {
       await this.sql`
         INSERT INTO logs (
@@ -861,8 +975,8 @@ export class NeonStore implements Store {
 
   async listLogs(q: LogQuery) {
     if (!this.logs) return [];
-    // One tagged template with `IS NULL OR` guards: the neon HTTP driver has no
-    // safe way to concatenate a WHERE clause, and the planner drops the dead
+    // One tagged template with `IS NULL OR` guards keeps every filter a bound
+    // parameter instead of concatenated SQL, and the planner drops the dead
     // branches once the parameter is bound.
     const like = q.q ? `%${q.q}%` : null;
     const dmOnly = q.scope === "all" ? null : q.scope === "dm";
@@ -1015,7 +1129,7 @@ export async function openStore(
     await mem.migrate();
     return mem;
   }
-  const store = new NeonStore(databaseUrl, { logs: opts.logs ?? false, defaults: settingsDefaults(process.env) });
+  const store = new PostgresStore(databaseUrl, { logs: opts.logs ?? false, defaults: settingsDefaults(process.env) });
   await store.migrate();
   return store;
 }

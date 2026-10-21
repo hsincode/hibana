@@ -26,7 +26,8 @@ export function bootApp(): Promise<Elysia> {
 }
 
 function bootFailedResponse() {
-  // Wrapper is outside createApp's onError; neon() also embeds the DSN in Error.
+  // Wrapper is outside createApp's onError. A driver error may name the
+  // database host, so the client only gets a generic message.
   return new Response(JSON.stringify({ error: "internal error" }), {
     status: 500,
     headers: { "content-type": "application/json" },

@@ -35,12 +35,22 @@ export const BOT_PATHS = ["apps/bot/", "apps/relay/", ...SHARED_PATHS];
 const TEST_FILE = /(^|\/)__tests__\/|\.test\.[cm]?[jt]sx?$/;
 
 export function touchesBot(changed: readonly string[]): boolean {
-  return touches(BOT_PATHS, changed.filter((file) => !TEST_FILE.test(file)));
+  return touches(
+    BOT_PATHS,
+    changed.filter((file) => !TEST_FILE.test(file)),
+  );
 }
 
 /** An entry ending in `/` is a directory; any other entry is one file at the repository root. */
-export function touches(paths: readonly string[], changed: readonly string[]): boolean {
-  return changed.some((file) => paths.some((path) => (path.endsWith("/") ? file.startsWith(path) : file === path)));
+export function touches(
+  paths: readonly string[],
+  changed: readonly string[],
+): boolean {
+  return changed.some((file) =>
+    paths.some((path) =>
+      path.endsWith("/") ? file.startsWith(path) : file === path,
+    ),
+  );
 }
 
 export interface Facts {
@@ -59,7 +69,8 @@ export interface Decision {
 }
 
 export function decide(facts: Facts): Decision {
-  if (facts.event === "workflow_dispatch") return { api: true, web: true, bot: true, base: "" };
+  if (facts.event === "workflow_dispatch")
+    return { api: true, web: true, bot: true, base: "" };
   return {
     api: facts.vercel ? touches(API_PATHS, facts.vercel.changed) : true,
     web: facts.vercel ? touches(WEB_PATHS, facts.vercel.changed) : true,
@@ -75,7 +86,8 @@ function run(cmd: string[]): { ok: boolean; out: string } {
   return { ok: proc.exitCode === 0, out: proc.stdout.toString().trim() };
 }
 
-const isAncestor = (base: string, head: string) => run(["git", "merge-base", "--is-ancestor", base, head]).ok;
+const isAncestor = (base: string, head: string) =>
+  run(["git", "merge-base", "--is-ancestor", base, head]).ok;
 
 function changedSince(base: string, head: string): string[] {
   const diff = run(["git", "diff", "--name-only", base, head]);
@@ -85,8 +97,19 @@ function changedSince(base: string, head: string): string[] {
 
 function vercelFacts(head: string): Facts["vercel"] {
   const list = run([
-    "gh", "run", "list", "--workflow", "ci.yml", "--branch", "main", "--status", "success",
-    "--limit", "50", "--json", "headSha,event",
+    "gh",
+    "run",
+    "list",
+    "--workflow",
+    "ci.yml",
+    "--branch",
+    "main",
+    "--status",
+    "success",
+    "--limit",
+    "50",
+    "--json",
+    "headSha,event",
   ]);
   if (!list.ok) return null;
   let runs: { headSha: string; event: string }[];
@@ -95,7 +118,11 @@ function vercelFacts(head: string): Facts["vercel"] {
   } catch {
     return null;
   }
-  const base = runs.find((r) => (r.event === "push" || r.event === "workflow_dispatch") && r.headSha !== head)?.headSha;
+  const base = runs.find(
+    (r) =>
+      (r.event === "push" || r.event === "workflow_dispatch") &&
+      r.headSha !== head,
+  )?.headSha;
   if (!base || !isAncestor(base, head)) return null;
   return { base, changed: changedSince(base, head) };
 }
@@ -116,7 +143,9 @@ async function botFacts(head: string): Promise<Facts["bot"]> {
     }
     deployed = ((await response.json()) as { commit?: unknown }).commit;
   } catch (err) {
-    console.error(`relay /status failed: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(
+      `relay /status failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
     return null;
   }
   if (typeof deployed !== "string" || !SHA_RE.test(deployed)) return null;
@@ -136,8 +165,18 @@ if (import.meta.main) {
     event === "workflow_dispatch"
       ? { event, vercel: null, bot: null }
       : { event, vercel: vercelFacts(head), bot: await botFacts(head) };
-  console.error(facts.vercel ? `api/web: ${facts.vercel.changed.length} files since ${facts.vercel.base.slice(0, 7)}` : "api/web: no deployable base");
-  console.error(facts.bot ? `bot: ${facts.bot.changed.length} files since ${facts.bot.deployed.slice(0, 7)} in production` : "bot: production commit unknown");
+  console.error(
+    facts.vercel
+      ? `api/web: ${facts.vercel.changed.length} files since ${facts.vercel.base.slice(0, 7)}`
+      : "api/web: no deployable base",
+  );
+  console.error(
+    facts.bot
+      ? `bot: ${facts.bot.changed.length} files since ${facts.bot.deployed.slice(0, 7)} in production`
+      : "bot: production commit unknown",
+  );
   const decision = decide(facts);
-  console.log(`api=${decision.api}\nweb=${decision.web}\nbot=${decision.bot}\nbase=${decision.base}`);
+  console.log(
+    `api=${decision.api}\nweb=${decision.web}\nbot=${decision.bot}\nbase=${decision.base}`,
+  );
 }

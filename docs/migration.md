@@ -21,6 +21,7 @@ Advisorと自動モデルRouterのコマンド、ツール、設定、UIを削�
 API の初期値には `PROVIDER` / `LLM_MODEL` / `LLM_EFFORT`、`ULTRA_MODE`、`MULTI_AGENT`、`JEV_ENABLED` / `JEV_TASK_ENABLED`、`LLM_TEMPERATURE`、`EXA_ENABLED`、`DISCORD_SUPPRESS_EMBEDS`、`THREAD_HISTORY_MAX_AGE_SECS`、`EXTRA_TRIGGERS` を使います。API と Bot を別環境で動かす場合は、更新前にこれらの非秘密設定を一致させてください。品質検証（`verify_enabled` / `VERIFY_ENABLED`）と速度優先（`fast_enabled` / `FAST_MODE`）は廃止しました。保存済みのキーは読み込み時に捨て、PATCH では未知のフィールドとして拒否されます。Discord の `/verify` と `/fast`、Codex への `speed=fast`、回答後の再採点もありません。資格情報は各プロセスで独立して管理します。2026-09-21 に本番の既存17設定行を具体値へ移行し、明示済みのモデルと主要な設定値の保持を確認しました。今回の変更だけを取り出したソースで `make ci`（240テスト）と画面テスト（13件）を実行し、Web/API の HTTP 200、Bot の正常起動と `sandbox:true` を確認済みです。Discord OAuth の実ログイン操作は今回の検証に含みません。
 
 Ultra（`ultra_mode`）は、Codex の Effort: Ultra を再現した積極的な委譲から、Claude Code の Ultracode に置き換えました（[Ultra（Claude Code の Ultracode）](ultracode.md)）。
+
 - 保存形式は変えていないので、設定の移行はありません。
 - 既存の ultra の行は、次のメッセージから xhigh とワークフローの常時編成で動きます。
 - multi の行は従来どおりの動作です。

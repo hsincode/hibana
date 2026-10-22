@@ -2,10 +2,7 @@
   "api": {
     "source": "codeberg.org/xuanling/deepseeker-api",
     "commit": "5a60cf98b39a95136eabe04e9d3b3cf6a49a120e",
-    "working_tree_changes": [
-      "src/app.test.ts",
-      "src/settings.ts"
-    ]
+    "working_tree_changes": ["src/app.test.ts", "src/settings.ts"]
   },
   "web": {
     "source": "codeberg.org/xuanling/deepseeker-app",

@@ -19,10 +19,18 @@
  *   ssh <vps> 'cat /var/lib/hibana/runtime_state.json' \
  *     | DATABASE_URL='postgres://…?sslmode=require' bun scripts/import-bot-snapshot.ts -
  */
-import { catalogPublished, isPremium, SELECTABLE_PRESETS } from "../packages/shared/src/catalog";
+import {
+  catalogPublished,
+  isPremium,
+  SELECTABLE_PRESETS,
+} from "../packages/shared/src/catalog";
 import { parseBudgetFallback } from "../packages/shared/src/budget";
 import { parseRole } from "../apps/api/src/roles";
-import { openStore, type Store, type UserContextEntry } from "../apps/api/src/store";
+import {
+  openStore,
+  type Store,
+  type UserContextEntry,
+} from "../apps/api/src/store";
 import type { GuildRow, UserOverrideRow } from "../apps/api/src/settings";
 
 const record = (value: unknown): Record<string, unknown> =>
@@ -30,7 +38,9 @@ const record = (value: unknown): Record<string, unknown> =>
     ? (value as Record<string, unknown>)
     : {};
 const ids = (value: unknown): string[] =>
-  Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+  Array.isArray(value)
+    ? value.filter((v): v is string => typeof v === "string")
+    : [];
 
 export type ImportSummary = {
   guilds: number;
@@ -75,9 +85,12 @@ export async function importBotSnapshot(
     throw new Error("Not a bot snapshot: version and guilds are missing");
   if (!opts.force) {
     const existing =
-      Object.keys(await store.allGuilds()).length + (await store.listUsers()).length;
+      Object.keys(await store.allGuilds()).length +
+      (await store.listUsers()).length;
     if (existing)
-      throw new Error("The database already has guilds or users; pass --force to overwrite them");
+      throw new Error(
+        "The database already has guilds or users; pass --force to overwrite them",
+      );
   }
   const now = opts.now ?? Date.now();
 
@@ -102,19 +115,36 @@ export async function importBotSnapshot(
     const role = typeof raw === "string" ? parseRole(raw) : null;
     if (!role) continue;
     // The username is blank until the person logs in; login keeps the role.
-    await store.upsertUser({ discord_id: id, username: "", avatar: null, role });
+    await store.upsertUser({
+      discord_id: id,
+      username: "",
+      avatar: null,
+      role,
+    });
     users++;
   }
 
   const blocked = ids(snapshot.blocked_users);
   for (const id of blocked)
-    await store.setBlocked({ discord_id: id, username: null, reason: null, blocked_by: IMPORT_ACTOR, blocked_at: now });
+    await store.setBlocked({
+      discord_id: id,
+      username: null,
+      reason: null,
+      blocked_by: IMPORT_ACTOR,
+      blocked_at: now,
+    });
 
-  const presets = presetOverrides(ids(snapshot.unpublished_presets), ids(snapshot.premium_presets));
+  const presets = presetOverrides(
+    ids(snapshot.unpublished_presets),
+    ids(snapshot.premium_presets),
+  );
   await store.setMeta("preset_visibility", JSON.stringify(presets.visibility));
   await store.setMeta("preset_premium", JSON.stringify(presets.premium));
   if (snapshot.budget_fallback)
-    await store.setMeta("budget_fallback", JSON.stringify(parseBudgetFallback(snapshot.budget_fallback)));
+    await store.setMeta(
+      "budget_fallback",
+      JSON.stringify(parseBudgetFallback(snapshot.budget_fallback)),
+    );
 
   // Above the bot's version, so its next poll cannot match a stale ETag.
   const version = Math.max(await store.version(), snapshot.version) + 1;
@@ -136,15 +166,20 @@ if (import.meta.main) {
   const args = process.argv.slice(2);
   const source = args.find((a) => !a.startsWith("--"));
   if (!source || args.includes("--help") || args.includes("-h")) {
-    console.log("Usage: DATABASE_URL=… bun scripts/import-bot-snapshot.ts SNAPSHOT_JSON|- [--force]");
+    console.log(
+      "Usage: DATABASE_URL=… bun scripts/import-bot-snapshot.ts SNAPSHOT_JSON|- [--force]",
+    );
     process.exit(source ? 0 : 1);
   }
-  const text = source === "-" ? await Bun.stdin.text() : await Bun.file(source).text();
+  const text =
+    source === "-" ? await Bun.stdin.text() : await Bun.file(source).text();
   const url = (process.env.DATABASE_URL ?? "").trim();
   if (!url) throw new Error("DATABASE_URL is not set");
   const store = await openStore(url);
   try {
-    const summary = await importBotSnapshot(store, JSON.parse(text), { force: args.includes("--force") });
+    const summary = await importBotSnapshot(store, JSON.parse(text), {
+      force: args.includes("--force"),
+    });
     console.log(JSON.stringify(summary));
   } finally {
     await (store as { close?: () => Promise<void> }).close?.();

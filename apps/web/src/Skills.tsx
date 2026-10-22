@@ -126,7 +126,11 @@ export function SkillManager({
           <Icon.plus size={14} />
           作成
         </button>
-        <button type="button" className="btn" onClick={() => setModal("import")}>
+        <button
+          type="button"
+          className="btn"
+          onClick={() => setModal("import")}
+        >
           インポート
         </button>
         <span className="grow" />
@@ -166,7 +170,11 @@ export function SkillManager({
               <li key={s.name} className="skill">
                 <div className="skill-main">
                   <div className="skill-top">
-                    <button type="button" className="skill-name" onClick={() => setPreview(s)}>
+                    <button
+                      type="button"
+                      className="skill-name"
+                      onClick={() => setPreview(s)}
+                    >
                       {s.name}
                     </button>
                     <Badge>{s.builtin ? "内蔵" : "カスタム"}</Badge>
@@ -254,7 +262,9 @@ export function SkillManager({
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                 />
-                <span className="field-hint">英小文字・数字・ハイフン。2〜64 文字。</span>
+                <span className="field-hint">
+                  英小文字・数字・ハイフン。2〜64 文字。
+                </span>
               </label>
               <label className="field">
                 <span className="field-name">説明</span>
@@ -389,7 +399,11 @@ export function SkillManager({
               ))}
             </ul>
             <div className="modal-foot">
-              <button type="button" className="btn" onClick={() => download(preview)}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => download(preview)}
+              >
                 <Icon.download size={14} />
                 ダウンロード
               </button>

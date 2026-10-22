@@ -1,8 +1,24 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { billingBounds, billingMonth } from "@hibana/shared/billing";
 import { api } from "./api";
 import { BudgetFallbackPanel } from "./BudgetFallback";
-import { Alert, Badge, Empty, Icon, Section, Skeleton, useDocumentTitle } from "./ui";
+import {
+  Alert,
+  Badge,
+  Empty,
+  Icon,
+  Section,
+  Skeleton,
+  useDocumentTitle,
+} from "./ui";
 
 /* ============================================================
    利用料（Anthropic の cost report）
@@ -39,7 +55,11 @@ type CostToday = {
   cost_usd: number;
   daily_guideline_usd: number;
   over: boolean;
-  unpriced: { model: string | null; service_tier: string | null; tokens: number }[];
+  unpriced: {
+    model: string | null;
+    service_tier: string | null;
+    tokens: number;
+  }[];
   fetched_at: number;
 };
 type TodayResponse = CostToday | { configured: false };
@@ -49,7 +69,10 @@ type TodayState = { data: CostToday | null; error: string | null };
 // API は今日の分を 1 分キャッシュするので、それより短い間隔で読んでも同じ値になる。
 const TODAY_REFRESH_MS = 60_000;
 
-const usdFormat = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+const usdFormat = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+});
 const usd = (n: number) => usdFormat.format(n);
 /** 目安との差。表示が $0.00 に丸まる差には符号を付けない（「−$0.00」にしない）。 */
 const signedUsd = (n: number) =>
@@ -68,8 +91,12 @@ const dayFormat = new Intl.DateTimeFormat("ja-JP", {
   timeZone: "UTC",
 });
 const day = (date: string) => dayFormat.format(new Date(`${date}T00:00:00Z`));
-const shortDay = (date: string) => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
-const timeFormat = new Intl.DateTimeFormat("ja-JP", { hour: "2-digit", minute: "2-digit" });
+const shortDay = (date: string) =>
+  `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
+const timeFormat = new Intl.DateTimeFormat("ja-JP", {
+  hour: "2-digit",
+  minute: "2-digit",
+});
 
 function monthLabel(month: string): string {
   const [year, mon] = month.split("-").map(Number);
@@ -85,18 +112,26 @@ const DAY_MS = 86_400_000;
 const utcMonth = () => billingMonth(new Date().toISOString().slice(0, 10));
 /** 期間の i 日目（0 始まり）の日付。 */
 const dayOf = (month: string, i: number) =>
-  new Date(Date.parse(`${billingBounds(month).start}T00:00:00Z`) + i * DAY_MS).toISOString().slice(0, 10);
+  new Date(Date.parse(`${billingBounds(month).start}T00:00:00Z`) + i * DAY_MS)
+    .toISOString()
+    .slice(0, 10);
 
 /** 期間の最初の日と最後の日。「10/5〜11/4」 */
 function rangeLabel(month: string): string {
   const { start, end } = billingBounds(month);
-  const last = new Date(Date.parse(`${end}T00:00:00Z`) - DAY_MS).toISOString().slice(0, 10);
+  const last = new Date(Date.parse(`${end}T00:00:00Z`) - DAY_MS)
+    .toISOString()
+    .slice(0, 10);
   return `${shortDay(start)}〜${shortDay(last)}`;
 }
 
 /** 目安との差を、色に頼らず文でも言う。 */
 function Verdict({ over }: { over: boolean }) {
-  return over ? <Badge tone="danger">目安超過</Badge> : <Badge tone="ok">目安以内</Badge>;
+  return over ? (
+    <Badge tone="danger">目安超過</Badge>
+  ) : (
+    <Badge tone="ok">目安以内</Badge>
+  );
 }
 
 export function AnalyticsPage() {
@@ -146,12 +181,18 @@ export function AnalyticsPage() {
           if (cancelled) return;
           const fresh = r.configured ? r : null;
           // UTC の日付が変わったら、昨日の確定額が cost report に載るので、月も読み直す。
-          if (fresh && todayDate.current !== null && todayDate.current !== fresh.date) setReloads((n) => n + 1);
+          if (
+            fresh &&
+            todayDate.current !== null &&
+            todayDate.current !== fresh.date
+          )
+            setReloads((n) => n + 1);
           todayDate.current = fresh?.date ?? null;
           setToday({ data: fresh, error: null });
         })
         .catch((e) => {
-          if (!cancelled) setToday((t) => ({ data: t.data, error: String(e.message ?? e) }));
+          if (!cancelled)
+            setToday((t) => ({ data: t.data, error: String(e.message ?? e) }));
         });
     };
     load();
@@ -176,9 +217,11 @@ export function AnalyticsPage() {
       <header className="page-head">
         <h1>利用料</h1>
         <p className="lead">
-          Anthropic の cost report（請求ベース・組織全体）を表示します。日付は UTC
-          区切り（日本時間の 9:00 に切り替わり）で、cost report に載るのは終わった日までです。進行中の日のぶんは、usage
-          report のトークン数から推計した額を「今日の推計」に出します（数分遅れ、1 分ごとに更新）。確定額は、次の 9:00
+          Anthropic の cost report（請求ベース・組織全体）を表示します。日付は
+          UTC 区切り（日本時間の 9:00 に切り替わり）で、cost report
+          に載るのは終わった日までです。進行中の日のぶんは、usage report
+          のトークン数から推計した額を「今日の推計」に出します（数分遅れ、1
+          分ごとに更新）。確定額は、次の 9:00
           を過ぎてから一覧に載ります。月の集計は、クレジットが付与される毎月5日から翌月4日までです。
         </p>
       </header>
@@ -233,15 +276,31 @@ export function AnalyticsPage() {
           body="API サーバーの環境変数 ANTHROPIC_ADMIN_API_KEY に、Anthropic の cost report を読めるキー（Admin API キーなど）を設定すると、ここに日毎の利用料が表示されます。"
         />
       )}
-      {report && <Report m={report} stale={loading} today={report.current ? today : undefined} />}
+      {report && (
+        <Report
+          m={report}
+          stale={loading}
+          today={report.current ? today : undefined}
+        />
+      )}
       {/* 判定は今月のものなので、過去の月を見ている間も同じ内容を出す。今日の推計が
           読み直されるたびに、この枠の状態も読み直す。 */}
-      <BudgetFallbackPanel reloadKey={`${reloads}:${today.data?.fetched_at ?? ""}`} />
+      <BudgetFallbackPanel
+        reloadKey={`${reloads}:${today.data?.fetched_at ?? ""}`}
+      />
     </div>
   );
 }
 
-function Report({ m, stale, today }: { m: CostMonth; stale: boolean; today?: TodayState }) {
+function Report({
+  m,
+  stale,
+  today,
+}: {
+  m: CostMonth;
+  stale: boolean;
+  today?: TodayState;
+}) {
   const guideline = m.daily_guideline_usd;
   // cost report に載るのは終わった日までなので、進行中の月でも「今日」の行はない。
   // 今月は、いちばん新しい確定日を取り上げる。
@@ -266,11 +325,16 @@ function Report({ m, stale, today }: { m: CostMonth; stale: boolean; today?: Tod
     .reverse();
 
   return (
-    <div className={`analytics-report${stale ? " is-stale" : ""}`} aria-busy={stale}>
+    <div
+      className={`analytics-report${stale ? " is-stale" : ""}`}
+      aria-busy={stale}
+    >
       <div className="stats" style={{ "--cols": columns } as CSSProperties}>
         <Stat
           label={m.current ? "今月の残り" : "予算の残り"}
-          value={overBudget ? `−${usd(-m.remaining_usd)}` : usd(m.remaining_usd)}
+          value={
+            overBudget ? `−${usd(-m.remaining_usd)}` : usd(m.remaining_usd)
+          }
           negative={overBudget}
           badge={overBudget ? <Badge tone="danger">予算超過</Badge> : undefined}
         >
@@ -284,17 +348,22 @@ function Report({ m, stale, today }: { m: CostMonth; stale: boolean; today?: Tod
           >
             <span className="meter-fill" style={{ width: `${used * 100}%` }} />
             {[0, 25, 50, 75, 100].map((t) => (
-              <i key={t} style={{ left: t === 100 ? "calc(100% - 1px)" : `${t}%` }} />
+              <i
+                key={t}
+                style={{ left: t === 100 ? "calc(100% - 1px)" : `${t}%` }}
+              />
             ))}
           </div>
           <p className="stat-note">
-            月の予算 {usd(m.monthly_budget_usd)} のうち {usd(m.spent_usd)} を使用
+            月の予算 {usd(m.monthly_budget_usd)} のうち {usd(m.spent_usd)}{" "}
+            を使用
             {m.current && until && `（${shortDay(until.date)} までの確定分）`}
             {m.current && `。残り ${m.days_left} 日（今日を含む）`}
           </p>
           {estimate && (
             <p className="stat-note">
-              今日の推計を含めると残り {signedRemaining(m.remaining_usd - estimate.cost_usd)}
+              今日の推計を含めると残り{" "}
+              {signedRemaining(m.remaining_usd - estimate.cost_usd)}
             </p>
           )}
         </Stat>
@@ -302,7 +371,9 @@ function Report({ m, stale, today }: { m: CostMonth; stale: boolean; today?: Tod
         <Stat
           label={m.current ? "今月の累計" : "この月の合計"}
           value={usd(m.spent_usd)}
-          badge={m.days.length > 0 ? <Verdict over={paceDiff > 0} /> : undefined}
+          badge={
+            m.days.length > 0 ? <Verdict over={paceDiff > 0} /> : undefined
+          }
         >
           <p className="stat-note">
             {m.days.length > 0
@@ -318,7 +389,9 @@ function Report({ m, stale, today }: { m: CostMonth; stale: boolean; today?: Tod
             badge={estimate ? <Verdict over={estimate.over} /> : undefined}
           >
             {estimate && <TodayNote t={estimate} />}
-            {today?.error && <p className="stat-note is-error">{today.error}</p>}
+            {today?.error && (
+              <p className="stat-note is-error">{today.error}</p>
+            )}
           </Stat>
         )}
 
@@ -326,7 +399,11 @@ function Report({ m, stale, today }: { m: CostMonth; stale: boolean; today?: Tod
           <Stat
             label={`直近の確定日（UTC ${shortDay(latest.date)}）`}
             value={latest.cost_usd === null ? "未集計" : usd(latest.cost_usd)}
-            badge={latest.cost_usd === null ? undefined : <Verdict over={latest.over} />}
+            badge={
+              latest.cost_usd === null ? undefined : (
+                <Verdict over={latest.over} />
+              )
+            }
           >
             <p className="stat-note">
               {latest.cost_usd === null
@@ -340,7 +417,8 @@ function Report({ m, stale, today }: { m: CostMonth; stale: boolean; today?: Tod
 
         <Stat label="1日の目安" value={usd(guideline)}>
           <p className="stat-note">
-            {usd(m.monthly_budget_usd)} ÷ {m.days_in_month} 日。超えた日は {overDays} 日（
+            {usd(m.monthly_budget_usd)} ÷ {m.days_in_month} 日。超えた日は{" "}
+            {overDays} 日（
             {m.days.length} 日中）
           </p>
         </Stat>
@@ -348,8 +426,8 @@ function Report({ m, stale, today }: { m: CostMonth; stale: boolean; today?: Tod
 
       {m.days.length === 0 ? (
         <p className="note">
-          この月で終わった日はまだありません。1 日のぶんは、UTC の日付が変わったあと（日本時間の 9:00
-          以降）に表示されます。
+          この月で終わった日はまだありません。1 日のぶんは、UTC
+          の日付が変わったあと（日本時間の 9:00 以降）に表示されます。
         </p>
       ) : (
         <>
@@ -357,7 +435,10 @@ function Report({ m, stale, today }: { m: CostMonth; stale: boolean; today?: Tod
             <div className="chart-head">
               <div>
                 <h2 id="cost-chart-h">日毎の利用料</h2>
-                <p>棒が点線（1日の目安 {usd(guideline)}）を超えた日が目安超過です。</p>
+                <p>
+                  棒が点線（1日の目安 {usd(guideline)}
+                  ）を超えた日が目安超過です。
+                </p>
               </div>
               <ul className="legend">
                 <li>
@@ -395,7 +476,9 @@ function Report({ m, stale, today }: { m: CostMonth; stale: boolean; today?: Tod
                   {rows.map((d) => (
                     <tr key={d.date}>
                       <td>{day(d.date)}</td>
-                      <td className="num">{d.cost_usd === null ? "—" : usd(d.cost_usd)}</td>
+                      <td className="num">
+                        {d.cost_usd === null ? "—" : usd(d.cost_usd)}
+                      </td>
                       <td>
                         {d.cost_usd === null ? (
                           <Badge>未集計</Badge>
@@ -404,7 +487,9 @@ function Report({ m, stale, today }: { m: CostMonth; stale: boolean; today?: Tod
                         )}
                       </td>
                       <td className="num">
-                        {d.cost_usd === null ? "—" : signedUsd(d.cost_usd - guideline)}
+                        {d.cost_usd === null
+                          ? "—"
+                          : signedUsd(d.cost_usd - guideline)}
                       </td>
                       <td className="num">{usd(d.running)}</td>
                     </tr>
@@ -431,14 +516,17 @@ function TodayNote({ t }: { t: CostToday }) {
     <>
       {/* 時刻は「取得」の時刻と同じく、ブラウザの時間帯で出す。日の始まりだけ UTC と書く。 */}
       <p className="stat-note">
-        {timeFormat.format(Date.parse(t.through))} までの利用から単価表で計算した推計（UTC の {shortDay(t.date)} 0:00 から
-        {t.last_usage_at && `。最後の利用 ${timeFormat.format(Date.parse(t.last_usage_at))}`}
+        {timeFormat.format(Date.parse(t.through))}{" "}
+        までの利用から単価表で計算した推計（UTC の {shortDay(t.date)} 0:00 から
+        {t.last_usage_at &&
+          `。最後の利用 ${timeFormat.format(Date.parse(t.last_usage_at))}`}
         ）。反映は数分遅れます。
       </p>
       {left > 0 && (
         <p className="stat-note">
           単価の分からない利用（{models.slice(0, 2).join("、")}
-          {models.length > 2 && ` ほか ${models.length - 2} 件`}、{tokenFormat.format(left)} トークン）は含みません。
+          {models.length > 2 && ` ほか ${models.length - 2} 件`}、
+          {tokenFormat.format(left)} トークン）は含みません。
         </p>
       )}
     </>
@@ -462,7 +550,9 @@ function Stat({
     <div className="stat">
       <span className="stat-label">{label}</span>
       <div className="stat-line">
-        <span className={`stat-value${negative ? " is-neg" : ""}`}>{value}</span>
+        <span className={`stat-value${negative ? " is-neg" : ""}`}>
+          {value}
+        </span>
         {badge}
       </div>
       {children}
@@ -482,7 +572,8 @@ const RIGHT = 44;
 function axis(max: number) {
   const raw = max / 4;
   const pow = 10 ** Math.floor(Math.log10(raw));
-  const step = [1, 2, 2.5, 5, 10].map((k) => k * pow).find((s) => s >= raw) ?? 10 * pow;
+  const step =
+    [1, 2, 2.5, 5, 10].map((k) => k * pow).find((s) => s >= raw) ?? 10 * pow;
   const count = Math.ceil(max / step);
   return Array.from({ length: count + 1 }, (_, i) => i * step);
 }
@@ -524,11 +615,15 @@ function CostChart({ m }: { m: CostMonth }) {
   function onKeyDown(event: React.KeyboardEvent) {
     const last = m.days.length - 1;
     const next =
-      event.key === "ArrowLeft" ? Math.max((active ?? last + 1) - 1, 0)
-      : event.key === "ArrowRight" ? Math.min((active ?? -1) + 1, last)
-      : event.key === "Home" ? 0
-      : event.key === "End" ? last
-      : null;
+      event.key === "ArrowLeft"
+        ? Math.max((active ?? last + 1) - 1, 0)
+        : event.key === "ArrowRight"
+          ? Math.min((active ?? -1) + 1, last)
+          : event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? last
+              : null;
     if (next === null) return;
     event.preventDefault();
     setActive(next);
@@ -549,11 +644,16 @@ function CostChart({ m }: { m: CostMonth }) {
             role="status"
             style={{
               // 端の日でも枠からはみ出さないよう、中心を内側に寄せる。
-              left: Math.min(Math.max(center(active), 84), Math.max(width - 84, 84)),
+              left: Math.min(
+                Math.max(center(active), 84),
+                Math.max(width - 84, 84),
+              ),
             }}
           >
             <span>{day(shownDay.date)}</span>
-            <strong>{shownDay.cost_usd === null ? "未集計" : usd(shownDay.cost_usd)}</strong>
+            <strong>
+              {shownDay.cost_usd === null ? "未集計" : usd(shownDay.cost_usd)}
+            </strong>
             {shownDay.cost_usd !== null && (
               <span className={shownDay.over ? "is-over" : undefined}>
                 {shownDay.over ? "目安超過 " : "目安以内 "}
@@ -562,7 +662,9 @@ function CostChart({ m }: { m: CostMonth }) {
             )}
           </div>
         ) : (
-          <span className="chart-hint">棒に触れるか、グラフを選んで ← → で日を選べます。</span>
+          <span className="chart-hint">
+            棒に触れるか、グラフを選んで ← → で日を選べます。
+          </span>
         )}
       </div>
       <div
@@ -581,19 +683,40 @@ function CostChart({ m }: { m: CostMonth }) {
         onPointerLeave={() => setActive(null)}
       >
         {width > 0 && (
-          <svg width={width} height={PAD_TOP + PLOT_H + AXIS_H} aria-hidden="true">
+          <svg
+            width={width}
+            height={PAD_TOP + PLOT_H + AXIS_H}
+            aria-hidden="true"
+          >
             <defs>
               {/* 軸の高さに対して色を掛ける（棒ごとではない）ので、高い日ほど暖かい色になる。 */}
-              <linearGradient id={`${defs}-bar`} gradientUnits="userSpaceOnUse" x1="0" x2="0" y1={base} y2={PAD_TOP}>
+              <linearGradient
+                id={`${defs}-bar`}
+                gradientUnits="userSpaceOnUse"
+                x1="0"
+                x2="0"
+                y1={base}
+                y2={PAD_TOP}
+              >
                 <stop offset="0" style={{ stopColor: "var(--f1)" }} />
                 <stop offset="0.46" style={{ stopColor: "var(--f2)" }} />
                 <stop offset="0.82" style={{ stopColor: "var(--f3)" }} />
                 <stop offset="1" style={{ stopColor: "var(--f4)" }} />
               </linearGradient>
               {/* 超過は色だけでなく斜線でも示す。 */}
-              <pattern id={`${defs}-over`} patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="rotate(45)">
+              <pattern
+                id={`${defs}-over`}
+                patternUnits="userSpaceOnUse"
+                width="5"
+                height="5"
+                patternTransform="rotate(45)"
+              >
                 <rect width="5" height="5" style={{ fill: "var(--danger)" }} />
-                <rect width="2" height="5" style={{ fill: "var(--danger-deep)" }} />
+                <rect
+                  width="2"
+                  height="5"
+                  style={{ fill: "var(--danger-deep)" }}
+                />
               </pattern>
             </defs>
             {active !== null && (
@@ -607,8 +730,20 @@ function CostChart({ m }: { m: CostMonth }) {
             )}
             {ticks.map((t) => (
               <g key={t}>
-                <line className="chart-grid" x1={LEFT} x2={LEFT + plotW} y1={y(t)} y2={y(t)} />
-                <text className="chart-tick" x={LEFT - 8} y={y(t)} dy="0.32em" textAnchor="end">
+                <line
+                  className="chart-grid"
+                  x1={LEFT}
+                  x2={LEFT + plotW}
+                  y1={y(t)}
+                  y2={y(t)}
+                />
+                <text
+                  className="chart-tick"
+                  x={LEFT - 8}
+                  y={y(t)}
+                  dy="0.32em"
+                  textAnchor="end"
+                >
                   {tickFormat.format(t)}
                 </text>
               </g>
@@ -625,26 +760,52 @@ function CostChart({ m }: { m: CostMonth }) {
                   key={d.date}
                   className={`chart-bar${d.over ? " is-over" : ""}`}
                   // 棒は左の日から順に伸びる。
-                  style={{
-                    "--i": i,
-                    fill: d.over ? `url(#${defs}-over) var(--danger)` : `url(#${defs}-bar) var(--f2)`,
-                  } as CSSProperties}
+                  style={
+                    {
+                      "--i": i,
+                      fill: d.over
+                        ? `url(#${defs}-over) var(--danger)`
+                        : `url(#${defs}-bar) var(--f2)`,
+                    } as CSSProperties
+                  }
                   // 上だけ丸め、基線側は角のまま。
                   d={`M${x},${base}V${t + r}Q${x},${t} ${x + r},${t}H${x + barW - r}Q${x + barW},${t} ${x + barW},${t + r}V${base}Z`}
                 />
               );
             })}
-            <line className="chart-guide" x1={LEFT} x2={LEFT + plotW} y1={y(guideline)} y2={y(guideline)} />
-            <text className="chart-guide-label" x={LEFT + plotW + 8} y={y(guideline)} dy="0.32em">
+            <line
+              className="chart-guide"
+              x1={LEFT}
+              x2={LEFT + plotW}
+              y1={y(guideline)}
+              y2={y(guideline)}
+            />
+            <text
+              className="chart-guide-label"
+              x={LEFT + plotW + 8}
+              y={y(guideline)}
+              dy="0.32em"
+            >
               目安
             </text>
             {/* 横軸は 5日から翌月 4日まで。期間の初日と月が変わる 1日には月も書く。
                 30日は、隣の 1日のラベルと当たるので書かない。 */}
-            {Array.from({ length: m.days_in_month }, (_, i) => ({ i, date: dayOf(m.month, i) }))
+            {Array.from({ length: m.days_in_month }, (_, i) => ({
+              i,
+              date: dayOf(m.month, i),
+            }))
               .map(({ i, date }) => ({ i, date, n: Number(date.slice(8, 10)) }))
-              .filter(({ i, n }) => i === 0 || n === 1 || (n % 5 === 0 && n <= 25))
+              .filter(
+                ({ i, n }) => i === 0 || n === 1 || (n % 5 === 0 && n <= 25),
+              )
               .map(({ i, date, n }) => (
-                <text key={date} className="chart-tick" x={center(i)} y={base + 17} textAnchor="middle">
+                <text
+                  key={date}
+                  className="chart-tick"
+                  x={center(i)}
+                  y={base + 17}
+                  textAnchor="middle"
+                >
                   {i === 0 || n === 1 ? shortDay(date) : n}
                 </text>
               ))}

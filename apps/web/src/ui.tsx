@@ -366,7 +366,8 @@ export function providerMeta(
   provider: string | undefined,
   label?: string,
 ): ProviderMeta {
-  if (provider === "chatgpt") return { ...PROVIDERS.codex_pro!, label: "ChatGPT" };
+  if (provider === "chatgpt")
+    return { ...PROVIDERS.codex_pro!, label: "ChatGPT" };
   if (provider && PROVIDERS[provider]) return PROVIDERS[provider];
   // provider を返さない旧 API 用: label の "Provider / Model" 前半で引く
   const head = label?.split("/")[0]?.trim().toLowerCase();
@@ -578,7 +579,13 @@ export function BoolSeg({
   onDefault?: () => void;
 }) {
   const current =
-    value === true ? "on" : value === false ? "off" : onDefault ? "inherit" : "off";
+    value === true
+      ? "on"
+      : value === false
+        ? "off"
+        : onDefault
+          ? "inherit"
+          : "off";
   return (
     <Seg
       label={label}
@@ -586,7 +593,9 @@ export function BoolSeg({
       wideOnMobile
       value={current}
       options={[
-        ...(onDefault ? [{ value: "inherit" as const, label: "デフォルト" }] : []),
+        ...(onDefault
+          ? [{ value: "inherit" as const, label: "デフォルト" }]
+          : []),
         { value: "on" as const, label: "ON" },
         { value: "off" as const, label: "OFF" },
       ]}
@@ -605,7 +614,9 @@ export function Badge({
   children: ReactNode;
   tone?: "" | "ok" | "warn" | "danger" | "solid";
 }) {
-  return <span className={`badge${tone ? ` is-${tone}` : ""}`}>{children}</span>;
+  return (
+    <span className={`badge${tone ? ` is-${tone}` : ""}`}>{children}</span>
+  );
 }
 
 export function Empty({
@@ -752,7 +763,10 @@ export function ToastArea({ toasts }: { toasts: Toast[] }) {
   return (
     <div className="toast-area" aria-live="polite">
       {toasts.map((t) => (
-        <div key={t.id} className={`toast${t.kind === "error" ? " is-danger" : ""}`}>
+        <div
+          key={t.id}
+          className={`toast${t.kind === "error" ? " is-danger" : ""}`}
+        >
           {t.kind === "ok" ? <Icon.check /> : <Icon.alert />}
           <span>{t.text}</span>
         </div>

@@ -63,11 +63,16 @@ export function ArtifactsPage() {
             showGuild
             onAct={async (site, action, ok) => {
               if (!site.guild_id)
-                throw new Error("DM の成果物はダッシュボードから操作できません");
-              await api(`/api/guilds/${site.guild_id}/artifacts/${site.token}`, {
-                method: "PATCH",
-                body: JSON.stringify({ action }),
-              });
+                throw new Error(
+                  "DM の成果物はダッシュボードから操作できません",
+                );
+              await api(
+                `/api/guilds/${site.guild_id}/artifacts/${site.token}`,
+                {
+                  method: "PATCH",
+                  body: JSON.stringify({ action }),
+                },
+              );
               push("ok", ok);
               load();
             }}
@@ -150,7 +155,9 @@ function ArtifactTable({
     filter === "all" ? true : s.retention === filter,
   );
   const count = (key: Retention) =>
-    key === "all" ? sites.length : sites.filter((s) => s.retention === key).length;
+    key === "all"
+      ? sites.length
+      : sites.filter((s) => s.retention === key).length;
 
   async function act(site: Artifact, action: Action, ok: string) {
     setBusy(`${site.token}:${action}`);
@@ -211,7 +218,9 @@ function ArtifactTable({
                     </td>
                   )}
                   <td className="full" data-label="パス">
-                    <div className="cell-title mono">{s.source_path || "—"}</div>
+                    <div className="cell-title mono">
+                      {s.source_path || "—"}
+                    </div>
                   </td>
                   <td className="full" data-label="URL">
                     <a
@@ -240,7 +249,9 @@ function ArtifactTable({
                         type="button"
                         className="btn btn-sm"
                         disabled={!!busy || s.retention === "permanent"}
-                        onClick={() => void act(s, "month", "1ヶ月延命を依頼した")}
+                        onClick={() =>
+                          void act(s, "month", "1ヶ月延命を依頼した")
+                        }
                       >
                         1ヶ月
                       </button>
@@ -260,7 +271,9 @@ function ArtifactTable({
                           type="button"
                           className="btn btn-sm"
                           disabled={!!busy}
-                          onClick={() => void act(s, "permanent", "永久化を依頼した")}
+                          onClick={() =>
+                            void act(s, "permanent", "永久化を依頼した")
+                          }
                         >
                           永久化
                         </button>

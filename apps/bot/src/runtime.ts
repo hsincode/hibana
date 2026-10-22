@@ -110,13 +110,19 @@ export class Runtime {
    *  the key is set. They are put back as the catalog ships them; the stored
    *  state of every other preset is left as it is. */
   private withholdWorkspacePresets() {
-    const workspace = new Set(MODEL_PRESETS.filter((p) => p.provider === WORKSPACE_PROVIDER).map((p): string => p.id));
+    const workspace = new Set(
+      MODEL_PRESETS.filter((p) => p.provider === WORKSPACE_PROVIDER).map(
+        (p): string => p.id,
+      ),
+    );
     for (const [list, shipped] of [
       ["unpublished_presets", unpublishedPresetIds({})],
       ["premium_presets", premiumPresetIds({})],
     ] as const) {
       const stored = this.snapshot[list];
-      const missing = shipped.filter((id) => workspace.has(id) && !stored.includes(id));
+      const missing = shipped.filter(
+        (id) => workspace.has(id) && !stored.includes(id),
+      );
       if (missing.length) this.snapshot[list] = [...stored, ...missing];
     }
   }
@@ -147,15 +153,29 @@ export class Runtime {
     ])) {
       const a = previous.guilds[id],
         b = this.snapshot.guilds[id];
-      if (notify &&
-          JSON.stringify([a?.selection, a?.effort, a?.ultra_mode, a?.multi_agent]) !==
-          JSON.stringify([b?.selection, b?.effort, b?.ultra_mode, b?.multi_agent]))
+      if (
+        notify &&
+        JSON.stringify([
+          a?.selection,
+          a?.effort,
+          a?.ultra_mode,
+          a?.multi_agent,
+        ]) !==
+          JSON.stringify([
+            b?.selection,
+            b?.effort,
+            b?.ultra_mode,
+            b?.multi_agent,
+          ])
+      )
         this.onChange?.(id);
     }
   }
   guild(id?: string) {
-    return normalizeGuild(id ? this.snapshot.guilds[id] : null,
-      normalizeGuild(this.snapshot.defaults, this.defaultSettings()));
+    return normalizeGuild(
+      id ? this.snapshot.guilds[id] : null,
+      normalizeGuild(this.snapshot.defaults, this.defaultSettings()),
+    );
   }
   async initializeGuild(id: string) {
     return this.serial.run(async () => {
@@ -163,7 +183,9 @@ export class Runtime {
       if (this.config.webApiUrl) {
         // An empty patch creates a concrete row without replacing an existing one.
         await this.remote(`/internal/guilds/${id}`, "PATCH", {});
-        this.replace(await this.remote("/internal/snapshot", "GET") as Snapshot);
+        this.replace(
+          (await this.remote("/internal/snapshot", "GET")) as Snapshot,
+        );
       } else {
         this.snapshot.guilds[id] = this.guild(id);
         await this.persist();
@@ -171,14 +193,21 @@ export class Runtime {
     });
   }
   defaultSettings(): GuildRow {
-    return { ...emptyGuild(), selection: this.config.selection,
+    return {
+      ...emptyGuild(),
+      selection: this.config.selection,
       effort: this.config.selection.effort ?? "default",
-      ultra_mode: this.config.ultraMode || this.config.multiAgent, multi_agent: this.config.multiAgent,
+      ultra_mode: this.config.ultraMode || this.config.multiAgent,
+      multi_agent: this.config.multiAgent,
       subagent_enabled: this.config.subagentEnabled,
-      jev_enabled: this.config.jevEnabled, jev_task_enabled: this.config.jevTaskEnabled,
-      suppress_embeds: this.config.suppressEmbeds, temperature: this.config.temperature,
-      exa_mode: this.config.exaMode, extra_triggers: [...this.config.extraTriggers],
-      thread_history_max_age_secs: this.config.threadHistoryAge };
+      jev_enabled: this.config.jevEnabled,
+      jev_task_enabled: this.config.jevTaskEnabled,
+      suppress_embeds: this.config.suppressEmbeds,
+      temperature: this.config.temperature,
+      exa_mode: this.config.exaMode,
+      extra_triggers: [...this.config.extraTriggers],
+      thread_history_max_age_secs: this.config.threadHistoryAge,
+    };
   }
   role(userId: string) {
     if ((process.env.WEB_ADMIN_IDS || "").split(",").includes(userId))
@@ -205,20 +234,26 @@ export class Runtime {
     if (this.canSelect(preset, userId)) return true;
     const p = MODEL_PRESETS.find((p) => p.id === preset);
     const chosen = guildId ? this.guild(guildId).selection : undefined;
-    const server = chosen && MODEL_PRESETS.find(
-      (x) => x.provider === chosen.provider && x.model === chosen.model,
-    );
+    const server =
+      chosen &&
+      MODEL_PRESETS.find(
+        (x) => x.provider === chosen.provider && x.model === chosen.model,
+      );
     return Boolean(
-      p && server && serverShared(p.id) && serverShared(server.id) &&
-      (server.id === p.id || (isAutoRoute(server) && p.provider === server.provider)) &&
+      p &&
+      server &&
+      serverShared(p.id) &&
+      serverShared(server.id) &&
+      (server.id === p.id ||
+        (isAutoRoute(server) && p.provider === server.provider)) &&
       !this.snapshot.unpublished_presets.includes(p.id) &&
       this.providerAvailable(p.provider),
     );
   }
   available() {
-    return MODEL_PRESETS.filter(
-      (p) => this.providerAvailable(p.provider),
-    ).map((p) => p.id);
+    return MODEL_PRESETS.filter((p) => this.providerAvailable(p.provider)).map(
+      (p) => p.id,
+    );
   }
   providerAvailable(provider: string) {
     return provider === "chatgpt"
@@ -242,13 +277,17 @@ export class Runtime {
   }
   /** The threshold of the last answer, for the Discord notice (#95). */
   budgetThreshold(): number {
-    return this.snapshot.budget?.threshold_usd ?? DEFAULT_BUDGET_FALLBACK_THRESHOLD_USD;
+    return (
+      this.snapshot.budget?.threshold_usd ??
+      DEFAULT_BUDGET_FALLBACK_THRESHOLD_USD
+    );
   }
   /** The selection the fallback runs as. A stored preset that was hidden
    *  since (it may not have a live wire id) runs the default instead. */
   budgetFallback(): Selection {
     let fallback = parseBudgetFallback(this.snapshot.budget_fallback);
-    if (this.snapshot.unpublished_presets.includes(fallback.preset)) fallback = DEFAULT_BUDGET_FALLBACK;
+    if (this.snapshot.unpublished_presets.includes(fallback.preset))
+      fallback = DEFAULT_BUDGET_FALLBACK;
     return budgetFallbackSelection(fallback);
   }
   /** What an `anthropic` request runs as (#89): the fallback while the budget
@@ -257,7 +296,8 @@ export class Runtime {
    *  request changes: history and checkpoints stay filed under the stored
    *  model, so the conversation continues there once the budget is back. */
   budgetSelection(selection: Selection): Selection {
-    if (selection.provider !== BUDGET_FALLBACK_PROVIDER || !this.budgetLow()) return selection;
+    if (selection.provider !== BUDGET_FALLBACK_PROVIDER || !this.budgetLow())
+      return selection;
     return this.budgetFallback();
   }
   resolve(guildId?: string, userId?: string) {
@@ -275,14 +315,14 @@ export class Runtime {
     );
     // A member without the plan keeps a server's `server_shared` pick, but
     // not one stored on their own row (e.g. after losing the plan).
-    const shared = preset && user.selection == null && guildId && serverShared(preset.id);
-    const unavailable = (
+    const shared =
+      preset && user.selection == null && guildId && serverShared(preset.id);
+    const unavailable =
       preset &&
       userId &&
       !shared &&
       this.snapshot.premium_presets.includes(preset.id) &&
-      !["premium", "moderator", "administrator"].includes(this.role(userId))
-    );
+      !["premium", "moderator", "administrator"].includes(this.role(userId));
     if (unavailable) selection = this.config.selection;
     else selection = { ...selection, effort: effort ?? selection.effort };
     // Resolved Multi still implies Ultra, including when only one of the two
@@ -298,17 +338,24 @@ export class Runtime {
       multi_agent: storedMulti,
     };
     const multiAgent = !workspace && storedMulti;
-    const context = user.context ??
-      (guildId ? guild.context : this.snapshot.user_contexts[userId || ""] ?? null);
+    const context =
+      user.context ??
+      (guildId
+        ? guild.context
+        : (this.snapshot.user_contexts[userId || ""] ?? null));
     // The stored switches are kept; they apply again under another provider.
-    const subagentEnabled = !workspace && !subagentsUnsupported(selection.provider) &&
+    const subagentEnabled =
+      !workspace &&
+      !subagentsUnsupported(selection.provider) &&
       stored.subagent_enabled;
     const ultraMode = !workspace && stored.ultra_mode;
     // Haiku Ultra: the session is created with Managed Agents' dynamic
     // workflows. It takes a stored Ultra on Haiku 5.5 and the same process
     // switches as Hibana's own workflows, so WORKFLOWS_ENABLED=false (or
     // tools or subagents off) stops it too.
-    const workspaceUltra = workspace && workflowsEnabled(this.config, stored) &&
+    const workspaceUltra =
+      workspace &&
+      workflowsEnabled(this.config, stored) &&
       effectiveSubagentMode(stored, selection) === "ultra";
     return {
       ...guild,
@@ -319,7 +366,11 @@ export class Runtime {
       multi_agent: multiAgent,
       // Whether this scope's turns run as Ultracode (xhigh + workflows);
       // selection keeps the stored effort.
-      ultracode: ultracodeActive(this.config, { subagent_enabled: subagentEnabled, ultra_mode: ultraMode, multi_agent: multiAgent }),
+      ultracode: ultracodeActive(this.config, {
+        subagent_enabled: subagentEnabled,
+        ultra_mode: ultraMode,
+        multi_agent: multiAgent,
+      }),
       multi_agent_roles: pick(user.multi_agent_roles, guild.multi_agent_roles!),
       subagent_model: pick(user.subagent_model, guild.subagent_model!),
       subagent_effort: pick(user.subagent_effort, guild.subagent_effort!),
@@ -342,10 +393,15 @@ export class Runtime {
       !this.canSelect(patch.preset, userId)
     )
       throw new Error("This model is unavailable for your account");
-    if (patch.subagent_model?.mode === "fixed" && !this.canSelect(patch.subagent_model.preset, userId))
+    if (
+      patch.subagent_model?.mode === "fixed" &&
+      !this.canSelect(patch.subagent_model.preset, userId)
+    )
       throw new Error("This subagent model is unavailable for your account");
     // Per-role Multi-Agent presets need the same plan/visibility check.
-    for (const id of patchPresetIds({ multi_agent_roles: patch.multi_agent_roles }))
+    for (const id of patchPresetIds({
+      multi_agent_roles: patch.multi_agent_roles,
+    }))
       if (!this.canSelect(id, userId))
         throw new Error("This subagent model is unavailable for your account");
     return this.serial.run(async () => {
@@ -354,7 +410,11 @@ export class Runtime {
         const fresh = await this.remote("/internal/snapshot", "GET");
         this.replace(fresh as Snapshot);
       } else {
-        const row = applyPatch(this.guild(guildId), patch, this.defaultSettings());
+        const row = applyPatch(
+          this.guild(guildId),
+          patch,
+          this.defaultSettings(),
+        );
         const next = {
           ...this.snapshot,
           guilds: { ...this.snapshot.guilds, [guildId]: row },
@@ -393,7 +453,10 @@ export class Runtime {
         );
       } else {
         const row = applyUserOverridePatch(
-          normalizeUserOverride(this.snapshot.user_overrides[userId], this.defaultSettings()),
+          normalizeUserOverride(
+            this.snapshot.user_overrides[userId],
+            this.defaultSettings(),
+          ),
           patch,
           this.defaultSettings(),
         );

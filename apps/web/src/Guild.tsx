@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { Link, NavLink, Navigate, useLocation, useParams } from "react-router-dom";
+import {
+  Link,
+  NavLink,
+  Navigate,
+  useLocation,
+  useParams,
+} from "react-router-dom";
 import {
   api,
   apiCached,
@@ -82,7 +88,9 @@ export function GuildPage() {
         setGuild(guilds.find((g) => g.id === id) ?? null);
       })
       .catch(() => {});
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [id]);
 
   useEffect(() => {
@@ -92,16 +100,30 @@ export function GuildPage() {
     setSettings(null);
     setDraft(null);
     apiCached<Catalog>("/api/catalog")
-      .then((c) => { if (active) setCat(c); })
-      .catch((e) => { if (active) setErr(String(e.message ?? e)); });
+      .then((c) => {
+        if (active) setCat(c);
+      })
+      .catch((e) => {
+        if (active) setErr(String(e.message ?? e));
+      });
     apiCached<Me>("/api/me")
-      .then((m) => { if (active) setMe(m); })
-      .catch(() => { if (active) setMe(null); });
+      .then((m) => {
+        if (active) setMe(m);
+      })
+      .catch(() => {
+        if (active) setMe(null);
+      });
     api<{ settings: GuildSettings }>(`/api/guilds/${id}/settings`)
-      .then((r) => { if (active) setSettings(r.settings); })
-      .catch((e) => { if (active) setErr(String(e.message ?? e)); });
+      .then((r) => {
+        if (active) setSettings(r.settings);
+      })
+      .catch((e) => {
+        if (active) setErr(String(e.message ?? e));
+      });
     // サーバーを切り替えた直後に、前のサーバーの応答が遅れて届いても表示しない。
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [id]);
 
   const ready = !!cat && !!settings;
@@ -110,8 +132,10 @@ export function GuildPage() {
 
   if (!id) return <Navigate to="/" replace />;
   // 1 ページだった頃の節へのリンクは、分かれた先のページへ送る。
-  const legacy = path === "" ? LEGACY_SECTION_PAGE[location.hash.slice(1)] : undefined;
-  if (legacy) return <Navigate to={`${guildPath(id, legacy)}${location.hash}`} replace />;
+  const legacy =
+    path === "" ? LEGACY_SECTION_PAGE[location.hash.slice(1)] : undefined;
+  if (legacy)
+    return <Navigate to={`${guildPath(id, legacy)}${location.hash}`} replace />;
 
   if (!page) {
     return (
@@ -205,7 +229,9 @@ export function GuildPage() {
             <SkillManager key={id} guildId={id} guilds={guilds} />
           </Section>
         )}
-        {page.path === "artifacts" && <GuildArtifacts guildId={id} push={push} />}
+        {page.path === "artifacts" && (
+          <GuildArtifacts guildId={id} push={push} />
+        )}
 
         <ToastArea toasts={toasts} />
       </div>
@@ -254,7 +280,9 @@ function ToolsSections({
     mono = true,
   ) => (
     <Row k={row} name={name} mono={mono} inline>
-      {(nameId) => <BoolSeg labelledBy={nameId} value={value} onChange={onChange} />}
+      {(nameId) => (
+        <BoolSeg labelledBy={nameId} value={value} onChange={onChange} />
+      )}
     </Row>
   );
 
@@ -266,7 +294,13 @@ function ToolsSections({
         desc="数値は入力欄からフォーカスを外した時点で保存されます。"
       >
         <div className="rows">
-          <Row k="g-temperature" name="temperature" mono htmlFor="g-temperature-in" hint="0〜2。">
+          <Row
+            k="g-temperature"
+            name="temperature"
+            mono
+            htmlFor="g-temperature-in"
+            hint="0〜2。"
+          >
             <input
               className="input mono"
               id="g-temperature-in"
@@ -276,7 +310,9 @@ function ToolsSections({
               max={2}
               step={0.05}
               defaultValue={s.temperature ?? ""}
-              onBlur={(e) => saveNumber(e.target, "temperature", "g-temperature")}
+              onBlur={(e) =>
+                saveNumber(e.target, "temperature", "g-temperature")
+              }
             />
           </Row>
           <Row k="g-exa" name="exa" mono htmlFor="g-exa-sel">
@@ -306,7 +342,9 @@ function ToolsSections({
               min={0}
               step={60}
               defaultValue={s.thread_history_max_age_secs ?? ""}
-              onBlur={(e) => saveNumber(e.target, "thread_history_max_age_secs", "g-history")}
+              onBlur={(e) =>
+                saveNumber(e.target, "thread_history_max_age_secs", "g-history")
+              }
             />
           </Row>
         </div>
@@ -341,7 +379,8 @@ function ToolsSections({
                   return;
                 }
                 const next = e.target.value.trim() || null;
-                if (next !== (s.mcp_url ?? null)) patch({ mcp_url: next }, "g-mcp-url");
+                if (next !== (s.mcp_url ?? null))
+                  patch({ mcp_url: next }, "g-mcp-url");
               }}
             />
           </Row>

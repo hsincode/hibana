@@ -67,14 +67,18 @@ async function fixture() {
   );
   (bot.client as { user: { id: string } | null }).user = { id: "30000" };
   bot.tools.sandbox.available = true;
-  const sent: { content?: string; reply?: { messageReference?: string } }[] = [];
+  const sent: { content?: string; reply?: { messageReference?: string } }[] =
+    [];
   let guild = false;
   bot.client.channels.fetch = (async (id: string) => {
     const channel = {
       id,
       isSendable: () => true,
       sendTyping: async () => {},
-      send: async (value: { content?: string; reply?: { messageReference?: string } }) => {
+      send: async (value: {
+        content?: string;
+        reply?: { messageReference?: string };
+      }) => {
         sent.push(value);
         return { id: "sent", edit: async () => {} };
       },
@@ -158,7 +162,8 @@ describe("direct /image prefix", () => {
             undefined,
             JSON.stringify(settings.selection),
             false,
-            settings.thread_history_max_age_secs ?? f.bot.config.threadHistoryAge,
+            settings.thread_history_max_age_secs ??
+              f.bot.config.threadHistoryAge,
           )
           .map((message) => message.content),
       ).toEqual([
@@ -168,7 +173,10 @@ describe("direct /image prefix", () => {
       f.setGuild(true);
       f.generated.length = 0;
       await f.handle(
-        incoming("<@30000> /image shrine at dusk", { dm: false, mention: true }),
+        incoming("<@30000> /image shrine at dusk", {
+          dm: false,
+          mention: true,
+        }),
       );
       expect(f.rounds()).toBe(0);
       expect(f.generated.map((row) => row.prompt)).toEqual(["shrine at dusk"]);
@@ -206,7 +214,9 @@ describe("direct /image prefix", () => {
         "プロンプトは8000文字までです。",
         "画像生成はいま使えません。",
       ]);
-      expect(f.sent.every((message) => message.reply?.messageReference === "50000")).toBe(true);
+      expect(
+        f.sent.every((message) => message.reply?.messageReference === "50000"),
+      ).toBe(true);
     } finally {
       await f.cleanup();
     }

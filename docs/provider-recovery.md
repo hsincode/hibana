@@ -53,6 +53,7 @@ SSE の最終応答と使用量を取得できることも確認しました。�
 未検証です。WebSocket のフォールバックや無制限再接続など、
 Codex fork の全機能を移植したものではありません。400/401/404 が設定に起因する場合は
 設定の修正が必要で、同一リクエストの再送だけでは解消しません。
+
 # Provider failure diagnostics
 
 Bot journal failures now include `provider_diagnostics`: provider/model,

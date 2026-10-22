@@ -46,7 +46,7 @@ Bun + TypeScript monorepo: `apps/bot` (Discord agent), `apps/api` (Elysia settin
 
 - Secrets belong in environment variables only; never commit `.env` or runtime data.
 - Every change goes through an Issue and a pull request. The owner decides whether and in what order to merge; the agent performs the merge, with a merge commit, when the owner says so (decision record: #2). Do not push to `main`.
-- Run `make test` after logic changes and `make ci` before pushing.
+- Run `make test` after logic changes and `make ci` before pushing. Format with `bun fmt` (`make fmt`); `make ci` and CI fail on unformatted files. Prompts and skills under `apps/bot/prompts` and `apps/bot/skills` are excluded in `.prettierignore` because they are model input (decision record: #99).
 - Preserve guild / DM isolation, permission checks, bounded Docker sandboxes and independent provider credentials.
 - Anthropic Workspace turns have no Docker sandbox: each channel works in a container in Anthropic's cloud. They are bounded by money, time and concurrency instead: a budget per turn, a daily and a monthly budget that a resumed turn is held to as well, a time limit per turn and a limit on turns running at once (decision record: #76). Keep those bounds, keep one turn at a time per channel, and keep `ANTHROPIC_WORKSPACE_API_KEY` apart from `ANTHROPIC_API_KEY`: neither falls back to the other.
 - Advisor, the old automatic model router, answer verification (`verify`), the Jev completion check at the end of a turn (decision record: #50), and Codex fast mode (`fast`) are intentionally removed. OpenRouter provider and React navigation remain supported.

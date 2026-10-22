@@ -15,7 +15,8 @@ test("every action in the workflows is pinned to a full commit SHA", async () =>
       const uses = /^\s*(?:-\s*)?uses:\s*(\S+)/.exec(line)?.[1];
       if (!uses || uses.startsWith("./")) return; // a local action runs from this commit
       seen += 1;
-      if (!/@[0-9a-f]{40}$/.test(uses)) unpinned.push(`${file}:${index + 1} ${uses}`);
+      if (!/@[0-9a-f]{40}$/.test(uses))
+        unpinned.push(`${file}:${index + 1} ${uses}`);
     });
   }
   expect(seen).toBeGreaterThan(0);

@@ -26,16 +26,20 @@ switch (command) {
       const flag = rest[i];
       const value = rest[++i] ?? fail(`${flag} needs a value`);
       if (flag === "--name") name = value;
-      else if (flag === "--scope") scopes.push(isScope(value) ? value : fail(`unknown scope: ${value}`));
+      else if (flag === "--scope")
+        scopes.push(isScope(value) ? value : fail(`unknown scope: ${value}`));
       else fail(usage);
     }
     const { key, token } = await store.create(name, scopes);
-    console.error(`created ${key.id} (${key.name}) scopes=${key.scopes.join(",")}; the token is shown only once:`);
+    console.error(
+      `created ${key.id} (${key.name}) scopes=${key.scopes.join(",")}; the token is shown only once:`,
+    );
     console.log(token);
     break;
   }
   case "list":
-    for (const k of await store.list()) console.log(`${k.id}\t${k.name}\t${k.scopes.join(",")}\t${k.createdAt}`);
+    for (const k of await store.list())
+      console.log(`${k.id}\t${k.name}\t${k.scopes.join(",")}\t${k.createdAt}`);
     break;
   case "revoke": {
     const id = rest[0] ?? fail(usage);

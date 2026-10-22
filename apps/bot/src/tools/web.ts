@@ -81,10 +81,20 @@ export class WebTools {
       // Exa's public MCP returns this quota notice with isError=false. Treating
       // it as evidence lets Jev advance dependent steps without search results.
       // Match the provider's leading diagnostic, not words inside search hits.
-      if (Array.isArray(result.content) && result.content.some(block =>
-        block.type === "text" && typeof block.text === "string" &&
-        block.text.trimStart().startsWith("You've hit Exa's free MCP rate limit.")))
-        throw new Error("Exa public MCP rate limit reached. No search results were returned. Use another available source instead of repeating this request; EXA_API_KEY enables the dedicated Exa API.");
+      if (
+        Array.isArray(result.content) &&
+        result.content.some(
+          (block) =>
+            block.type === "text" &&
+            typeof block.text === "string" &&
+            block.text
+              .trimStart()
+              .startsWith("You've hit Exa's free MCP rate limit."),
+        )
+      )
+        throw new Error(
+          "Exa public MCP rate limit reached. No search results were returned. Use another available source instead of repeating this request; EXA_API_KEY enables the dedicated Exa API.",
+        );
       return result;
     }
     const path = name === "web_fetch_exa" ? "/contents" : "/search";

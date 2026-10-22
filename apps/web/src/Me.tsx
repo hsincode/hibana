@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { AgentSections } from "./Agent";
-import { api, apiCached, type Catalog, type Me, type UserSettings } from "./api";
+import {
+  api,
+  apiCached,
+  type Catalog,
+  type Me,
+  type UserSettings,
+} from "./api";
 import { SaveMarksContext, useReportSave } from "./save";
 import {
   ContextSection,
@@ -33,7 +39,9 @@ function overrideCount(s: UserSettings): number {
     s.multi_agent_roles,
     s.jev_enabled,
     s.jev_task_enabled,
-    s.context && (s.context.text.trim() || s.context.persona_override) ? s.context : null,
+    s.context && (s.context.text.trim() || s.context.persona_override)
+      ? s.context
+      : null,
   ].filter((v) => v != null).length;
 }
 
@@ -106,9 +114,15 @@ export function MePage() {
                   : "上書きはありません。すべて、話しかけたサーバーの設定に従います。"
               }
               items={[
-                { label: "モデル", value: settings.selection?.model ?? "デフォルト" },
+                {
+                  label: "モデル",
+                  value: settings.selection?.model ?? "デフォルト",
+                },
                 { label: "effort", value: settings.effort ?? "デフォルト" },
-                { label: "コンテキスト", value: personalContextLabel(settings.context) },
+                {
+                  label: "コンテキスト",
+                  value: personalContextLabel(settings.context),
+                },
               ]}
             />
             <AgentSections

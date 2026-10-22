@@ -73,13 +73,19 @@ export function isClosedControllerError(error: unknown): boolean {
   );
 }
 /** Bound semaphore wait as well as the HTTP request; queued work checks abort. */
-export async function withAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+export async function withAbort<T>(
+  work: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
   let abort: () => void = () => {};
   const cancelled = new Promise<never>((_, reject) => {
     abort = () => reject(signal.reason);
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
   });
-  try { return await Promise.race([work, cancelled]); }
-  finally { signal.removeEventListener("abort", abort); }
+  try {
+    return await Promise.race([work, cancelled]);
+  } finally {
+    signal.removeEventListener("abort", abort);
+  }
 }

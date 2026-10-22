@@ -97,12 +97,17 @@ export class JevImagesRejected extends Error {}
 
 /** Every image must appear in the request: Jev rejects an unreferenced asset. */
 function assets(input: unknown, images: readonly JevImage[]) {
-  if (images.length > MAX_JEV_IMAGES) throw new Error(`Jev takes at most ${MAX_JEV_IMAGES} images`);
+  if (images.length > MAX_JEV_IMAGES)
+    throw new Error(`Jev takes at most ${MAX_JEV_IMAGES} images`);
   const text = JSON.stringify(input);
   if (images.some((i) => !text.includes(i.reference)))
     throw new Error("Every Jev image must be referenced in the request");
-  return Object.fromEntries(images.map(({ reference, format, data_base64 }) =>
-    [reference, { type: "image", format, data_base64 }]));
+  return Object.fromEntries(
+    images.map(({ reference, format, data_base64 }) => [
+      reference,
+      { type: "image", format, data_base64 },
+    ]),
+  );
 }
 
 export class JevClient {
@@ -217,7 +222,9 @@ export class JevClient {
 /** Judge with the images and, if Jev rejects them, once more from the text
  *  alone. For the silent judgments before a turn (triage, routing), where a
  *  judgment without the images is still the one Hibana made before #83. */
-export async function decideWithImageFallback<T extends z.infer<typeof jevInputSchema>>(
+export async function decideWithImageFallback<
+  T extends z.infer<typeof jevInputSchema>,
+>(
   decide: JevClient["decide"],
   build: (images: readonly JevImage[]) => T,
   images: readonly JevImage[],
@@ -225,7 +232,10 @@ export async function decideWithImageFallback<T extends z.infer<typeof jevInputS
 ) {
   if (images.length) {
     try {
-      return { result: await decide(build(images), signal, images), images: images.length };
+      return {
+        result: await decide(build(images), signal, images),
+        images: images.length,
+      };
     } catch (error) {
       if (!(error instanceof JevImagesRejected)) throw error;
     }

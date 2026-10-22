@@ -98,7 +98,10 @@ export function TriggerEditor({
   }
 
   function removeExtra(word: string) {
-    patch({ extra_triggers: extras.filter((e) => !triggerNamesEqual(e, word)) }, ROW);
+    patch(
+      { extra_triggers: extras.filter((e) => !triggerNamesEqual(e, word)) },
+      ROW,
+    );
   }
 
   function addWord() {
@@ -107,7 +110,11 @@ export function TriggerEditor({
     const builtin = canonicalBuiltin(t, builtins);
     if (builtin) {
       patch(
-        { disabled_triggers: disabled.filter((d) => !triggerNamesEqual(d, builtin)) },
+        {
+          disabled_triggers: disabled.filter(
+            (d) => !triggerNamesEqual(d, builtin),
+          ),
+        },
         ROW,
       );
     } else {
@@ -283,7 +290,9 @@ export function TriggerEditor({
           <button
             type="button"
             className="btn btn-ghost"
-            onClick={() => patch({ extra_triggers: null, disabled_triggers: [] }, ROW)}
+            onClick={() =>
+              patch({ extra_triggers: null, disabled_triggers: [] }, ROW)
+            }
           >
             既定に戻す
           </button>

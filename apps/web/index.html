@@ -17,10 +17,21 @@
 
     <meta name="color-scheme" content="dark light" />
     <!-- ブラウザの枠の色。src/styles/tokens.css の --bg（ダーク / ライト）を sRGB に直した値 -->
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0c0f15" />
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f4f4fa" />
+    <meta
+      name="theme-color"
+      media="(prefers-color-scheme: dark)"
+      content="#0c0f15"
+    />
+    <meta
+      name="theme-color"
+      media="(prefers-color-scheme: light)"
+      content="#f4f4fa"
+    />
     <script>
-      try { document.documentElement.dataset.theme = localStorage.getItem("hibana-theme") || "system"; } catch {}
+      try {
+        document.documentElement.dataset.theme =
+          localStorage.getItem("hibana-theme") || "system";
+      } catch {}
     </script>
 
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -32,7 +43,10 @@
     <meta property="og:site_name" content="Hibana" />
     <meta property="og:locale" content="ja_JP" />
     <meta property="og:url" content="%SITE_URL%/" />
-    <meta property="og:title" content="Hibana — Discord ボット設定ダッシュボード" />
+    <meta
+      property="og:title"
+      content="Hibana — Discord ボット設定ダッシュボード"
+    />
     <meta
       property="og:description"
       content="Discord サーバーごとに、使うモデルをブラウザから切り替えられる設定ダッシュボード。"
@@ -42,17 +56,26 @@
     <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="Hibana — Discord ボット設定ダッシュボード" />
+    <meta
+      property="og:image:alt"
+      content="Hibana — Discord ボット設定ダッシュボード"
+    />
 
     <!-- X.com -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Hibana — Discord ボット設定ダッシュボード" />
+    <meta
+      name="twitter:title"
+      content="Hibana — Discord ボット設定ダッシュボード"
+    />
     <meta
       name="twitter:description"
       content="Discord サーバーごとに、使うモデルをブラウザから切り替えられる設定ダッシュボード。"
     />
     <meta name="twitter:image" content="%SITE_URL%/og.png" />
-    <meta name="twitter:image:alt" content="Hibana — Discord ボット設定ダッシュボード" />
+    <meta
+      name="twitter:image:alt"
+      content="Hibana — Discord ボット設定ダッシュボード"
+    />
 
     <script type="application/ld+json">
       {

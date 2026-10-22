@@ -28,7 +28,13 @@ export type PrefixReport = {
 
 const ROOT = "root";
 // Settings outside the message list that invalidate a cached prefix when they change.
-const SETTINGS = ["model", "reasoning", "reasoning_effort", "thinking", "output_config"];
+const SETTINGS = [
+  "model",
+  "reasoning",
+  "reasoning_effort",
+  "thinking",
+  "output_config",
+];
 
 function segment(kind: string, value: unknown): Segment {
   const text = JSON.stringify(value) ?? "";
@@ -41,15 +47,21 @@ export function requestSegments(body: Json): Segment[] {
   const items = (body.input ?? body.messages ?? []) as Json[];
   const system = body.instructions ?? body.system;
   return [
-    segment("settings", SETTINGS.map(key => body[key] ?? null)),
-    ...((body.tools ?? []) as Json[]).map(tool => segment("tool", tool)),
+    segment(
+      "settings",
+      SETTINGS.map((key) => body[key] ?? null),
+    ),
+    ...((body.tools ?? []) as Json[]).map((tool) => segment("tool", tool)),
     ...(system ? [segment("system", system)] : []),
-    ...items.flatMap(item => {
+    ...items.flatMap((item) => {
       const kind = `item:${String(item.role ?? item.type ?? "unknown")}`;
       // Anthropic merges consecutive same-role messages into one turn. Split
       // by content block so a block appended to the last turn is an append.
       return Array.isArray(item.content)
-        ? [segment(kind, item.role), ...item.content.map(block => segment(kind, block))]
+        ? [
+            segment(kind, item.role),
+            ...item.content.map((block) => segment(kind, block)),
+          ]
         : [segment(kind, item)];
     }),
   ];
@@ -58,14 +70,18 @@ export function requestSegments(body: Json): Segment[] {
 function compare(current: Segment[], earlier: Segment[]) {
   let shared = 0;
   while (
-    shared < current.length && shared < earlier.length &&
-    current[shared]!.hash === earlier[shared]!.hash && current[shared]!.bytes === earlier[shared]!.bytes
-  ) shared++;
+    shared < current.length &&
+    shared < earlier.length &&
+    current[shared]!.hash === earlier[shared]!.hash &&
+    current[shared]!.bytes === earlier[shared]!.bytes
+  )
+    shared++;
   return {
     shared_segments: shared,
     shared_bytes: current.slice(0, shared).reduce((sum, s) => sum + s.bytes, 0),
     // Running off the end of the earlier request is a plain append.
-    diverged: shared === earlier.length ? null : current[shared]?.kind ?? "truncated",
+    diverged:
+      shared === earlier.length ? null : (current[shared]?.kind ?? "truncated"),
   };
 }
 
@@ -79,7 +95,10 @@ export class PrefixAudit {
 
   /** Compares without recording. Call `commit` once the provider has accepted
    *  the request: a body that was never delivered is not a prefix of anything. */
-  observe(trace: RequestTrace, body: Json): { report: PrefixReport; commit: () => void } {
+  observe(
+    trace: RequestTrace,
+    body: Json,
+  ): { report: PrefixReport; commit: () => void } {
     const current = requestSegments(body);
     const key = `${trace.channel}:${trace.agent}`;
     const rootKey = `${trace.channel}:${ROOT}`;
@@ -90,12 +109,18 @@ export class PrefixAudit {
     let report: PrefixReport = {
       segments: current.length,
       bytes: current.reduce((sum, s) => sum + s.bytes, 0),
-      against: "none", shared_segments: 0, shared_bytes: 0, diverged: null,
+      against: "none",
+      shared_segments: 0,
+      shared_bytes: 0,
+      diverged: null,
     };
     for (const [against, earlier] of candidates) {
       if (!earlier) continue;
       const result = compare(current, earlier);
-      if (report.against === "none" || result.shared_bytes > report.shared_bytes)
+      if (
+        report.against === "none" ||
+        result.shared_bytes > report.shared_bytes
+      )
         report = { ...report, against, ...result };
     }
     return {
@@ -106,7 +131,8 @@ export class PrefixAudit {
         const root = trace.child ? this.last.get(rootKey) : undefined;
         if (root) this.touch(rootKey, root);
         this.touch(key, current);
-        while (this.last.size > this.capacity) this.last.delete(this.last.keys().next().value!);
+        while (this.last.size > this.capacity)
+          this.last.delete(this.last.keys().next().value!);
       },
     };
   }

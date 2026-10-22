@@ -36,22 +36,48 @@ describe("assertPostgresUrl", () => {
   });
 
   test("rejects garbage and other schemes", () => {
-    expect(() => assertPostgresUrl("not a url SECRET")).toThrow("DATABASE_URL is not a valid URL");
-    expect(() => assertPostgresUrl("mysql://u:p@127.0.0.1/db")).toThrow("must be a postgres URL");
+    expect(() => assertPostgresUrl("not a url SECRET")).toThrow(
+      "DATABASE_URL is not a valid URL",
+    );
+    expect(() => assertPostgresUrl("mysql://u:p@127.0.0.1/db")).toThrow(
+      "must be a postgres URL",
+    );
   });
 });
 
 describe("isStaleConnection", () => {
   test("matches the errors Bun raises on a connection closed while the instance slept", () => {
     // Shapes measured with Bun 1.4.3 against Postgres 17 (see store.ts).
-    expect(isStaleConnection({ code: "ERR_POSTGRES_SERVER_ERROR", errno: "57P01", severity: "FATAL" })).toBe(true);
-    expect(isStaleConnection({ code: "ERR_POSTGRES_CONNECTION_CLOSED" })).toBe(true);
+    expect(
+      isStaleConnection({
+        code: "ERR_POSTGRES_SERVER_ERROR",
+        errno: "57P01",
+        severity: "FATAL",
+      }),
+    ).toBe(true);
+    expect(isStaleConnection({ code: "ERR_POSTGRES_CONNECTION_CLOSED" })).toBe(
+      true,
+    );
   });
 
   test("does not match query errors, which must not be retried", () => {
-    expect(isStaleConnection({ code: "ERR_POSTGRES_SERVER_ERROR", errno: "22P02", severity: "ERROR" })).toBe(false);
-    expect(isStaleConnection({ code: "ERR_POSTGRES_SERVER_ERROR", errno: "28P01", severity: "FATAL" })).toBe(false);
-    expect(isStaleConnection({ code: "ERR_POSTGRES_CONNECTION_TIMEOUT" })).toBe(false);
+    expect(
+      isStaleConnection({
+        code: "ERR_POSTGRES_SERVER_ERROR",
+        errno: "22P02",
+        severity: "ERROR",
+      }),
+    ).toBe(false);
+    expect(
+      isStaleConnection({
+        code: "ERR_POSTGRES_SERVER_ERROR",
+        errno: "28P01",
+        severity: "FATAL",
+      }),
+    ).toBe(false);
+    expect(isStaleConnection({ code: "ERR_POSTGRES_CONNECTION_TIMEOUT" })).toBe(
+      false,
+    );
     expect(isStaleConnection(new Error("boom"))).toBe(false);
     expect(isStaleConnection(null)).toBe(false);
   });
@@ -66,7 +92,11 @@ function fakePools(script: unknown[]) {
     const client = (async () => {
       state.calls++;
       const next = script.shift();
-      if (next instanceof Error || (next && typeof next === "object" && "code" in next)) throw next;
+      if (
+        next instanceof Error ||
+        (next && typeof next === "object" && "code" in next)
+      )
+        throw next;
       return (next as unknown[]) ?? [];
     }) as unknown as SqlClient;
     client.close = async () => {
@@ -78,7 +108,11 @@ function fakePools(script: unknown[]) {
 }
 
 const closed = { code: "ERR_POSTGRES_CONNECTION_CLOSED" };
-const fatal = { code: "ERR_POSTGRES_SERVER_ERROR", errno: "57P01", severity: "FATAL" };
+const fatal = {
+  code: "ERR_POSTGRES_SERVER_ERROR",
+  errno: "57P01",
+  severity: "FATAL",
+};
 
 describe("PostgresStore query retry", () => {
   const url = "postgres://u:p@127.0.0.1:5432/db";
@@ -98,11 +132,17 @@ describe("PostgresStore query retry", () => {
   test("gives up after three attempts", async () => {
     const pools = fakePools([closed, closed, closed, [{ value: "1" }]]);
     const store = new PostgresStore(url, { connect: pools.connect });
-    await expect(store.version()).rejects.toMatchObject({ code: "ERR_POSTGRES_CONNECTION_CLOSED" });
+    await expect(store.version()).rejects.toMatchObject({
+      code: "ERR_POSTGRES_CONNECTION_CLOSED",
+    });
   });
 
   test("a query error is not retried", async () => {
-    const bad = { code: "ERR_POSTGRES_SERVER_ERROR", errno: "22P02", severity: "ERROR" };
+    const bad = {
+      code: "ERR_POSTGRES_SERVER_ERROR",
+      errno: "22P02",
+      severity: "ERROR",
+    };
     const pools = fakePools([bad, [{ value: "1" }]]);
     const store = new PostgresStore(url, { connect: pools.connect });
     await expect(store.version()).rejects.toMatchObject({ errno: "22P02" });
@@ -227,31 +267,57 @@ describe.skipIf(!local)("PostgresStore against Postgres", () => {
   });
 
   test("guilds, user contexts and user overrides round-trip JSONB", async () => {
-    const guild = { ...emptyGuild(), mcp_url: "https://例え.jp/mcp", thread_only: true };
+    const guild = {
+      ...emptyGuild(),
+      mcp_url: "https://例え.jp/mcp",
+      thread_only: true,
+    };
     await store.putGuild("g1", guild);
-    expect(await store.getGuild("g1")).toMatchObject({ mcp_url: "https://例え.jp/mcp", thread_only: true });
+    expect(await store.getGuild("g1")).toMatchObject({
+      mcp_url: "https://例え.jp/mcp",
+      thread_only: true,
+    });
     expect(Object.keys(await store.allGuilds())).toEqual(["g1"]);
     await store.replaceSnapshot(
       { g2: emptyGuild() },
       { u1: { text: "context", persona_override: true } },
     );
     expect(Object.keys(await store.allGuilds())).toEqual(["g2"]);
-    expect(await store.allUserContexts()).toEqual({ u1: { text: "context", persona_override: true } });
+    expect(await store.allUserContexts()).toEqual({
+      u1: { text: "context", persona_override: true },
+    });
     await store.putUserOverride("u1", emptyUserOverride());
     expect(await store.getUserOverride("u1")).toEqual(emptyUserOverride());
     expect(Object.keys(await store.allUserOverrides())).toContain("u1");
   });
 
   test("users, sessions, OAuth state and the block list", async () => {
-    await store.upsertUser({ discord_id: "u1", username: "alice", avatar: null });
+    await store.upsertUser({
+      discord_id: "u1",
+      username: "alice",
+      avatar: null,
+    });
     await store.setUserRole("u1", "moderator");
-    await store.upsertUser({ discord_id: "u1", username: "alice2", avatar: "a" });
-    expect(await store.getUser("u1")).toEqual({ discord_id: "u1", role: "moderator", username: "alice2", avatar: "a" });
+    await store.upsertUser({
+      discord_id: "u1",
+      username: "alice2",
+      avatar: "a",
+    });
+    expect(await store.getUser("u1")).toEqual({
+      discord_id: "u1",
+      role: "moderator",
+      username: "alice2",
+      avatar: "a",
+    });
     expect((await store.listUsers()).map((u) => u.discord_id)).toEqual(["u1"]);
 
     const expires = Date.now() + 60_000;
     await store.putSession("s1", "u1", "tok", expires);
-    expect(await store.getSession("s1")).toEqual({ discord_id: "u1", access_token: "tok", expires_at: expires });
+    expect(await store.getSession("s1")).toEqual({
+      discord_id: "u1",
+      access_token: "tok",
+      expires_at: expires,
+    });
     await store.deleteSession("s1");
     expect(await store.getSession("s1")).toBeNull();
 
@@ -260,8 +326,22 @@ describe.skipIf(!local)("PostgresStore against Postgres", () => {
     expect(await store.takePending("st")).toBeNull();
 
     const at = Date.now();
-    await store.setBlocked({ discord_id: "b1", username: null, reason: "spam", blocked_by: "u1", blocked_at: at });
-    expect(await store.listBlocked()).toEqual([{ discord_id: "b1", username: null, reason: "spam", blocked_by: "u1", blocked_at: at }]);
+    await store.setBlocked({
+      discord_id: "b1",
+      username: null,
+      reason: "spam",
+      blocked_by: "u1",
+      blocked_at: at,
+    });
+    expect(await store.listBlocked()).toEqual([
+      {
+        discord_id: "b1",
+        username: null,
+        reason: "spam",
+        blocked_by: "u1",
+        blocked_at: at,
+      },
+    ]);
     await store.unblock("b1");
     expect(await store.listBlocked()).toEqual([]);
   });
@@ -273,17 +353,56 @@ describe.skipIf(!local)("PostgresStore against Postgres", () => {
       logEntry({ guild_id: null, guild_name: null, prompt: "DM message" }),
       logEntry({ user_id: "u2", username: "bob", prompt: "from bob" }),
     ]);
-    const all = await store.listLogs({ limit: 10, before: null, guild_id: null, user_id: null, scope: "all", q: null });
-    expect(all.map((r) => r.prompt)).toEqual(["from bob", "DM message", "old one"]);
+    const all = await store.listLogs({
+      limit: 10,
+      before: null,
+      guild_id: null,
+      user_id: null,
+      scope: "all",
+      q: null,
+    });
+    expect(all.map((r) => r.prompt)).toEqual([
+      "from bob",
+      "DM message",
+      "old one",
+    ]);
     expect(typeof all[0]!.id).toBe("number");
     expect(typeof all[0]!.at).toBe("number");
-    const dm = await store.listLogs({ limit: 10, before: null, guild_id: null, user_id: null, scope: "dm", q: null });
+    const dm = await store.listLogs({
+      limit: 10,
+      before: null,
+      guild_id: null,
+      user_id: null,
+      scope: "dm",
+      q: null,
+    });
     expect(dm.map((r) => r.prompt)).toEqual(["DM message"]);
-    const bob = await store.listLogs({ limit: 10, before: null, guild_id: null, user_id: "u2", scope: "all", q: null });
+    const bob = await store.listLogs({
+      limit: 10,
+      before: null,
+      guild_id: null,
+      user_id: "u2",
+      scope: "all",
+      q: null,
+    });
     expect(bob.map((r) => r.prompt)).toEqual(["from bob"]);
-    const page = await store.listLogs({ limit: 1, before: all[0]!.id, guild_id: null, user_id: null, scope: "all", q: null });
+    const page = await store.listLogs({
+      limit: 1,
+      before: all[0]!.id,
+      guild_id: null,
+      user_id: null,
+      scope: "all",
+      q: null,
+    });
     expect(page.map((r) => r.prompt)).toEqual(["DM message"]);
-    const search = await store.listLogs({ limit: 10, before: null, guild_id: null, user_id: null, scope: "all", q: "BOB" });
+    const search = await store.listLogs({
+      limit: 10,
+      before: null,
+      guild_id: null,
+      user_id: null,
+      scope: "all",
+      q: "BOB",
+    });
     expect(search.map((r) => r.prompt)).toEqual(["from bob"]);
     expect(await store.pruneLogs(Date.now() - 30 * 24 * 3600_000)).toBe(1);
   });
@@ -304,11 +423,20 @@ describe.skipIf(!local)("PostgresStore against Postgres", () => {
         file_count: 2,
       },
     ]);
-    expect((await store.listArtifacts("g1")).map((a) => a.token)).toEqual(["t1"]);
-    expect(await store.getArtifact("t1")).toMatchObject({ bytes: 10, file_count: 2, updated_at_unix: null, retention: "month" });
+    expect((await store.listArtifacts("g1")).map((a) => a.token)).toEqual([
+      "t1",
+    ]);
+    expect(await store.getArtifact("t1")).toMatchObject({
+      bytes: 10,
+      file_count: 2,
+      updated_at_unix: null,
+      retention: "month",
+    });
     const cmd = await store.enqueueArtifactCommand("t1", "g1", "permanent");
     expect(typeof cmd.id).toBe("number");
-    expect((await store.listArtifactCommands()).map((c) => c.id)).toEqual([cmd.id]);
+    expect((await store.listArtifactCommands()).map((c) => c.id)).toEqual([
+      cmd.id,
+    ]);
     expect(await store.ackArtifactCommands([cmd.id])).toBe(1);
     expect(await store.listArtifactCommands()).toEqual([]);
   });

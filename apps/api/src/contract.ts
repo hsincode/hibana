@@ -31,13 +31,21 @@ export async function currentContract(): Promise<Contract> {
   const env = loadTestEnv();
   const store = new MemoryStore();
   await store.migrate();
-  const app = createApp(env, store, { guildAccess: async () => true, listGuilds: async () => [] });
+  const app = createApp(env, store, {
+    guildAccess: async () => true,
+    listGuilds: async () => [],
+  });
   const snapshot = await app.handle(
-    new Request("http://127.0.0.1/internal/snapshot", { headers: { authorization: `Bearer ${env.internalToken}` } }),
+    new Request("http://127.0.0.1/internal/snapshot", {
+      headers: { authorization: `Bearer ${env.internalToken}` },
+    }),
   );
-  if (snapshot.status !== 200) throw new Error(`GET /internal/snapshot answered HTTP ${snapshot.status}`);
+  if (snapshot.status !== 200)
+    throw new Error(`GET /internal/snapshot answered HTTP ${snapshot.status}`);
   return {
-    routes: [...new Set(app.routes.map((route) => `${route.method} ${route.path}`))].sort(),
+    routes: [
+      ...new Set(app.routes.map((route) => `${route.method} ${route.path}`)),
+    ].sort(),
     guildPatchKeys: Object.keys(guildPatchSchema.shape).sort(),
     userPatchKeys: Object.keys(userOverridePatchSchema.shape).sort(),
     snapshotKeys: Object.keys((await snapshot.json()) as object).sort(),

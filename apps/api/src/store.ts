@@ -75,7 +75,11 @@ export interface Store {
   migrate(): Promise<void>;
   getMeta(key: string): Promise<string | null>;
   setMeta(key: string, value: string): Promise<void>;
-  compareMeta(key: string, expected: string | null, value: string): Promise<boolean>;
+  compareMeta(
+    key: string,
+    expected: string | null,
+    value: string,
+  ): Promise<boolean>;
   bumpVersion(): Promise<number>;
   version(): Promise<number>;
   getGuild(id: string): Promise<GuildRow>;
@@ -233,14 +237,20 @@ export class MemoryStore implements Store {
   }
   async allGuilds() {
     return Object.fromEntries(
-      [...this.guilds].map(([id, row]) => [id, normalizeGuild(row, this.defaults)]),
+      [...this.guilds].map(([id, row]) => [
+        id,
+        normalizeGuild(row, this.defaults),
+      ]),
     );
   }
   async allUserContexts() {
     return Object.fromEntries(this.userContexts);
   }
   async getUserOverride(id: string) {
-    const row = normalizeUserOverride(this.userOverrides.get(id), this.defaults);
+    const row = normalizeUserOverride(
+      this.userOverrides.get(id),
+      this.defaults,
+    );
     if (!this.userOverrides.has(id)) await this.putUserOverride(id, row);
     return row;
   }
@@ -261,7 +271,10 @@ export class MemoryStore implements Store {
     userContexts: Record<string, UserContextEntry>,
   ) {
     this.guilds = new Map(
-      Object.entries(guilds).map(([id, row]) => [id, normalizeGuild(row, this.defaults)]),
+      Object.entries(guilds).map(([id, row]) => [
+        id,
+        normalizeGuild(row, this.defaults),
+      ]),
     );
     this.userContexts = new Map(Object.entries(userContexts));
     await this.bumpVersion();
@@ -395,7 +408,10 @@ export class MemoryStore implements Store {
 }
 
 /** A tagged-template query that resolves to its rows. */
-type Sql = (strings: TemplateStringsArray, ...values: unknown[]) => Promise<any[]>;
+type Sql = (
+  strings: TemplateStringsArray,
+  ...values: unknown[]
+) => Promise<any[]>;
 
 /** The part of Bun's `SQL` client this store calls, so tests can stand in for it. */
 export type SqlClient = {
@@ -415,7 +431,12 @@ export type SqlClient = {
  * - `max: 5`: Fluid serves several requests on one instance at once, and
  *   Vercel advises against a pool of one.
  */
-const POOL = { max: 5, idleTimeout: 5, connectionTimeout: 10, prepare: false } as const;
+const POOL = {
+  max: 5,
+  idleTimeout: 5,
+  connectionTimeout: 10,
+  prepare: false,
+} as const;
 
 /** Attempts per query while pooled connections turn out to be closed. */
 const STALE_ATTEMPTS = 3;
@@ -432,7 +453,11 @@ const STALE_ATTEMPTS = 3;
  * before the query reaches a server, so the query is retried on a fresh pool.
  */
 export function isStaleConnection(e: unknown): boolean {
-  const err = e as { code?: unknown; errno?: unknown; severity?: unknown } | null;
+  const err = e as {
+    code?: unknown;
+    errno?: unknown;
+    severity?: unknown;
+  } | null;
   if (!err || typeof err !== "object") return false;
   if (err.code === "ERR_POSTGRES_CONNECTION_CLOSED") return true;
   return (
@@ -477,7 +502,8 @@ export class PostgresStore implements Store {
   private readonly connect: (url: string) => SqlClient;
   /** When false, skip the logs table/indexes so a cold start does not pay for an unused feature. */
   private logs: boolean;
-  private readonly sql: Sql = (strings, ...values) => this.query(strings, values);
+  private readonly sql: Sql = (strings, ...values) =>
+    this.query(strings, values);
 
   constructor(
     databaseUrl: string,
@@ -489,7 +515,8 @@ export class PostgresStore implements Store {
     } = {},
   ) {
     this.url = assertPostgresUrl(databaseUrl);
-    this.connect = opts.connect ?? ((url) => new SQL(url, POOL) as unknown as SqlClient);
+    this.connect =
+      opts.connect ?? ((url) => new SQL(url, POOL) as unknown as SqlClient);
     this.db = this.connect(this.url);
     this.logs = opts.logs ?? false;
     this.defaults = opts.defaults ?? emptyGuild();
@@ -648,13 +675,19 @@ export class PostgresStore implements Store {
       )`;
       // Keep deployments that already have the logs table compatible with the
       // richer failure telemetry without requiring a destructive migration.
-      await this.sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS failure_phase TEXT`;
-      await this.sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS failure_code TEXT`;
-      await this.sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS http_status INTEGER`;
-      await this.sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS has_checkpoint BOOLEAN`;
+      await this
+        .sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS failure_phase TEXT`;
+      await this
+        .sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS failure_code TEXT`;
+      await this
+        .sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS http_status INTEGER`;
+      await this
+        .sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS has_checkpoint BOOLEAN`;
       // Provider failure detail (#42).
-      await this.sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS failure_stage TEXT`;
-      await this.sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS failure_reason TEXT`;
+      await this
+        .sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS failure_stage TEXT`;
+      await this
+        .sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS failure_reason TEXT`;
       await this.sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS error_type TEXT`;
       await this.sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS retries INTEGER`;
       await this.sql`ALTER TABLE logs ADD COLUMN IF NOT EXISTS effort TEXT`;
@@ -717,9 +750,13 @@ export class PostgresStore implements Store {
   async compareMeta(key: string, expected: string | null, value: string) {
     // Atomic across Vercel instances: rotating a refresh token twice can
     // invalidate the account, so an in-process mutex is insufficient.
-    const rows = (expected === null
-      ? await this.sql`INSERT INTO meta (key,value) VALUES (${key},${value}) ON CONFLICT DO NOTHING RETURNING key`
-      : await this.sql`UPDATE meta SET value=${value} WHERE key=${key} AND value=${expected} RETURNING key`) as { key: string }[];
+    const rows = (
+      expected === null
+        ? await this
+            .sql`INSERT INTO meta (key,value) VALUES (${key},${value}) ON CONFLICT DO NOTHING RETURNING key`
+        : await this
+            .sql`UPDATE meta SET value=${value} WHERE key=${key} AND value=${expected} RETURNING key`
+    ) as { key: string }[];
     return rows.length === 1;
   }
 
@@ -783,12 +820,15 @@ export class PostgresStore implements Store {
       settings: UserOverrideRow;
     }[];
     const row = normalizeUserOverride(rows[0]?.settings, this.defaults);
-    if (!rows[0] || !sameSettings(row, rows[0].settings)) await this.putUserOverride(id, row);
+    if (!rows[0] || !sameSettings(row, rows[0].settings))
+      await this.putUserOverride(id, row);
     return row;
   }
 
   async putUserOverride(id: string, settings: UserOverrideRow) {
-    const payload = JSON.stringify(normalizeUserOverride(settings, this.defaults));
+    const payload = JSON.stringify(
+      normalizeUserOverride(settings, this.defaults),
+    );
     await this.sql`
       INSERT INTO user_overrides (discord_id, settings) VALUES (${id}, ${payload}::jsonb)
       ON CONFLICT (discord_id) DO UPDATE SET settings = EXCLUDED.settings
@@ -806,7 +846,8 @@ export class PostgresStore implements Store {
     for (const r of rows) {
       const row = normalizeUserOverride(r.settings, this.defaults);
       out[r.discord_id] = row;
-      if (!sameSettings(row, r.settings)) await this.putUserOverride(r.discord_id, row);
+      if (!sameSettings(row, r.settings))
+        await this.putUserOverride(r.discord_id, row);
     }
     return out;
   }
@@ -1129,14 +1170,25 @@ export async function openStore(
     await mem.migrate();
     return mem;
   }
-  const store = new PostgresStore(databaseUrl, { logs: opts.logs ?? false, defaults: settingsDefaults(process.env) });
+  const store = new PostgresStore(databaseUrl, {
+    logs: opts.logs ?? false,
+    defaults: settingsDefaults(process.env),
+  });
   await store.migrate();
   return store;
 }
 
 // JSONB sorts object keys; compare recursively to avoid writing every read.
 function sameSettings(a: unknown, b: unknown): boolean {
-  const stable = (value: unknown): unknown => Array.isArray(value) ? value.map(stable)
-    : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, stable(v)])) : value;
+  const stable = (value: unknown): unknown =>
+    Array.isArray(value)
+      ? value.map(stable)
+      : value && typeof value === "object"
+        ? Object.fromEntries(
+            Object.entries(value)
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([k, v]) => [k, stable(v)]),
+          )
+        : value;
   return JSON.stringify(stable(a)) === JSON.stringify(stable(b));
 }

@@ -13,13 +13,13 @@ Ultracode は、推論 effort の xhigh と、ワークフローの常時編成�
 
 ## 動作の概要
 
-| 項目 | Claude Code | Hibana |
-| --- | --- | --- |
-| 有効化 | `/effort ultracode` | サーバー設定・マイ設定のサブエージェントで ultra、`/switch ultra:on`、設定ツールの `ultra_mode` |
-| effort | xhigh | 親を xhigh で呼ぶ（保存済みの effort は変えない） |
-| 方針 | 実質的な依頼には毎回 Workflow を使う | 同じ（リマインダーの文面も同一） |
-| キーワード | 入力に `ultracode` があると、その1回だけワークフローで実行 | Discord で入力されたメッセージに同じ規則を適用 |
-| スクリプト | `agent()` / `parallel()` / `pipeline()` などを使う JavaScript | 同じ API（隔離実行は QuickJS） |
+| 項目       | Claude Code                                                   | Hibana                                                                                          |
+| ---------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| 有効化     | `/effort ultracode`                                           | サーバー設定・マイ設定のサブエージェントで ultra、`/switch ultra:on`、設定ツールの `ultra_mode` |
+| effort     | xhigh                                                         | 親を xhigh で呼ぶ（保存済みの effort は変えない）                                               |
+| 方針       | 実質的な依頼には毎回 Workflow を使う                          | 同じ（リマインダーの文面も同一）                                                                |
+| キーワード | 入力に `ultracode` があると、その1回だけワークフローで実行    | Discord で入力されたメッセージに同じ規則を適用                                                  |
+| スクリプト | `agent()` / `parallel()` / `pipeline()` などを使う JavaScript | 同じ API（隔離実行は QuickJS）                                                                  |
 
 ## effort
 
@@ -38,12 +38,12 @@ Claude Code は、xhigh のないモデルでは ultracode 自体を選べなく
 
 Claude Code は、入力されたプロンプトに `<system-reminder>` を添えます。Hibana も同じ文面を、ユーザーのメッセージの直後に内部メッセージとして入れます。
 
-| 条件 | 文面 |
-| --- | --- |
-| Ultra を有効にした最初の入力 | `Ultracode is on: optimize for the most exhaustive, correct answer — not the fastest or cheapest. Use the Workflow tool on every substantive task; ...` |
-| 前回のリマインダーから入力が10回あった後 | `Ultracode is still on — use the Workflow tool; ...` |
-| Ultra を外した後の最初の入力 | `Ultracode is off — the Workflow tool's standard opt-in rule applies again.` |
-| 入力にキーワード `ultracode` がある | `The user included the keyword "ultracode", opting this turn into multi-agent orchestration — use the Workflow tool to fulfill the request.` |
+| 条件                                     | 文面                                                                                                                                                    |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ultra を有効にした最初の入力             | `Ultracode is on: optimize for the most exhaustive, correct answer — not the fastest or cheapest. Use the Workflow tool on every substantive task; ...` |
+| 前回のリマインダーから入力が10回あった後 | `Ultracode is still on — use the Workflow tool; ...`                                                                                                    |
+| Ultra を外した後の最初の入力             | `Ultracode is off — the Workflow tool's standard opt-in rule applies again.`                                                                            |
+| 入力にキーワード `ultracode` がある      | `The user included the keyword "ultracode", opting this turn into multi-agent orchestration — use the Workflow tool to fulfill the request.`            |
 
 - リマインダーは会話履歴に残ります。次の入力では、モデルが最後に受け取ったのがオンかオフかを履歴から判定します。
 - 通常チャンネルの履歴は、推定トークン数が上限（既定 `HISTORY_MAX_TOKENS=160000`）を超えたときに、古いターンからまとめて削ります（既定 `HISTORY_KEEP_TOKENS=80000` まで）。開始時のリマインダーが削られた後は、10回ごとの短い文面より先に、開始時の全文が再送されることがあります。
@@ -63,12 +63,12 @@ Claude Code は、入力されたプロンプトに `<system-reminder>` を添�
 
 ## モードごとの違い
 
-| サブエージェント | Workflow / TaskStop | キーワード | Ultracode のリマインダー | 親の effort | `<multi_agent_mode>` |
-| --- | --- | --- | --- | --- | --- |
-| off | なし | 無効 | なし | 保存値 | サブエージェント無効 |
-| on | あり（明示的な依頼のときだけ使う） | 有効 | オフの通知だけ | 保存値 | 明示的な依頼のときだけ委譲 |
-| ultra | あり（常に使う） | 有効 | オン・10回ごと | xhigh | 明示的な依頼のときだけ委譲 |
-| multi | キーワードのターンだけ | 有効 | オフの通知だけ | 保存値 | 積極的な委譲＋役割チーム |
+| サブエージェント | Workflow / TaskStop                | キーワード | Ultracode のリマインダー | 親の effort | `<multi_agent_mode>`       |
+| ---------------- | ---------------------------------- | ---------- | ------------------------ | ----------- | -------------------------- |
+| off              | なし                               | 無効       | なし                     | 保存値      | サブエージェント無効       |
+| on               | あり（明示的な依頼のときだけ使う） | 有効       | オフの通知だけ           | 保存値      | 明示的な依頼のときだけ委譲 |
+| ultra            | あり（常に使う）                   | 有効       | オン・10回ごと           | xhigh       | 明示的な依頼のときだけ委譲 |
+| multi            | キーワードのターンだけ             | 有効       | オフの通知だけ           | 保存値      | 積極的な委譲＋役割チーム   |
 
 - on / ultra の `agents__spawn_agent` などは、従来の on と同じ方針です。明示的な依頼があるときだけ使います。Ultracode の常時の許可は Workflow ツールに対するもので、Claude Code の Agent ツールの扱いとも一致します。
 - multi は従来のままです。HsinCLI の積極的な委譲の文面と役割チームを使います。保存上は `ultra_mode=true` も持ちますが、Ultracode にはなりません。
@@ -77,13 +77,13 @@ Claude Code は、入力されたプロンプトに `<system-reminder>` を添�
 
 親（root）だけが使えます。入力は Claude Code と同じです。
 
-| 入力 | 内容 |
-| --- | --- |
-| `script` | ワークフローのスクリプト |
-| `scriptPath` | `/workspace` 内のスクリプトファイル。`script` と `name` より優先 |
-| `name` | 保存済みのワークフロー |
-| `args` | スクリプトの `args` に渡す値 |
-| `resumeFromRunId` | 以前の実行の Run ID。完了済みのエージェントを再利用する |
+| 入力              | 内容                                                             |
+| ----------------- | ---------------------------------------------------------------- |
+| `script`          | ワークフローのスクリプト                                         |
+| `scriptPath`      | `/workspace` 内のスクリプトファイル。`script` と `name` より優先 |
+| `name`            | 保存済みのワークフロー                                           |
+| `args`            | スクリプトの `args` に渡す値                                     |
+| `resumeFromRunId` | 以前の実行の Run ID。完了済みのエージェントを再利用する          |
 
 スクリプトの先頭には `export const meta = {...}` が必要です。name・description・phases を純粋なリテラルで書きます。変数・関数呼び出し・スプレッド・`${}` は受け付けません。
 
@@ -107,17 +107,17 @@ on / ultra の親への各リクエストでは、ツール定義が約5,800文�
 
 ### スクリプトの API
 
-| API | 動作 |
-| --- | --- |
-| `agent(prompt, opts)` | 子エージェントを1体起動します。`opts` には `label` / `phase` / `schema` / `model` / `effort` / `agentType` を指定できます。`schema` を渡すと、`StructuredOutput` で検証済みのオブジェクトを返します。検証の失敗は5回までです。 |
-| `pipeline(items, ...stages)` | 項目ごとに段階を進めます。段階の間で待ち合わせません。 |
-| `parallel(thunks)` | すべての完了を待ちます。失敗した要素は `null` になり、失敗は記録されます。 |
-| `phase(title)` / `log(message)` | 進捗表示のグループと、表示する1行です。 |
-| `console.*` | `log` と同じです。 |
-| `workflow(nameOrRef, args)` | 保存済みのワークフロー、または `{scriptPath}` を1段だけ入れ子で実行します。 |
-| `args` | Workflow の `args` をそのまま渡します。 |
-| `budget` | `total` は常に `null`、`remaining()` は `Infinity` です。`spent()` はこのターンの出力トークン数です。 |
-| `setTimeout` / `clearTimeout` | タイマーです。 |
+| API                             | 動作                                                                                                                                                                                                                           |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `agent(prompt, opts)`           | 子エージェントを1体起動します。`opts` には `label` / `phase` / `schema` / `model` / `effort` / `agentType` を指定できます。`schema` を渡すと、`StructuredOutput` で検証済みのオブジェクトを返します。検証の失敗は5回までです。 |
+| `pipeline(items, ...stages)`    | 項目ごとに段階を進めます。段階の間で待ち合わせません。                                                                                                                                                                         |
+| `parallel(thunks)`              | すべての完了を待ちます。失敗した要素は `null` になり、失敗は記録されます。                                                                                                                                                     |
+| `phase(title)` / `log(message)` | 進捗表示のグループと、表示する1行です。                                                                                                                                                                                        |
+| `console.*`                     | `log` と同じです。                                                                                                                                                                                                             |
+| `workflow(nameOrRef, args)`     | 保存済みのワークフロー、または `{scriptPath}` を1段だけ入れ子で実行します。                                                                                                                                                    |
+| `args`                          | Workflow の `args` をそのまま渡します。                                                                                                                                                                                        |
+| `budget`                        | `total` は常に `null`、`remaining()` は `Infinity` です。`spent()` はこのターンの出力トークン数です。                                                                                                                          |
+| `setTimeout` / `clearTimeout`   | タイマーです。                                                                                                                                                                                                                 |
 
 - `Date.now()`、引数なしの `new Date()`、`Math.random()` は例外にします。再開時に同じ呼び出しを繰り返すためで、Claude Code と同じです。
 - TypeScript の構文と、`import` / `export` は受け付けません。
@@ -132,14 +132,14 @@ Claude Code はスクリプトを Node の vm で実行します。Hibana のプ
 - ホストの `process`、`fetch`、ファイル、環境変数には触れられません。
 - 関数のコンストラクタを経由しても、QuickJS の外には出られません。
 
-| 上限 | 値 |
-| --- | --- |
-| 1回の実行で同時に動くエージェント | `min(16, max(2, CPU数 - 2))`（Claude Code と同じ。コンテナの CPU 割り当ても考慮）。`WORKFLOW_MAX_CONCURRENT_AGENTS` で 1〜256 に変更 |
-| 1回の実行のエージェント総数 | 1000 |
-| `parallel()` / `pipeline()` 1回の項目数 | 4096 |
-| スクリプトのメモリ | 64MB |
-| 待たずに続けられる同期処理 | 2秒（無限ループなどを止め、Discord との接続を塞がない） |
-| スクリプトの長さ | 200,000文字 |
+| 上限                                    | 値                                                                                                                                   |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| 1回の実行で同時に動くエージェント       | `min(16, max(2, CPU数 - 2))`（Claude Code と同じ。コンテナの CPU 割り当ても考慮）。`WORKFLOW_MAX_CONCURRENT_AGENTS` で 1〜256 に変更 |
+| 1回の実行のエージェント総数             | 1000                                                                                                                                 |
+| `parallel()` / `pipeline()` 1回の項目数 | 4096                                                                                                                                 |
+| スクリプトのメモリ                      | 64MB                                                                                                                                 |
+| 待たずに続けられる同期処理              | 2秒（無限ループなどを止め、Discord との接続を塞がない）                                                                              |
+| スクリプトの長さ                        | 200,000文字                                                                                                                          |
 
 - CPU が4個以下の環境では、同時に動くのは既定で2体です。
 - エージェント同士のシェル実行は、既存の仕組みでワークスペースごとに順番に処理されます。
@@ -200,31 +200,31 @@ Ultracode 以外では、エージェントが25体（サイズ指針を指定�
 
 ## 設定
 
-| 環境変数 | 既定 | 内容 |
-| --- | --- | --- |
-| `WORKFLOWS_ENABLED` | true | false にすると Workflow・キーワード・Ultracode をすべて止めます。サブエージェント無効でも止まります。 |
-| `ULTRACODE_KEYWORD_TRIGGER` | true | キーワード `ultracode` を判定するか |
-| `WORKFLOW_MAX_CONCURRENT_AGENTS` | 空（上記の式） | 1回の実行で同時に動くエージェント数 |
-| `WORKFLOW_SIZE_GUIDELINE` | 空（medium） | 説明文に添えるサイズの目安。unrestricted / small（5体未満）/ medium（10体未満）/ large（50体未満）。上限ではありません。 |
+| 環境変数                         | 既定           | 内容                                                                                                                     |
+| -------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `WORKFLOWS_ENABLED`              | true           | false にすると Workflow・キーワード・Ultracode をすべて止めます。サブエージェント無効でも止まります。                    |
+| `ULTRACODE_KEYWORD_TRIGGER`      | true           | キーワード `ultracode` を判定するか                                                                                      |
+| `WORKFLOW_MAX_CONCURRENT_AGENTS` | 空（上記の式） | 1回の実行で同時に動くエージェント数                                                                                      |
+| `WORKFLOW_SIZE_GUIDELINE`        | 空（medium）   | 説明文に添えるサイズの目安。unrestricted / small（5体未満）/ medium（10体未満）/ large（50体未満）。上限ではありません。 |
 
 `ultra_mode` の保存形式は変えていないので、データの移行は不要です。既存の Ultra の設定は、次のメッセージから Ultracode として動きます。
 
 ## Claude Code との違い
 
-| 項目 | Claude Code | Hibana |
-| --- | --- | --- |
-| 実行前の確認 | 権限モードによって確認する（auto モードで ultracode のときは省略） | 確認しない。Ultra の設定・キーワード・明示的な依頼を同意として扱う |
-| 実行中の会話 | ターンを終えて通知で再開する | 同じターンで待つ |
-| スクリプトの実行 | Node vm | QuickJS（WebAssembly）。エラーの文面は QuickJS のもの（例: `not a function`） |
-| 進捗の操作 | `/workflows` で一時停止・エージェントの停止や再起動・保存 | Discord の表示のみ。停止は TaskStop |
-| worktree の分離 | `opts.isolation: 'worktree'` | なし（指定するとエラー） |
-| agentType | Agent ツールの登録済みの種類 | explorer / worker / reviewer / general-purpose |
-| budget | `+500k` のような指定で上限を設定 | 指定の仕組みがなく、常に上限なし |
-| 再開の保存先 | セッションのディレクトリ（journal.jsonl） | メモリに2時間（再起動で消える） |
-| 保存済みのワークフロー | プロジェクト・個人・プラグイン、同梱の `/deep-research` | ワークスペースの `.claude/workflows` のみ |
-| xhigh のないモデル | ultracode を選べない | 既存の effort 変換で丸める |
-| Large workflow の警告 | エージェント数と推定トークン数 | エージェント数のみ |
-| キャッシュのための起動の待ち合わせ・利用上限での一時停止 | あり | なし |
+| 項目                                                     | Claude Code                                                        | Hibana                                                                        |
+| -------------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| 実行前の確認                                             | 権限モードによって確認する（auto モードで ultracode のときは省略） | 確認しない。Ultra の設定・キーワード・明示的な依頼を同意として扱う            |
+| 実行中の会話                                             | ターンを終えて通知で再開する                                       | 同じターンで待つ                                                              |
+| スクリプトの実行                                         | Node vm                                                            | QuickJS（WebAssembly）。エラーの文面は QuickJS のもの（例: `not a function`） |
+| 進捗の操作                                               | `/workflows` で一時停止・エージェントの停止や再起動・保存          | Discord の表示のみ。停止は TaskStop                                           |
+| worktree の分離                                          | `opts.isolation: 'worktree'`                                       | なし（指定するとエラー）                                                      |
+| agentType                                                | Agent ツールの登録済みの種類                                       | explorer / worker / reviewer / general-purpose                                |
+| budget                                                   | `+500k` のような指定で上限を設定                                   | 指定の仕組みがなく、常に上限なし                                              |
+| 再開の保存先                                             | セッションのディレクトリ（journal.jsonl）                          | メモリに2時間（再起動で消える）                                               |
+| 保存済みのワークフロー                                   | プロジェクト・個人・プラグイン、同梱の `/deep-research`            | ワークスペースの `.claude/workflows` のみ                                     |
+| xhigh のないモデル                                       | ultracode を選べない                                               | 既存の effort 変換で丸める                                                    |
+| Large workflow の警告                                    | エージェント数と推定トークン数                                     | エージェント数のみ                                                            |
+| キャッシュのための起動の待ち合わせ・利用上限での一時停止 | あり                                                               | なし                                                                          |
 
 ## 検証範囲
 

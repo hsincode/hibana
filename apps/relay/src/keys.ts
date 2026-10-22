@@ -16,7 +16,8 @@ export interface ApiKey {
 
 const TOKEN_RE = /^hbr_([0-9a-f]{12})_([A-Za-z0-9_-]{43})$/;
 
-const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+const sha256 = (value: string) =>
+  createHash("sha256").update(value).digest("hex");
 
 export function isScope(value: string): value is Scope {
   return (SCOPES as readonly string[]).includes(value);
@@ -31,7 +32,9 @@ export class KeyStore {
 
   async list(): Promise<ApiKey[]> {
     try {
-      const data = JSON.parse(await readFile(this.path, "utf8")) as { keys?: ApiKey[] };
+      const data = JSON.parse(await readFile(this.path, "utf8")) as {
+        keys?: ApiKey[];
+      };
       return Array.isArray(data.keys) ? data.keys : [];
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
@@ -39,7 +42,10 @@ export class KeyStore {
     }
   }
 
-  async create(name: string, scopes: Scope[]): Promise<{ key: ApiKey; token: string }> {
+  async create(
+    name: string,
+    scopes: Scope[],
+  ): Promise<{ key: ApiKey; token: string }> {
     if (!name.trim()) throw new Error("name is required");
     if (scopes.length === 0) throw new Error("at least one scope is required");
     const keys = await this.list();
@@ -71,13 +77,18 @@ export class KeyStore {
     if (!key) return null;
     const expected = Buffer.from(key.hash, "hex");
     const actual = Buffer.from(sha256(match[2]!), "hex");
-    return expected.length === actual.length && timingSafeEqual(expected, actual) ? key : null;
+    return expected.length === actual.length &&
+      timingSafeEqual(expected, actual)
+      ? key
+      : null;
   }
 
   private async save(keys: ApiKey[]) {
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
     const tmp = `${this.path}.${process.pid}.tmp`;
-    await writeFile(tmp, `${JSON.stringify({ keys }, null, 2)}\n`, { mode: 0o600 });
+    await writeFile(tmp, `${JSON.stringify({ keys }, null, 2)}\n`, {
+      mode: 0o600,
+    });
     await chmod(tmp, 0o600);
     await rename(tmp, this.path);
   }

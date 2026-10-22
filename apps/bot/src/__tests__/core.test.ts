@@ -105,7 +105,9 @@ describe("trigger parity", () => {
     expect(route("/image a cat", { dm: true })).toBe("a cat");
     expect(route("/image hibana shrine")).toBe("hibana shrine");
     expect(route("hibana /image shrine")).toBe("agent");
-    expect(route("<@400> /image 赤いパンダ", { mention: true })).toBe("赤いパンダ");
+    expect(route("<@400> /image 赤いパンダ", { mention: true })).toBe(
+      "赤いパンダ",
+    );
     expect(route("<@!400>\n/image cat", { mention: true })).toBe("cat");
     expect(route("<@400> <@400> /image cat", { mention: true })).toBe("cat");
     expect(route("look /image cat <@400>", { mention: true })).toBe("agent");
@@ -116,11 +118,15 @@ describe("trigger parity", () => {
     expect(route("  /image  spaced  ", { dm: true })).toBe("spaced");
     expect(route("// /image cat", { dm: true })).toBe("ignore");
     expect(route("/image cat", { bot: true, dm: true })).toBe("ignore");
+    expect(route("/image cat", { thread: true, title: "Hibana project" })).toBe(
+      "cat",
+    );
     expect(
-      route("/image cat", { thread: true, title: "Hibana project" }),
-    ).toBe("cat");
-    expect(
-      route("/image cat", { mention: true }, { ...emptyGuild(), bot_disabled: true }),
+      route(
+        "/image cat",
+        { mention: true },
+        { ...emptyGuild(), bot_disabled: true },
+      ),
     ).toBe("ignore");
     expect(imagePrompt("/image " + "a".repeat(8000), "400")).toHaveLength(8000);
   });
@@ -141,7 +147,8 @@ describe("runtime isolation", () => {
         expect(Array.isArray(value.type)).toBe(false);
       for (const child of Object.values(value)) visit(child);
     };
-    for (const tool of [...definitions, jevTaskTool]) visit(tool.function.parameters);
+    for (const tool of [...definitions, jevTaskTool])
+      visit(tool.function.parameters);
   });
 
   test("credentials never fall back across paid accounts", () => {
@@ -155,17 +162,21 @@ describe("runtime isolation", () => {
       model: "gpt-6-luna",
       effort: "max",
     });
-    expect(loadConfig({
-      HIBANA_DATA_DIR: "/tmp/hibana-tests",
-      CODEX_PLUS_API_KEY: "test-plus",
-      LLM_MODEL: "gpt-5.6-luna",
-    }).selection.model).toBe("gpt-6-luna");
-    expect(loadConfig({
-      HIBANA_DATA_DIR: "/tmp/hibana-tests",
-      CLAUDE_MAX_API_KEY: "test-max",
-      PROVIDER: "claude_max",
-      LLM_MODEL: "claude-fable-5",
-    }).selection.model).toBe("claude-fable-5-1");
+    expect(
+      loadConfig({
+        HIBANA_DATA_DIR: "/tmp/hibana-tests",
+        CODEX_PLUS_API_KEY: "test-plus",
+        LLM_MODEL: "gpt-5.6-luna",
+      }).selection.model,
+    ).toBe("gpt-6-luna");
+    expect(
+      loadConfig({
+        HIBANA_DATA_DIR: "/tmp/hibana-tests",
+        CLAUDE_MAX_API_KEY: "test-max",
+        PROVIDER: "claude_max",
+        LLM_MODEL: "claude-fable-5",
+      }).selection.model,
+    ).toBe("claude-fable-5-1");
     expect(() => loadConfig({ PROVIDER: "CODEX_EVERYWHERE" })).toThrow();
     expect(() => loadConfig({ PROVIDER: "OPENCODE_GO" })).toThrow();
     expect(() => loadConfig({ LLM_TEMPERATURE: "NaN" })).toThrow();
@@ -187,9 +198,18 @@ describe("runtime isolation", () => {
       expect(runtime.resolve("100").selection.model).toBe("gpt-6.1-sol");
       expect(runtime.resolve("101").selection.model).toBe("gpt-6-luna");
       expect(changed).toBe("100");
-      await runtime.patch("100", { subagent_model: { mode: "fixed", preset: "sol" } }, "300");
-      expect(runtime.resolve("100", "300").subagent_model).toEqual({ mode: "fixed", preset: "sol" });
-      expect(runtime.resolve("101", "300").subagent_model).toEqual({ mode: "auto" });
+      await runtime.patch(
+        "100",
+        { subagent_model: { mode: "fixed", preset: "sol" } },
+        "300",
+      );
+      expect(runtime.resolve("100", "300").subagent_model).toEqual({
+        mode: "fixed",
+        preset: "sol",
+      });
+      expect(runtime.resolve("101", "300").subagent_model).toEqual({
+        mode: "auto",
+      });
       runtime.snapshot.user_overrides["300"] = {
         ...emptyUserOverride(),
         selection: null,
@@ -199,8 +219,14 @@ describe("runtime isolation", () => {
         jev_task_enabled: null,
         context: null,
       };
-      expect(runtime.resolve("100", "300").subagent_model).toEqual({ mode: "fixed", preset: "plus-luna" });
-      expect(runtime.resolve("100", "301").subagent_model).toEqual({ mode: "fixed", preset: "sol" });
+      expect(runtime.resolve("100", "300").subagent_model).toEqual({
+        mode: "fixed",
+        preset: "plus-luna",
+      });
+      expect(runtime.resolve("100", "301").subagent_model).toEqual({
+        mode: "fixed",
+        preset: "sol",
+      });
       const loaded = new Runtime(runtime.config);
       await loaded.load();
       expect(loaded.resolve("100").selection.effort).toBe("high");
@@ -342,14 +368,21 @@ test("Codex tool translation and disabled sandbox surface", () => {
 });
 
 test("home route tools register under workspace and normalize for dispatch", () => {
-  const base = (definitions as ToolDef[]).filter(t => t.function.name.startsWith("home_vpn_"));
+  const base = (definitions as ToolDef[]).filter((t) =>
+    t.function.name.startsWith("home_vpn_"),
+  );
   const tools = harnessTools(base, true);
   for (const action of ["status", "connect", "disconnect"]) {
     const name = `mcp__workspace__home_vpn_${action}`;
-    expect(tools.some(t => t.function.name === name)).toBe(true);
-    expect(normalizeTool(name, {})).toEqual({ name: `home_vpn_${action}`, args: {} });
+    expect(tools.some((t) => t.function.name === name)).toBe(true);
+    expect(normalizeTool(name, {})).toEqual({
+      name: `home_vpn_${action}`,
+      args: {},
+    });
   }
-  expect(harnessTools([], true).some(t => t.function.name.includes("home_vpn_"))).toBe(false);
+  expect(
+    harnessTools([], true).some((t) => t.function.name.includes("home_vpn_")),
+  ).toBe(false);
 });
 
 test("the proactive Multi-Agent V2 text is kept verbatim for Multi-Agent", () => {
@@ -363,19 +396,37 @@ test("the proactive Multi-Agent V2 text is kept verbatim for Multi-Agent", () =>
 });
 
 test("Ultra (Ultracode) keeps the explicit agent policy; only Multi-Agent is proactive", async () => {
-  for (const [env, proactive] of [[{ LLM_EFFORT: "ultra" }, false], [{ ULTRA_MODE: "true" }, false], [{ MULTI_AGENT: "true" }, true]] as const) {
-    const runtime = new Runtime(loadConfig({ HIBANA_DATA_DIR: "/tmp/hibana-tests", RUNTIME_STATE_PATH: "", ...env }));
+  for (const [env, proactive] of [
+    [{ LLM_EFFORT: "ultra" }, false],
+    [{ ULTRA_MODE: "true" }, false],
+    [{ MULTI_AGENT: "true" }, true],
+  ] as const) {
+    const runtime = new Runtime(
+      loadConfig({
+        HIBANA_DATA_DIR: "/tmp/hibana-tests",
+        RUNTIME_STATE_PATH: "",
+        ...env,
+      }),
+    );
     const prompt = await assemblePrompt(runtime, ctx, "");
-    expect(prompt.map((message) => message.role)).toEqual(proactive
-      ? ["system", "developer", "developer", "user"]
-      : ["system", "developer", "user"]);
+    expect(prompt.map((message) => message.role)).toEqual(
+      proactive
+        ? ["system", "developer", "developer", "user"]
+        : ["system", "developer", "user"],
+    );
     expect(prompt[1]).toEqual(multiAgentModeMessage(proactive));
     expect(ultracodeActive(runtime.config, runtime.resolve())).toBe(!proactive);
   }
 });
 
 test("server initialization and legacy normalization freeze defaults without changing other servers", async () => {
-  const runtime = new Runtime(loadConfig({ LLM_TEMPERATURE: "1.2", JEV_ENABLED: "false", RUNTIME_STATE_PATH: "" }));
+  const runtime = new Runtime(
+    loadConfig({
+      LLM_TEMPERATURE: "1.2",
+      JEV_ENABLED: "false",
+      RUNTIME_STATE_PATH: "",
+    }),
+  );
   await runtime.initializeGuild("100");
   expect(runtime.snapshot.guilds["100"]?.temperature).toBe(1.2);
   runtime.config.temperature = 0.2;
@@ -385,7 +436,10 @@ test("server initialization and legacy normalization freeze defaults without cha
   expect(runtime.resolve("100").temperature).toBe(1.2);
   expect(runtime.resolve("100").jev_enabled).toBe(false);
   expect(runtime.resolve("200").temperature).toBe(0.2);
-  runtime.replace({ guilds: { "300": { selection: null, temperature: null } as never }, user_overrides: { "400": { jev_enabled: null } as never } });
+  runtime.replace({
+    guilds: { "300": { selection: null, temperature: null } as never },
+    user_overrides: { "400": { jev_enabled: null } as never },
+  });
   const saved = structuredClone(runtime.snapshot);
   runtime.config.temperature = 0.9;
   runtime.config.jevEnabled = false;
@@ -628,7 +682,9 @@ test("sites on their own origins may use cookies and storage; shared-host URLs r
 });
 
 test("Ultra mode and effort resolve independently across guild, user, DM and legacy env", async () => {
-  const runtime = new Runtime(loadConfig({ LLM_EFFORT: "ultra", RUNTIME_STATE_PATH: "" }));
+  const runtime = new Runtime(
+    loadConfig({ LLM_EFFORT: "ultra", RUNTIME_STATE_PATH: "" }),
+  );
   expect(runtime.resolve().selection.effort).toBe("max");
   expect(runtime.resolve().ultra_mode).toBe(true);
   await runtime.patch("100", { effort: "low" }, "300");
@@ -636,7 +692,11 @@ test("Ultra mode and effort resolve independently across guild, user, DM and leg
   expect(runtime.resolve("100").ultra_mode).toBe(true);
   await runtime.patch("100", { ultra_mode: false }, "300");
   expect(runtime.resolve("100").selection.effort).toBe("low");
-  runtime.snapshot.user_overrides["300"] = { ...emptyUserOverride(), ultra_mode: true, effort: "medium" };
+  runtime.snapshot.user_overrides["300"] = {
+    ...emptyUserOverride(),
+    ultra_mode: true,
+    effort: "medium",
+  };
   expect(runtime.resolve("100", "300").ultra_mode).toBe(true);
   expect(runtime.resolve("100", "300").selection.effort).toBe("medium");
   expect(runtime.resolve("100", "301").ultra_mode).toBe(false);
@@ -646,15 +706,26 @@ test("Ultra mode and effort resolve independently across guild, user, DM and leg
   // leaving Ultra restores medium/low/max per scope.
   const turn = (guild?: string, user?: string) => {
     const settings = runtime.resolve(guild, user);
-    return turnSelection(settings.selection, ultracodeActive(runtime.config, settings)).effort;
+    return turnSelection(
+      settings.selection,
+      ultracodeActive(runtime.config, settings),
+    ).effort;
   };
-  expect([turn("100", "300"), turn("100", "301"), turn("101", "301"), turn(undefined, "300")])
-    .toEqual(["xhigh", "low", "xhigh", "xhigh"]);
+  expect([
+    turn("100", "300"),
+    turn("100", "301"),
+    turn("101", "301"),
+    turn(undefined, "300"),
+  ]).toEqual(["xhigh", "low", "xhigh", "xhigh"]);
   runtime.config.subagentEnabled = false;
   expect(turn("100", "300")).toBe("medium");
   runtime.config.subagentEnabled = true;
   const prompt = await assemblePrompt(runtime, ctx, "");
   expect(prompt[1]?.content).toContain("Do not spawn sub-agents");
-  expect(loadConfig({ LLM_EFFORT: "ultra", ULTRA_MODE: "false" }).ultraMode).toBe(false);
-  expect(loadConfig({ LLM_EFFORT: "low", ULTRA_MODE: "true" }).selection.effort).toBe("low");
+  expect(
+    loadConfig({ LLM_EFFORT: "ultra", ULTRA_MODE: "false" }).ultraMode,
+  ).toBe(false);
+  expect(
+    loadConfig({ LLM_EFFORT: "low", ULTRA_MODE: "true" }).selection.effort,
+  ).toBe("low");
 });

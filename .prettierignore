@@ -1,0 +1,5 @@
+# bun fmt reads this file (and .gitignore). Decision record: #99.
+# Prompts and skills are model input: formatting Markdown can change what the
+# model reads (it turned a "+ line" of a patch example into "* line").
+apps/bot/prompts/
+apps/bot/skills/

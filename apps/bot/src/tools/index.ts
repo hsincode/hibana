@@ -13,7 +13,11 @@ import {
 } from "@hibana/shared/settings";
 import { roleAllowsTool, workflowAgentAllowsTool } from "../agent-roles";
 import { workflowsEnabled } from "../ultracode";
-import { sandboxFiles, WorkflowJournals, type WorkflowFiles } from "../workflow/manager";
+import {
+  sandboxFiles,
+  WorkflowJournals,
+  type WorkflowFiles,
+} from "../workflow/manager";
 import {
   TASK_STOP_DESCRIPTION,
   TASK_STOP_PARAMETERS,
@@ -28,19 +32,47 @@ import {
 } from "../workflow/prompts";
 import { evaluateRoute, isAutoRoute, ROUTE_TIMEOUT_MS } from "../auto-route";
 type RouteDecision = Awaited<ReturnType<typeof evaluateRoute>>;
-import { evaluateTriage, latestRequest, shouldPrestartExplorer, TRIAGE_TIMEOUT_MS, type Triage } from "../jev-triage";
 import {
-  downloadImage, JEV_IMAGE_PREP_TIMEOUT_MS, MAX_JEV_IMAGE_BYTES, MAX_JEV_IMAGES, placeImages, prepareJevImages,
-  type Download, type JevImage,
+  evaluateTriage,
+  latestRequest,
+  shouldPrestartExplorer,
+  TRIAGE_TIMEOUT_MS,
+  type Triage,
+} from "../jev-triage";
+import {
+  downloadImage,
+  JEV_IMAGE_PREP_TIMEOUT_MS,
+  MAX_JEV_IMAGE_BYTES,
+  MAX_JEV_IMAGES,
+  placeImages,
+  prepareJevImages,
+  type Download,
+  type JevImage,
 } from "../jev-images";
 import definitions from "./definitions.json";
 import codexDefinitions from "./codex-definitions.json";
-import { childPresets, collaborationNames, collaborationTools, collaborationValidationSchema, teamTools } from "../multi-agent-policy";
+import {
+  childPresets,
+  collaborationNames,
+  collaborationTools,
+  collaborationValidationSchema,
+  teamTools,
+} from "../multi-agent-policy";
 import { Runtime } from "../runtime";
 import { Agent } from "../agent";
 import { nativeSearchFor } from "../llm";
-import { JevClient, JevImagesRejected, JEV_NOTICE_HEADER, jevInputSchema } from "../jev";
-import { jevTaskSchema, jevTaskTool, jevRequiredActionTools, runJevTask } from "../jev-task";
+import {
+  JevClient,
+  JevImagesRejected,
+  JEV_NOTICE_HEADER,
+  jevInputSchema,
+} from "../jev";
+import {
+  jevTaskSchema,
+  jevTaskTool,
+  jevRequiredActionTools,
+  runJevTask,
+} from "../jev-task";
 import { Semaphore, withAbort } from "../io";
 import { triggerWords } from "../triggers";
 import type { Context, Json, Message, ToolDef, Usage } from "../types";
@@ -61,7 +93,12 @@ import { WebTools } from "./web";
 import { ImageTools } from "./image";
 import { askQuestions, questionsSchema } from "./questions";
 import {
-  WORKSPACE_TOOLS, isWorkspaceTool, refuseFileArguments, runWorkspaceTool, takeWorkspaceCall, workspaceSurface,
+  WORKSPACE_TOOLS,
+  isWorkspaceTool,
+  refuseFileArguments,
+  runWorkspaceTool,
+  takeWorkspaceCall,
+  workspaceSurface,
   type WorkspaceHost,
 } from "../workspace/tools";
 import { downloadPublic } from "../network";
@@ -133,8 +170,15 @@ export class ToolRegistry {
     for (const d of [...codexDefinitions, ...definitions, jevTaskTool])
       this.validators.set(d.function.name, ajv.compile(d.function.parameters));
     for (const d of collaborationTools)
-      this.validators.set(`agents__${d.function.name}`, ajv.compile(collaborationValidationSchema(d)));
-    for (const d of WORKSPACE_TOOLS) this.workspaceValidators.set(d.function.name, ajv.compile(d.function.parameters));
+      this.validators.set(
+        `agents__${d.function.name}`,
+        ajv.compile(collaborationValidationSchema(d)),
+      );
+    for (const d of WORKSPACE_TOOLS)
+      this.workspaceValidators.set(
+        d.function.name,
+        ajv.compile(d.function.parameters),
+      );
     this.workspaceHost = {
       discord: this.discord,
       integration: (name, args, ctx) => this.runTool(name, args, ctx),
@@ -164,14 +208,22 @@ export class ToolRegistry {
     this.maintenance.unref();
   }
   /** Multi-Agent turn-start classification. Silent: no Discord notice or visible Jev count, and any failure means "no hint". */
-  async triage(ctx: Context, messages: readonly Message[]): Promise<{ triage: Triage; usage: Usage } | undefined> {
+  async triage(
+    ctx: Context,
+    messages: readonly Message[],
+  ): Promise<{ triage: Triage; usage: Usage } | undefined> {
     const enabled = () => {
       const settings = this.runtime.resolve(ctx.guildId, ctx.userId);
-      return ctx.depth === 0 && this.runtime.config.toolsEnabled &&
-        this.runtime.config.subagentEnabled && !!this.runtime.config.jevApiKey &&
-        settings.jev_enabled && subagentMode(settings) === "multi" &&
+      return (
+        ctx.depth === 0 &&
+        this.runtime.config.toolsEnabled &&
+        this.runtime.config.subagentEnabled &&
+        !!this.runtime.config.jevApiKey &&
+        settings.jev_enabled &&
+        subagentMode(settings) === "multi" &&
         !this.runtime.snapshot.blocked_users.includes(ctx.userId) &&
-        !this.runtime.guild(ctx.guildId).bot_disabled;
+        !this.runtime.guild(ctx.guildId).bot_disabled
+      );
     };
     if (!enabled()) return undefined;
     // The deadline includes waiting for the shared Jev slot: triage is only
@@ -186,11 +238,19 @@ export class ToolRegistry {
     // Images load while the call waits for the shared Jev slot.
     const images = this.requestImages(messages, signal);
     try {
-      result = await withAbort(this.subagents.run(async () => {
-        signal.throwIfAborted();
-        if (!enabled()) return undefined;
-        return evaluateTriage(messages, this.jev.decide.bind(this.jev), signal, await images);
-      }), signal);
+      result = await withAbort(
+        this.subagents.run(async () => {
+          signal.throwIfAborted();
+          if (!enabled()) return undefined;
+          return evaluateTriage(
+            messages,
+            this.jev.decide.bind(this.jev),
+            signal,
+            await images,
+          );
+        }),
+        signal,
+      );
       verdict = result ? "classified" : "disabled";
       return result && enabled() ? result : undefined;
     } catch {
@@ -199,60 +259,99 @@ export class ToolRegistry {
     } finally {
       // Probabilities only; never the request text or the API response body.
       const round = (value: number) => Math.round(value * 100) / 100;
-      this.log?.info({
-        channel: ctx.channelId, message_id: ctx.messageId, verdict,
-        ...(result ? {
-          needs_research: round(result.triage.needs_research),
-          needs_artifact_work: round(result.triage.needs_artifact_work), needs_review: round(result.triage.needs_review),
-          prestart_explorer: shouldPrestartExplorer(result.triage), images: result.images,
-        } : {}),
-        elapsed_ms: Math.round(performance.now() - started),
-      }, "Jev triage finished");
+      this.log?.info(
+        {
+          channel: ctx.channelId,
+          message_id: ctx.messageId,
+          verdict,
+          ...(result
+            ? {
+                needs_research: round(result.triage.needs_research),
+                needs_artifact_work: round(result.triage.needs_artifact_work),
+                needs_review: round(result.triage.needs_review),
+                prestart_explorer: shouldPrestartExplorer(result.triage),
+                images: result.images,
+              }
+            : {}),
+          elapsed_ms: Math.round(performance.now() - started),
+        },
+        "Jev triage finished",
+      );
     }
   }
   /** The latest request's images that fit Jev's limits (#83). Never throws:
    *  an image Jev cannot take leaves the judgment to the text, as before. */
-  private async requestImages(messages: readonly Message[], signal: AbortSignal): Promise<JevImage[]> {
+  private async requestImages(
+    messages: readonly Message[],
+    signal: AbortSignal,
+  ): Promise<JevImage[]> {
     const urls = latestRequest(messages)?.images ?? [];
     if (!this.runtime.config.jevImagesEnabled || !urls.length) return [];
-    const images = await prepareJevImages(urls, signal, this.jevImageDownload)
-      .catch((): (JevImage | undefined)[] => []);
+    const images = await prepareJevImages(
+      urls,
+      signal,
+      this.jevImageDownload,
+    ).catch((): (JevImage | undefined)[] => []);
     return images.filter((i): i is JevImage => !!i);
   }
   /** run_jev's images, all or nothing: a judgment about a picture must not
    *  quietly run without it. */
-  private async runJevImages(sources: readonly string[], ctx: Context): Promise<JevImage[]> {
-    const urls = await Promise.all(sources.map(async (source) => {
-      const attached = /^attachment:(\d+)$/i.exec(source);
-      if (attached) {
-        const url = ctx.images?.[Number(attached[1]) - 1];
-        if (!url) throw new Error(`${source}: the current message has no such image`);
-        return url;
-      }
-      if (/^https:\/\//i.test(source)) return source;
-      // An Anthropic Workspace turn's files are in Anthropic's container (#76).
-      if (ctx.harness === "workspace")
-        throw new Error(`${source}: a file in the container cannot be passed; deliver it with send_file and use the attachment's https URL`);
-      if (!/\.(png|jpe?g)$/i.test(source)) throw new Error(`${source}: Jev reads PNG or JPEG images only`);
-      const full = await this.sandbox.path(ctx, source);
-      if ((await lstat(full)).size > MAX_JEV_IMAGE_BYTES) throw new Error(`${source}: image too large for Jev`);
-      // The format comes from the file's header, not this media type.
-      return `data:application/octet-stream;base64,${(await readFile(full)).toString("base64")}`;
-    }));
-    const images = await prepareJevImages(urls, ctx.signal, this.jevImageDownload);
+  private async runJevImages(
+    sources: readonly string[],
+    ctx: Context,
+  ): Promise<JevImage[]> {
+    const urls = await Promise.all(
+      sources.map(async (source) => {
+        const attached = /^attachment:(\d+)$/i.exec(source);
+        if (attached) {
+          const url = ctx.images?.[Number(attached[1]) - 1];
+          if (!url)
+            throw new Error(`${source}: the current message has no such image`);
+          return url;
+        }
+        if (/^https:\/\//i.test(source)) return source;
+        // An Anthropic Workspace turn's files are in Anthropic's container (#76).
+        if (ctx.harness === "workspace")
+          throw new Error(
+            `${source}: a file in the container cannot be passed; deliver it with send_file and use the attachment's https URL`,
+          );
+        if (!/\.(png|jpe?g)$/i.test(source))
+          throw new Error(`${source}: Jev reads PNG or JPEG images only`);
+        const full = await this.sandbox.path(ctx, source);
+        if ((await lstat(full)).size > MAX_JEV_IMAGE_BYTES)
+          throw new Error(`${source}: image too large for Jev`);
+        // The format comes from the file's header, not this media type.
+        return `data:application/octet-stream;base64,${(await readFile(full)).toString("base64")}`;
+      }),
+    );
+    const images = await prepareJevImages(
+      urls,
+      ctx.signal,
+      this.jevImageDownload,
+    );
     const failed = images.findIndex((i) => !i);
     if (failed >= 0)
-      throw new Error(`${sources[failed]}: Jev cannot take this image (PNG or JPEG, 256–1568 px per side, at most ${MAX_JEV_IMAGE_BYTES / 1048576} MiB, loaded within ${JEV_IMAGE_PREP_TIMEOUT_MS / 1000} s). Inspect it with view_image and send what it shows as text.`);
+      throw new Error(
+        `${sources[failed]}: Jev cannot take this image (PNG or JPEG, 256–1568 px per side, at most ${MAX_JEV_IMAGE_BYTES / 1048576} MiB, loaded within ${JEV_IMAGE_PREP_TIMEOUT_MS / 1000} s). Inspect it with view_image and send what it shows as text.`,
+      );
     return images as JevImage[];
   }
   /** Auto routing: Jev scores the request's difficulty once, before the turn.
    *  Silent like the triage. Any failure returns undefined and the caller
    *  uses the fallback model. */
-  async route(ctx: Context, messages: readonly Message[]): Promise<RouteDecision | undefined> {
+  async route(
+    ctx: Context,
+    messages: readonly Message[],
+  ): Promise<RouteDecision | undefined> {
     const enabled = () => {
       const settings = this.runtime.resolve(ctx.guildId, ctx.userId);
-      return this.runtime.config.toolsEnabled && this.runtime.config.subagentEnabled &&
-        !!this.runtime.config.jevApiKey && settings.jev_enabled && isAutoRoute(settings.selection);
+      return (
+        this.runtime.config.toolsEnabled &&
+        this.runtime.config.subagentEnabled &&
+        !!this.runtime.config.jevApiKey &&
+        settings.jev_enabled &&
+        isAutoRoute(settings.selection)
+      );
     };
     const started = performance.now();
     let verdict = "disabled";
@@ -266,10 +365,18 @@ export class ToolRegistry {
         AbortSignal.timeout(ROUTE_TIMEOUT_MS),
       ]);
       const images = this.requestImages(messages, signal);
-      result = await withAbort(this.subagents.run(async () => {
-        signal.throwIfAborted();
-        return evaluateRoute(messages, this.jev.decide.bind(this.jev), signal, await images);
-      }), signal);
+      result = await withAbort(
+        this.subagents.run(async () => {
+          signal.throwIfAborted();
+          return evaluateRoute(
+            messages,
+            this.jev.decide.bind(this.jev),
+            signal,
+            await images,
+          );
+        }),
+        signal,
+      );
       verdict = "classified";
       return result;
     } catch {
@@ -277,11 +384,24 @@ export class ToolRegistry {
       return undefined;
     } finally {
       // The level only; never the request text or the API response body.
-      this.log?.info({
-        channel: ctx.channelId, message_id: ctx.messageId, verdict,
-        ...(result ? { level: result.level, requested: result.requested ?? null, model: result.selection.model, effort: result.selection.effort, images: result.images } : {}),
-        elapsed_ms: Math.round(performance.now() - started),
-      }, "Jev route finished");
+      this.log?.info(
+        {
+          channel: ctx.channelId,
+          message_id: ctx.messageId,
+          verdict,
+          ...(result
+            ? {
+                level: result.level,
+                requested: result.requested ?? null,
+                model: result.selection.model,
+                effort: result.selection.effort,
+                images: result.images,
+              }
+            : {}),
+          elapsed_ms: Math.round(performance.now() - started),
+        },
+        "Jev route finished",
+      );
     }
   }
   base(ctx: Context): ToolDef[] {
@@ -292,21 +412,38 @@ export class ToolRegistry {
       settings.exa_mode,
       this.runtime.config.webSearch,
     );
-    const available = [...definitions as ToolDef[], jevTaskTool, ...(this.runtime.config.subagentEnabled && settings.subagent_enabled && ctx.team ? teamTools(this.runtime, ctx).map(t => ({
-      ...t, function: { ...t.function, name: `agents__${t.function.name}` },
-    })) : [])];
+    const available = [
+      ...(definitions as ToolDef[]),
+      jevTaskTool,
+      ...(this.runtime.config.subagentEnabled &&
+      settings.subagent_enabled &&
+      ctx.team
+        ? teamTools(this.runtime, ctx).map((t) => ({
+            ...t,
+            function: { ...t.function, name: `agents__${t.function.name}` },
+          }))
+        : []),
+    ];
     return available.filter((t) => {
       const n = t.function.name;
-      if ((n === "generate_image" || n === "edit_image" || n === "image_generation_status") &&
-          (!this.runtime.config.imageWorkerUrl || !this.sandbox.available)) return false;
+      if (
+        (n === "generate_image" ||
+          n === "edit_image" ||
+          n === "image_generation_status") &&
+        (!this.runtime.config.imageWorkerUrl || !this.sandbox.available)
+      )
+        return false;
       if (sandboxNames.has(n) && !this.sandbox.available) return false;
       if (ADMIN_TOOLS.has(n) && (!ctx.guildId || !settings.server_tools))
         return false;
       if (
         /^home_vpn_/.test(n) &&
-        (!this.runtime.config.browserProxyUrl || !this.sandbox.available || ctx.depth > 0 ||
+        (!this.runtime.config.browserProxyUrl ||
+          !this.sandbox.available ||
+          ctx.depth > 0 ||
           this.runtime.role(ctx.userId) !== "administrator")
-      ) return false;
+      )
+        return false;
       if (
         /^vpn_/.test(n) &&
         (!this.runtime.config.vpnEnabled ||
@@ -322,8 +459,12 @@ export class ToolRegistry {
       )
         return false;
       // exa off disables every web tool, Jev task mode included (#46).
-      if (/^web/.test(n) && (!this.runtime.config.webSearch || settings.exa_mode === "off" ||
-          (native && !this.jevTaskMode(ctx))))
+      if (
+        /^web/.test(n) &&
+        (!this.runtime.config.webSearch ||
+          settings.exa_mode === "off" ||
+          (native && !this.jevTaskMode(ctx)))
+      )
         return false;
       if (/^mcp_/.test(n) && settings.mcp_enabled === false) return false;
       if (
@@ -346,14 +487,20 @@ export class ToolRegistry {
     const settings = this.runtime.resolve(ctx.guildId, ctx.userId);
     if (!workflowsEnabled(this.runtime.config, settings)) return false;
     const mode = subagentMode(settings);
-    return mode === "on" || mode === "ultra" || (mode === "multi" && !!ctx.workflowKeyword);
+    return (
+      mode === "on" ||
+      mode === "ultra" ||
+      (mode === "multi" && !!ctx.workflowKeyword)
+    );
   }
   private referenceOptions(ctx: Context): ReferenceOptions {
     const settings = this.runtime.resolve(ctx.guildId, ctx.userId);
     return {
       concurrency: this.runtime.config.workflowConcurrency,
       modelOption: settings.subagent_model.mode === "auto",
-      presets: childPresets().filter((p) => this.runtime.canSelect(p.id, ctx.userId)).map((p) => p.id),
+      presets: childPresets()
+        .filter((p) => this.runtime.canSelect(p.id, ctx.userId))
+        .map((p) => p.id),
     };
   }
   /** Claude Code serves the authoring reference as the workflow-authoring
@@ -367,9 +514,14 @@ export class ToolRegistry {
   /** ## Skills list, plus the built-in workflow-authoring reference. */
   async skillCatalog(ctx: Context): Promise<string> {
     const settings = this.runtime.resolve(ctx.guildId, ctx.userId);
-    const workflow = workflowsEnabled(this.runtime.config, settings) && this.workflowSkillAvailable()
-      ? `- ${WORKFLOW_AUTHORING_SKILL}: ${WORKFLOW_AUTHORING_DESCRIPTION}` : "";
-    return [await this.skills.catalog(ctx), workflow].filter(Boolean).join("\n");
+    const workflow =
+      workflowsEnabled(this.runtime.config, settings) &&
+      this.workflowSkillAvailable()
+        ? `- ${WORKFLOW_AUTHORING_SKILL}: ${WORKFLOW_AUTHORING_DESCRIPTION}`
+        : "";
+    return [await this.skills.catalog(ctx), workflow]
+      .filter(Boolean)
+      .join("\n");
   }
   private workflowTools(ctx: Context): ToolDef[] {
     const config = this.runtime.config;
@@ -387,7 +539,14 @@ export class ToolRegistry {
           parameters: WORKFLOW_PARAMETERS,
         },
       },
-      { type: "function", function: { name: TASK_STOP_TOOL, description: TASK_STOP_DESCRIPTION, parameters: TASK_STOP_PARAMETERS } },
+      {
+        type: "function",
+        function: {
+          name: TASK_STOP_TOOL,
+          description: TASK_STOP_DESCRIPTION,
+          parameters: TASK_STOP_PARAMETERS,
+        },
+      },
     ];
   }
   /** The custom tools of an Anthropic Workspace session (#76), under their
@@ -401,8 +560,14 @@ export class ToolRegistry {
     if (!this.runtime.config.toolsEnabled) return [];
     // `resolve` reads an empty user id as "no user": the server's own row.
     const server: Context = {
-      guildId: ctx.guildId, channelId: ctx.channelId, thread: ctx.thread, botId: ctx.botId,
-      userId: "", depth: 0, delivered: false, harness: "workspace",
+      guildId: ctx.guildId,
+      channelId: ctx.channelId,
+      thread: ctx.thread,
+      botId: ctx.botId,
+      userId: "",
+      depth: 0,
+      delivered: false,
+      harness: "workspace",
     };
     return workspaceSurface(this.base(server));
   }
@@ -411,8 +576,12 @@ export class ToolRegistry {
    *  existing session keeps what it was created with. */
   workspaceWeb(ctx: Context): boolean {
     const config = this.runtime.config;
-    return config.toolsEnabled && config.webSearch && config.anthropicWorkspace.web &&
-      this.runtime.guild(ctx.guildId).exa_mode !== "off";
+    return (
+      config.toolsEnabled &&
+      config.webSearch &&
+      config.anthropicWorkspace.web &&
+      this.runtime.guild(ctx.guildId).exa_mode !== "off"
+    );
   }
   tools(ctx: Context) {
     if (!this.runtime.config.toolsEnabled) return [];
@@ -421,29 +590,60 @@ export class ToolRegistry {
     // Filter the final surface, not base(): harness-native aliases such as
     // shell_command/apply_patch are added later and must obey the role too.
     const tools = harnessTools(base, this.sandbox.available)
-      .filter((t) => roleAllowsTool(ctx.agentRole, normalizeTool(t.function.name, {}).name))
-      .filter((t) => !ctx.workflowAgent || workflowAgentAllowsTool(normalizeTool(t.function.name, {}).name));
+      .filter((t) =>
+        roleAllowsTool(ctx.agentRole, normalizeTool(t.function.name, {}).name),
+      )
+      .filter(
+        (t) =>
+          !ctx.workflowAgent ||
+          workflowAgentAllowsTool(normalizeTool(t.function.name, {}).name),
+      );
     if (this.workflowAvailable(ctx)) tools.push(...this.workflowTools(ctx));
     // The Codex harness reads files through shell_command and hides the file
     // tools. A role without a shell (explorer) gets the read-only ones back,
     // or it could not inspect the workspace it is meant to research.
     if (ctx.agentRole && !roleAllowsTool(ctx.agentRole, "bash"))
-      tools.push(...base.filter((t) =>
-        ["read_file", "list_files", "grep_files"].includes(t.function.name) &&
-        roleAllowsTool(ctx.agentRole, t.function.name)).map(namespaced));
+      tools.push(
+        ...base
+          .filter(
+            (t) =>
+              ["read_file", "list_files", "grep_files"].includes(
+                t.function.name,
+              ) && roleAllowsTool(ctx.agentRole, t.function.name),
+          )
+          .map(namespaced),
+      );
     if (!this.jevTaskMode(ctx)) return tools;
-    const actions = this.taskActionDefinitions(ctx).filter(t => jevRequiredActionTools.has(t.function.name));
+    const actions = this.taskActionDefinitions(ctx).filter((t) =>
+      jevRequiredActionTools.has(t.function.name),
+    );
     // Only hidden operations need embedded schemas. Repeating every directly
     // exposed integration doubled production tool context and buried delegation.
-    return tools.filter((t) => !jevRequiredActionTools.has(normalizeTool(t.function.name, {}).name))
-      .map((t) => t.function.name === "mcp__agent__run_jev_task" ? {
-        ...t, function: {
-          ...t.function,
-          description: t.function.description + "\nRequired action schemas (use these names inside actions only; other eligible candidates use their directly exposed schemas):\n" + JSON.stringify(actions.map((a) => ({
-            name: a.function.name, description: a.function.description, parameters: a.function.parameters,
-          }))),
-        },
-      } : t);
+    return tools
+      .filter(
+        (t) =>
+          !jevRequiredActionTools.has(normalizeTool(t.function.name, {}).name),
+      )
+      .map((t) =>
+        t.function.name === "mcp__agent__run_jev_task"
+          ? {
+              ...t,
+              function: {
+                ...t.function,
+                description:
+                  t.function.description +
+                  "\nRequired action schemas (use these names inside actions only; other eligible candidates use their directly exposed schemas):\n" +
+                  JSON.stringify(
+                    actions.map((a) => ({
+                      name: a.function.name,
+                      description: a.function.description,
+                      parameters: a.function.parameters,
+                    })),
+                  ),
+              },
+            }
+          : t,
+      );
   }
   jevTaskMode(ctx: Context): boolean {
     // The mode rewrites the tool list from a setting. The list of a
@@ -453,10 +653,15 @@ export class ToolRegistry {
     const settings = this.runtime.resolve(ctx.guildId, ctx.userId);
     // Multi-Agent parallelizes through role workers; a Jev decision before
     // every root operation serialized exactly the work it is meant to speed up.
-    return ctx.depth === 0 && this.runtime.config.toolsEnabled &&
-      settings.jev_task_enabled && !(
-        this.runtime.config.subagentEnabled && subagentMode(settings) === "multi"
-      );
+    return (
+      ctx.depth === 0 &&
+      this.runtime.config.toolsEnabled &&
+      settings.jev_task_enabled &&
+      !(
+        this.runtime.config.subagentEnabled &&
+        subagentMode(settings) === "multi"
+      )
+    );
   }
   private taskActionDefinitions(ctx: Context): ToolDef[] {
     // Derive candidates from the parent's live tool surface, not a second
@@ -464,13 +669,22 @@ export class ToolRegistry {
     // schemas take precedence over harness aliases with different arguments.
     const base = this.base(ctx);
     const actions = new Map<string, ToolDef>();
-    for (const tool of [...base, ...harnessTools(base, this.sandbox.available)]) {
+    for (const tool of [
+      ...base,
+      ...harnessTools(base, this.sandbox.available),
+    ]) {
       const name = normalizeTool(tool.function.name, {}).name;
       // Coordination stays with the chat agent under the Codex mode policy.
       // Gating spawn/wait on Jev delays workers and can consume a whole plan
       // budget waiting for a mailbox. Recursive Jev also risks semaphore deadlock.
-      if (name === "run_jev" || name === "run_jev_task" ||
-          (name.startsWith("agents__") && collaborationNames.has(name.slice(8))) || actions.has(name)) continue;
+      if (
+        name === "run_jev" ||
+        name === "run_jev_task" ||
+        (name.startsWith("agents__") &&
+          collaborationNames.has(name.slice(8))) ||
+        actions.has(name)
+      )
+        continue;
       actions.set(name, { ...tool, function: { ...tool.function, name } });
     }
     return [...actions.values()];
@@ -485,24 +699,43 @@ export class ToolRegistry {
       this.runtime.guild(ctx.guildId).bot_disabled
     )
       throw new Error("Bot access disabled");
-    if (ctx.harness === "workspace") return this.executeWorkspace(rawName, rawArgs, ctx);
+    if (ctx.harness === "workspace")
+      return this.executeWorkspace(rawName, rawArgs, ctx);
     const { name, args: a } = normalizeTool(rawName, rawArgs);
     // Checked after normalization so use_tool wrappers and aliases cannot
     // reach a tool that the role's tool list does not expose.
     if (!roleAllowsTool(ctx.agentRole, name))
-      throw new Error(`The ${ctx.agentRole} role cannot use ${name}; report what is needed to the orchestrator instead`);
+      throw new Error(
+        `The ${ctx.agentRole} role cannot use ${name}; report what is needed to the orchestrator instead`,
+      );
     if (ctx.workflowAgent && !workflowAgentAllowsTool(name))
-      throw new Error(`Workflow agents cannot use ${name}; return what is needed to the script instead`);
+      throw new Error(
+        `Workflow agents cannot use ${name}; return what is needed to the script instead`,
+      );
     const selected = this.jevActions.get(ctx);
     this.jevActions.delete(ctx);
-    if (this.jevTaskMode(ctx) && jevRequiredActionTools.has(name) &&
-        !(selected?.name === name && JSON.stringify(selected.args) === JSON.stringify(a)))
-      throw new Error("Jev action-selection mode requires run_jev_task; submit an objective and candidate actions instead of executing directly");
+    if (
+      this.jevTaskMode(ctx) &&
+      jevRequiredActionTools.has(name) &&
+      !(
+        selected?.name === name &&
+        JSON.stringify(selected.args) === JSON.stringify(a)
+      )
+    )
+      throw new Error(
+        "Jev action-selection mode requires run_jev_task; submit an objective and candidate actions instead of executing directly",
+      );
     const validator = this.validators.get(name);
     const workflowTool = name === WORKFLOW_TOOL || name === TASK_STOP_TOOL;
-    if (workflowTool ? !this.workflowAvailable(ctx)
-      : validator && !this.base(ctx).some((t) => t.function.name === name) &&
-        !harnessTools(this.base(ctx), this.sandbox.available).some((t) => t.function.name === name))
+    if (
+      workflowTool
+        ? !this.workflowAvailable(ctx)
+        : validator &&
+          !this.base(ctx).some((t) => t.function.name === name) &&
+          !harnessTools(this.base(ctx), this.sandbox.available).some(
+            (t) => t.function.name === name,
+          )
+    )
       throw new Error("Tool disabled for this context");
     if (validator && !validator(a))
       throw new Error(
@@ -521,25 +754,42 @@ export class ToolRegistry {
   /** One custom tool call of an Anthropic Workspace session (#76). The
    *  session's built-in tools run in Anthropic's container and never come
    *  here. No home connection is opened: none of these tools uses one. */
-  private async executeWorkspace(name: string, args: Json, ctx: Context): Promise<unknown> {
+  private async executeWorkspace(
+    name: string,
+    args: Json,
+    ctx: Context,
+  ): Promise<unknown> {
     // `WorkspaceCalls` is the only way in. It is what makes a call from a
     // workflow run's thread a worker's call, and what refuses a run that
     // someone else started; a call that arrives without its mark skipped both.
-    if (!takeWorkspaceCall(ctx)) throw new Error("A Workspace tool call must come through the turn's call queue.");
-    if (!isWorkspaceTool(name)) throw new Error(`${name} is not a tool of this workspace.`);
+    if (!takeWorkspaceCall(ctx))
+      throw new Error(
+        "A Workspace tool call must come through the turn's call queue.",
+      );
+    if (!isWorkspaceTool(name))
+      throw new Error(`${name} is not a tool of this workspace.`);
     if (!roleAllowsTool(ctx.agentRole, name))
-      throw new Error(`An agent of a workflow run cannot use ${name}. Return what is needed in your result instead.`);
+      throw new Error(
+        `An agent of a workflow run cannot use ${name}. Return what is needed in your result instead.`,
+      );
     // Shown is not the same as allowed: the list is the same for everyone in
     // the channel, so an integration tool is checked again here against what
     // this person may run. `send_file` is not taken from `base()`, where it
     // depends on the Docker sandbox this path does not use.
-    const allowed = this.runtime.config.toolsEnabled && (
-      name === "send_file" ||
-      (name === "AskUserQuestion" ? ctx.depth === 0 : this.base(ctx).some((t) => t.function.name === name)));
-    if (!allowed) throw new Error(`${name} is not available to you in this conversation.`);
-    const validator = this.workspaceValidators.get(name) ?? this.validators.get(name);
+    const allowed =
+      this.runtime.config.toolsEnabled &&
+      (name === "send_file" ||
+        (name === "AskUserQuestion"
+          ? ctx.depth === 0
+          : this.base(ctx).some((t) => t.function.name === name)));
+    if (!allowed)
+      throw new Error(`${name} is not available to you in this conversation.`);
+    const validator =
+      this.workspaceValidators.get(name) ?? this.validators.get(name);
     if (validator && !validator(args))
-      throw new Error(`Invalid arguments for ${name}: ${validator.errors?.map((e) => `${e.instancePath || "input"} ${e.message}`).join("; ")}`);
+      throw new Error(
+        `Invalid arguments for ${name}: ${validator.errors?.map((e) => `${e.instancePath || "input"} ${e.message}`).join("; ")}`,
+      );
     refuseFileArguments(name, args);
     return runWorkspaceTool(this.workspaceHost, name, args, ctx);
   }
@@ -548,7 +798,8 @@ export class ToolRegistry {
     if (name === "edit_image") return this.image.edit(a, ctx);
     if (name === "generate_image") return this.image.generate(a, ctx);
     if (/^home_vpn_/.test(name)) {
-      if (ctx.depth > 0 || this.runtime.role(ctx.userId) !== "administrator") throw new Error("Administrator task required");
+      if (ctx.depth > 0 || this.runtime.role(ctx.userId) !== "administrator")
+        throw new Error("Administrator task required");
       return this.media.homeCommand(name, ctx);
     }
     if (/^vpn_/.test(name)) {
@@ -571,17 +822,30 @@ export class ToolRegistry {
       // action. The evaluator may select a prepared action, never invent one.
       const task = name === "run_jev_task" ? jevTaskSchema.parse(a) : null;
       const input = task ? null : jevInputSchema.parse(a);
-      const sources = task ? [] : z.array(z.string().min(1).max(2000)).max(MAX_JEV_IMAGES).default([]).parse(a.images);
+      const sources = task
+        ? []
+        : z
+            .array(z.string().min(1).max(2000))
+            .max(MAX_JEV_IMAGES)
+            .default([])
+            .parse(a.images);
       if (sources.length && !this.runtime.config.jevImagesEnabled)
-        throw new Error("Jev image input is disabled (JEV_IMAGES_ENABLED=false); send what the images show as text");
+        throw new Error(
+          "Jev image input is disabled (JEV_IMAGES_ENABLED=false); send what the images show as text",
+        );
       // Placeholders are checked with the rest of the input, before any fetch.
       if (input) placeImages(input, sources);
       const validateAction = (tool: string, args: Json) => {
         const normalized = normalizeTool(tool, args);
-        const definition = this.taskActionDefinitions(ctx).find((t) => t.function.name === normalized.name);
+        const definition = this.taskActionDefinitions(ctx).find(
+          (t) => t.function.name === normalized.name,
+        );
         if (!definition)
           throw new Error(`Jev task tool unavailable: ${normalized.name}`);
-        const validate = new Ajv({ strict: false, allowUnionTypes: true }).compile(definition.function.parameters);
+        const validate = new Ajv({
+          strict: false,
+          allowUnionTypes: true,
+        }).compile(definition.function.parameters);
         if (!validate(normalized.args))
           throw new Error(`Invalid Jev action arguments: ${normalized.name}`);
         return normalized;
@@ -597,7 +861,8 @@ export class ToolRegistry {
           this.runtime.snapshot.blocked_users.includes(ctx.userId) ||
           this.runtime.guild(ctx.guildId).bot_disabled ||
           !this.base(ctx).some((t) => t.function.name === name)
-        ) throw new Error("Jev is disabled for this context");
+        )
+          throw new Error("Jev is disabled for this context");
       };
       return this.subagents.run(async () => {
         ctx.signal?.throwIfAborted();
@@ -615,26 +880,37 @@ export class ToolRegistry {
             assertEnabled,
             report: ctx.jevTaskProgress,
             ...(this.runtime.config.jevImagesEnabled
-              ? { prepareImages: (urls: string[], signal: AbortSignal) => prepareJevImages(urls, signal, this.jevImageDownload) }
+              ? {
+                  prepareImages: (urls: string[], signal: AbortSignal) =>
+                    prepareJevImages(urls, signal, this.jevImageDownload),
+                }
               : {}),
             execute: async (tool, args, actionCtx) => {
               actionCtx.signal?.throwIfAborted();
               assertEnabled();
               validateAction(tool, args);
               this.jevActions.set(actionCtx, { name: tool, args });
-              try { return await this.execute(tool, args, actionCtx); }
-              finally { this.jevActions.delete(actionCtx); }
+              try {
+                return await this.execute(tool, args, actionCtx);
+              } finally {
+                this.jevActions.delete(actionCtx);
+              }
             },
           });
         }
         if (!ctx.notify)
           throw new Error("Jev requires a Discord notification channel");
         // Persistent evaluation notices survive parent progress edits.
-        const executions = ctx.jevExecutions ??= { count: 0 };
+        const executions = (ctx.jevExecutions ??= { count: 0 });
         // Load the images first: a call that cannot send them fails before
         // the notice, without a judgment made blind to what it was about.
-        const images = sources.length ? await this.runJevImages(sources, ctx) : [];
-        const placed = placeImages(input!, images.map((i) => i.reference));
+        const images = sources.length
+          ? await this.runJevImages(sources, ctx)
+          : [];
+        const placed = placeImages(
+          input!,
+          images.map((i) => i.reference),
+        );
         await ctx.notify(`${JEV_NOTICE_HEADER}(${++executions.count}回目)`);
         try {
           const result = await this.jev.decide(placed, ctx.signal, images);
@@ -642,27 +918,39 @@ export class ToolRegistry {
           return result;
         } catch (error) {
           if (error instanceof JevImagesRejected)
-            throw new Error("Jev did not accept the images (its image input is experimental). Inspect them with view_image and send what they show as text.");
+            throw new Error(
+              "Jev did not accept the images (its image input is experimental). Inspect them with view_image and send what they show as text.",
+            );
           throw error;
         }
       });
     }
     if (name === WORKFLOW_TOOL || name === TASK_STOP_TOOL) {
       if (!ctx.team) throw new Error("No active multi-agent session");
-      return name === WORKFLOW_TOOL ? ctx.team.launchWorkflow(a, ctx) : ctx.team.stopTask(a, ctx);
+      return name === WORKFLOW_TOOL
+        ? ctx.team.launchWorkflow(a, ctx)
+        : ctx.team.stopTask(a, ctx);
     }
     if (name.startsWith("agents__") && collaborationNames.has(name.slice(8))) {
-      if (!this.runtime.config.subagentEnabled ||
-          !this.runtime.resolve(ctx.guildId, ctx.userId).subagent_enabled || !ctx.team)
+      if (
+        !this.runtime.config.subagentEnabled ||
+        !this.runtime.resolve(ctx.guildId, ctx.userId).subagent_enabled ||
+        !ctx.team
+      )
         throw new Error("No active multi-agent session");
       // Log control flow without task names, messages or tool arguments so
       // production can distinguish absent delegation from hidden progress edits.
       const started = performance.now();
-      const fields = { operation_id: crypto.randomUUID(), channel: ctx.channelId,
-        message_id: ctx.messageId, tool: name, agent_depth: ctx.depth,
+      const fields = {
+        operation_id: crypto.randomUUID(),
+        channel: ctx.channelId,
+        message_id: ctx.messageId,
+        tool: name,
+        agent_depth: ctx.depth,
         ultra_mode: this.runtime.resolve(ctx.guildId, ctx.userId).ultra_mode,
         multi_agent: this.runtime.resolve(ctx.guildId, ctx.userId).multi_agent,
-        agent_role: ctx.agentRole ?? null };
+        agent_role: ctx.agentRole ?? null,
+      };
       this.log?.info(fields, "Agent collaboration started");
       let ok = false;
       try {
@@ -670,7 +958,14 @@ export class ToolRegistry {
         ok = true;
         return result;
       } finally {
-        this.log?.info({ ...fields, ok, elapsed_ms: Math.round(performance.now() - started) }, "Agent collaboration finished");
+        this.log?.info(
+          {
+            ...fields,
+            ok,
+            elapsed_ms: Math.round(performance.now() - started),
+          },
+          "Agent collaboration finished",
+        );
       }
     }
     if (
@@ -700,9 +995,12 @@ export class ToolRegistry {
       };
     }
     if (
-      ["request_user_input", "UserAskQuestion", "AskUserQuestion", "ask_user_question"].includes(
-        name,
-      )
+      [
+        "request_user_input",
+        "UserAskQuestion",
+        "AskUserQuestion",
+        "ask_user_question",
+      ].includes(name)
     )
       return this.ask(a, ctx);
     if (["update_plan", "todo_write", "TodoWrite"].includes(name))
@@ -758,16 +1056,37 @@ export class ToolRegistry {
     if (/skill/.test(name)) {
       if (!this.runtime.config.skillsEnabled)
         throw new Error("Skills disabled");
-      const workflowSkill = workflowsEnabled(this.runtime.config, this.runtime.resolve(ctx.guildId, ctx.userId));
-      if (a.name === WORKFLOW_AUTHORING_SKILL && (name === "use_skill" || name === "read_skill_file")) {
+      const workflowSkill = workflowsEnabled(
+        this.runtime.config,
+        this.runtime.resolve(ctx.guildId, ctx.userId),
+      );
+      if (
+        a.name === WORKFLOW_AUTHORING_SKILL &&
+        (name === "use_skill" || name === "read_skill_file")
+      ) {
         if (!workflowSkill) throw new Error("Skill not found or disabled");
-        if (name === "read_skill_file") throw new Error(`${WORKFLOW_AUTHORING_SKILL} has no supporting files`);
+        if (name === "read_skill_file")
+          throw new Error(
+            `${WORKFLOW_AUTHORING_SKILL} has no supporting files`,
+          );
         await ctx.progress?.(`Skill: ${WORKFLOW_AUTHORING_SKILL}`);
-        return { name: WORKFLOW_AUTHORING_SKILL, description: WORKFLOW_AUTHORING_DESCRIPTION, content: this.workflowReference(ctx), files: [] };
+        return {
+          name: WORKFLOW_AUTHORING_SKILL,
+          description: WORKFLOW_AUTHORING_DESCRIPTION,
+          content: this.workflowReference(ctx),
+          files: [],
+        };
       }
       if (name === "list_skills" && workflowSkill)
-        return [...(await this.skills.execute(name, a, ctx) as Json[]),
-          { name: WORKFLOW_AUTHORING_SKILL, description: WORKFLOW_AUTHORING_DESCRIPTION, builtin: true, enabled: true }];
+        return [
+          ...((await this.skills.execute(name, a, ctx)) as Json[]),
+          {
+            name: WORKFLOW_AUTHORING_SKILL,
+            description: WORKFLOW_AUTHORING_DESCRIPTION,
+            builtin: true,
+            enabled: true,
+          },
+        ];
       if (name === "import_skill") {
         const guild = await this.client.guilds.fetch(String(a.source_guild_id));
         await guild.members.fetch(ctx.userId);
@@ -827,15 +1146,22 @@ export class ToolRegistry {
           MODEL_PRESETS.find(
             (p) => p.model === a.model && p.provider === a.provider,
           )?.id;
-        if (!a.reset && !preset && (a.preset || a.model || a.provider)) throw new Error("Unknown preset");
-        patch = a.reset ? { preset: "reset", ultra_mode: null, multi_agent: null } : {
-          ...(preset ? { preset } : {}),
-          ...(a.ultra_mode === undefined ? {} : { ultra_mode: a.ultra_mode }),
-          ...(a.multi_agent === undefined ? {} : { multi_agent: a.multi_agent }),
-          ...(a.effort === undefined
-            ? {}
-            : { effort: a.effort === "default" ? null : a.effort }),
-        };
+        if (!a.reset && !preset && (a.preset || a.model || a.provider))
+          throw new Error("Unknown preset");
+        patch = a.reset
+          ? { preset: "reset", ultra_mode: null, multi_agent: null }
+          : {
+              ...(preset ? { preset } : {}),
+              ...(a.ultra_mode === undefined
+                ? {}
+                : { ultra_mode: a.ultra_mode }),
+              ...(a.multi_agent === undefined
+                ? {}
+                : { multi_agent: a.multi_agent }),
+              ...(a.effort === undefined
+                ? {}
+                : { effort: a.effort === "default" ? null : a.effort }),
+            };
       }
       if (name === "set_thread_history")
         patch = {
@@ -910,8 +1236,11 @@ export class ToolRegistry {
           ctx.signal?.throwIfAborted();
           const args = { ...f, overwrite: a.overwrite };
           this.jevActions.set(ctx, { name: "write_file", args });
-          try { results.push(await this.execute("write_file", args, ctx)); }
-          finally { this.jevActions.delete(ctx); }
+          try {
+            results.push(await this.execute("write_file", args, ctx));
+          } finally {
+            this.jevActions.delete(ctx);
+          }
         }
         return { ok: true, files: results };
       }

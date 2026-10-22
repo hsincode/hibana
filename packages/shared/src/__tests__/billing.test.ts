@@ -18,8 +18,17 @@ describe("billing month", () => {
   });
 
   test("runs from the 5th to the next 5th, which is not part of it", () => {
-    expect(billingBounds("2026-10")).toEqual({ start: "2026-10-05", end: "2026-11-05" });
-    expect(billingBounds("2026-12")).toEqual({ start: "2026-12-05", end: "2027-01-05" });
-    expect(billingBounds("2026-02")).toEqual({ start: "2026-02-05", end: "2026-03-05" });
+    expect(billingBounds("2026-10")).toEqual({
+      start: "2026-10-05",
+      end: "2026-11-05",
+    });
+    expect(billingBounds("2026-12")).toEqual({
+      start: "2026-12-05",
+      end: "2027-01-05",
+    });
+    expect(billingBounds("2026-02")).toEqual({
+      start: "2026-02-05",
+      end: "2026-03-05",
+    });
   });
 });

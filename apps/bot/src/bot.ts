@@ -14,7 +14,14 @@ import type { Config, Selection } from "./config";
 import { Runtime } from "./runtime";
 import { LlmClient, nativeSearchFor } from "./llm";
 import { providerFailureNotice, ProviderError } from "./llm-errors";
-import { checkpointSnapshot, checkpointInScope, resumeCheckpoint, resumeNote, resumesAtStart, type Checkpoint } from "./checkpoint";
+import {
+  checkpointSnapshot,
+  checkpointInScope,
+  resumeCheckpoint,
+  resumeNote,
+  resumesAtStart,
+  type Checkpoint,
+} from "./checkpoint";
 import { Agent, type AgentOptions } from "./agent";
 import { MultiAgentSession } from "./multi-agent";
 import { History } from "./history";
@@ -25,7 +32,12 @@ import { Voice } from "./voice";
 import { commands, handleCommand } from "./commands";
 import { imagePrompt, shouldRespond, splitMessage } from "./triggers";
 import { assemblePrompt } from "./harness";
-import { conversationKey, harnessFor, keyHarness, workspaceVariant } from "./workspace/select";
+import {
+  conversationKey,
+  harnessFor,
+  keyHarness,
+  workspaceVariant,
+} from "./workspace/select";
 import { Workspace, type WorkspaceDeps } from "./workspace";
 import { atomicJson, readJson, Serial } from "./io";
 import { UsageLedger } from "./usage-ledger";
@@ -35,8 +47,21 @@ import {
   type FailureCode,
   type FailurePhase,
 } from "./failure";
-import { addUsage, emptyUsage, type Context, type Message, type Usage } from "./types";
-import { budgetHeader, isAutoRoute, namesModel, routeFallback, routeHeader, RouteMemory } from "./auto-route";
+import {
+  addUsage,
+  emptyUsage,
+  type Context,
+  type Message,
+  type Usage,
+} from "./types";
+import {
+  budgetHeader,
+  isAutoRoute,
+  namesModel,
+  routeFallback,
+  routeHeader,
+  RouteMemory,
+} from "./auto-route";
 import { BUDGET_FALLBACK_PROVIDER } from "@hibana/shared/budget";
 import {
   hasUltracodeKeyword,
@@ -118,7 +143,12 @@ export class Hibana {
     private log: Logger,
     /** Tests reach the Workspace API through their own `fetch`; the smoke
      *  script names what its bot creates (`identity`). */
-    options: { workspace?: Pick<WorkspaceDeps, "fetch" | "now" | "sleep" | "limits" | "identity"> } = {},
+    options: {
+      workspace?: Pick<
+        WorkspaceDeps,
+        "fetch" | "now" | "sleep" | "limits" | "identity"
+      >;
+    } = {},
   ) {
     this.client = new Client({
       intents: [
@@ -138,9 +168,9 @@ export class Hibana {
       (e) => this.report(e),
     );
     this.llm = new LlmClient(config, fetch, {
-      budgetSelection: selection => this.runtime.budgetSelection(selection),
-      onRetry: notice => this.log.warn(notice, "LLM reconnecting"),
-      onCompletion: record => {
+      budgetSelection: (selection) => this.runtime.budgetSelection(selection),
+      onRetry: (notice) => this.log.warn(notice, "LLM reconnecting"),
+      onCompletion: (record) => {
         this.log.info(record, "LLM request completed");
         this.usage.record(record);
       },
@@ -148,10 +178,17 @@ export class Hibana {
     this.agent = new Agent(this.llm);
     // Opened in start(): until then, and if the file cannot be opened, both
     // stay in process memory.
-    this.conversations = new ConversationStore(config.conversationDbPath, (e) => this.report(e));
+    this.conversations = new ConversationStore(config.conversationDbPath, (e) =>
+      this.report(e),
+    );
     this.history = new History(config, this.conversations);
     this.routes = new RouteMemory(Date.now, this.conversations);
-    this.tools = new ToolRegistry(this.runtime, this.client, this.agent, this.log);
+    this.tools = new ToolRegistry(
+      this.runtime,
+      this.client,
+      this.agent,
+      this.log,
+    );
     this.sync = new WebSync(this.runtime, this.tools, (e) => this.report(e));
     this.voice = new Voice(
       this.runtime,
@@ -163,12 +200,22 @@ export class Hibana {
     this.runtime.onChange = (id) => this.history.clearGuild(id);
     this.runtime.onBudgetChange = (state) => {
       if (!state.low) this.budgetAnnounced.clear();
-      this.log.info({ ...state, fallback: state.low ? this.runtime.budgetFallback() : null },
-        state.low ? "Budget fallback started" : "Budget fallback ended");
+      this.log.info(
+        {
+          ...state,
+          fallback: state.low ? this.runtime.budgetFallback() : null,
+        },
+        state.low ? "Budget fallback started" : "Budget fallback ended",
+      );
     };
     this.workspace = new Workspace(config, {
-      runtime: this.runtime, tools: this.tools, store: this.conversations, log: this.log,
-      report: (e) => this.report(e), shutdown: this.shutdown.signal, ...options.workspace,
+      runtime: this.runtime,
+      tools: this.tools,
+      store: this.conversations,
+      log: this.log,
+      report: (e) => this.report(e),
+      shutdown: this.shutdown.signal,
+      ...options.workspace,
     });
     // A conversation that ends here ends its cloud session too: `/clear`, a
     // deleted channel, a changed model, an expired thread.
@@ -179,7 +226,8 @@ export class Hibana {
     this.log.error(
       {
         error: error instanceof Error ? error.message : String(error),
-        provider_diagnostics: error instanceof ProviderError ? error.diagnostics : undefined,
+        provider_diagnostics:
+          error instanceof ProviderError ? error.diagnostics : undefined,
         ...failure,
       },
       "Hibana operation failed",
@@ -196,7 +244,10 @@ export class Hibana {
     this.conversations.open();
     if (this.conversations.opened) {
       this.routes.prune();
-      this.log.info(this.conversations.stats() ?? {}, "Conversation store opened");
+      this.log.info(
+        this.conversations.stats() ?? {},
+        "Conversation store opened",
+      );
     }
     await this.runtime.load();
     await this.tools.load();
@@ -209,7 +260,9 @@ export class Hibana {
     // against it: while it is unread, Workspace turns are refused.
     await this.workspace.load().catch((e) => this.report(e));
     this.client.on(Events.Error, (e) => this.report(e));
-    this.client.on(Events.GuildCreate, (guild) => this.track(this.runtime.initializeGuild(guild.id)));
+    this.client.on(Events.GuildCreate, (guild) =>
+      this.track(this.runtime.initializeGuild(guild.id)),
+    );
     this.client.on(Events.MessageCreate, (m) => this.track(this.onMessage(m)));
     this.client.on(Events.InteractionCreate, (i) => {
       if (i.isAutocomplete()) {
@@ -261,7 +314,8 @@ export class Hibana {
     // guild's settings, the command registration).
     const swept = this.workspace.sweep();
     this.track(swept);
-    for (const id of this.client.guilds.cache.keys()) await this.runtime.initializeGuild(id);
+    for (const id of this.client.guilds.cache.keys())
+      await this.runtime.initializeGuild(id);
     const applicationId = this.client.application!.id;
     await this.client.rest.put(
       this.config.commandGuildId
@@ -281,7 +335,11 @@ export class Hibana {
     for (const cp of Object.values(this.checkpoints)) {
       if (!resumesAtStart(cp)) continue;
       const ctx = { ...cp.ctx, botId: this.client.user!.id };
-      this.track(keyHarness(cp.selectionKey) === "workspace" ? swept.then(() => this.retry(ctx)) : this.retry(ctx));
+      this.track(
+        keyHarness(cp.selectionKey) === "workspace"
+          ? swept.then(() => this.retry(ctx))
+          : this.retry(ctx),
+      );
     }
   }
   private async onMessage(m: DiscordMessage) {
@@ -347,11 +405,21 @@ export class Hibana {
     const text = `${m.content}\n\n[author: ${m.member?.displayName ?? m.author.displayName}; user_id: ${m.author.id}; channel_id: ${m.channelId}; message_id: ${m.id}]${attachments.length ? "\nAttachments: " + attachments.map((a) => JSON.stringify({ id: a.id, filename: a.name, url: a.url, bytes: a.size })).join("\n") : ""}`;
     // Claude Code honours "ultracode" only in a prompt a person typed. Bot
     // authors never reach here, and voice transcripts do not use this path.
-    const keyword = this.config.ultracodeKeywordTrigger && hasUltracodeKeyword(m.content) &&
-      workflowsEnabled(this.config, this.runtime.resolve(m.guildId ?? undefined, m.author.id));
+    const keyword =
+      this.config.ultracodeKeywordTrigger &&
+      hasUltracodeKeyword(m.content) &&
+      workflowsEnabled(
+        this.config,
+        this.runtime.resolve(m.guildId ?? undefined, m.author.id),
+      );
     const current = this.active.get(m.channelId);
     if (current?.accepting && current.userId === m.author.id) {
-      const prompt: Message = { role: "user", content: text, images, turnStart: true };
+      const prompt: Message = {
+        role: "user",
+        content: text,
+        images,
+        turnStart: true,
+      };
       if (keyword) {
         this.keywordPrompts.add(prompt);
         current.ctx.workflowKeyword = true;
@@ -381,9 +449,13 @@ export class Hibana {
       this.runtime.guild(ctx.guildId).bot_disabled
     )
       return;
-    const channel = await this.tools.discord.authorizeChannel(ctx, ctx.channelId);
+    const channel = await this.tools.discord.authorizeChannel(
+      ctx,
+      ctx.channelId,
+    );
     if (!channel.isSendable()) throw new Error("Channel is not sendable");
-    const suppress = this.runtime.resolve(ctx.guildId, ctx.userId).suppress_embeds
+    const suppress = this.runtime.resolve(ctx.guildId, ctx.userId)
+      .suppress_embeds
       ? 4
       : undefined;
     const reply = (content: string) =>
@@ -433,7 +505,11 @@ export class Hibana {
       this.history.get(
         ctx.channelId,
         ctx.guildId,
-        conversationKey(settings.selection, harness, workspaceVariant(settings)),
+        conversationKey(
+          settings.selection,
+          harness,
+          workspaceVariant(settings),
+        ),
         ctx.thread,
         settings.thread_history_max_age_secs ?? this.config.threadHistoryAge,
       );
@@ -469,10 +545,17 @@ export class Hibana {
   /** Claude Code autoloads the workflow-authoring skill on a keyword turn
    *  or with the full Ultracode reminder, unless the conversation already
    *  holds it. Without a skill tool the Workflow description embeds it. */
-  private authoringReference(ctx: Context, state: Active, messages: Message[] = []): Message[] {
+  private authoringReference(
+    ctx: Context,
+    state: Active,
+    messages: Message[] = [],
+  ): Message[] {
     if (!this.tools.workflowSkillAvailable()) return [];
-    const content = workflowAuthoringAutoload(this.tools.workflowReference(ctx));
-    if (state.referenceLoaded || messages.some((m) => m.content === content)) return [];
+    const content = workflowAuthoringAutoload(
+      this.tools.workflowReference(ctx),
+    );
+    if (state.referenceLoaded || messages.some((m) => m.content === content))
+      return [];
     state.referenceLoaded = true;
     return [{ role: "user", internal: true, content }];
   }
@@ -501,9 +584,17 @@ export class Hibana {
     historyStart: number,
     selectionKey: string,
   ) {
-    const snapshot = checkpointSnapshot(ctx, messages, historyStart, selectionKey);
+    const snapshot = checkpointSnapshot(
+      ctx,
+      messages,
+      historyStart,
+      selectionKey,
+    );
     await this.checkpointSerial.run(async () => {
-      const next = { ...this.checkpoints, [`${ctx.channelId}/${ctx.userId}`]: snapshot };
+      const next = {
+        ...this.checkpoints,
+        [`${ctx.channelId}/${ctx.userId}`]: snapshot,
+      };
       // Persist the detached snapshot before advertising resumable progress.
       await atomicJson(this.checkpointPath, next);
       this.checkpoints = next;
@@ -556,24 +647,23 @@ export class Hibana {
       ? 4
       : undefined;
     const discordPosts = new Serial();
-    const editable = (holder: { message?: DiscordMessage }) =>
-      (text: string) =>
-        discordPosts.run(async () => {
-          const content = text.slice(0, 1900);
-          if (holder.message) {
-            await holder.message.edit({
-              content,
-              allowedMentions: { parse: [] },
-            });
-            return;
-          }
-          // Serialize the first send so parallel starts do not each post a copy.
-          holder.message = await channel.send({
+    const editable = (holder: { message?: DiscordMessage }) => (text: string) =>
+      discordPosts.run(async () => {
+        const content = text.slice(0, 1900);
+        if (holder.message) {
+          await holder.message.edit({
             content,
             allowedMentions: { parse: [] },
-            flags: suppressEmbeds,
           });
+          return;
+        }
+        // Serialize the first send so parallel starts do not each post a copy.
+        holder.message = await channel.send({
+          content,
+          allowedMentions: { parse: [] },
+          flags: suppressEmbeds,
         });
+      });
     ctx.progress = editable({});
     // Jev task status is its own message so parent thinking edits do not erase
     // it, and later run_jev_task calls in this turn edit instead of stacking.
@@ -615,34 +705,63 @@ export class Hibana {
     // off changes the effort sent, not the conversation (Claude Code keeps it).
     // A Workspace key also names its path and its variant: the session's
     // agent is fixed, and no other provider's turns continue it.
-    const key = conversationKey(settings.selection, harness, workspaceVariant(settings));
+    const key = conversationKey(
+      settings.selection,
+      harness,
+      workspaceVariant(settings),
+    );
     const ultracode = settings.ultracode;
     // While the month's budget is low, an Anthropic API turn runs on the
     // fallback (#89), auto preset included: Jev is not asked for a route the
     // request would not use. LlmClient swaps every request the same way; this
     // only makes the turn's log and notice say so.
-    const budgetFallback = !workspace && settings.selection.provider === BUDGET_FALLBACK_PROVIDER &&
-      this.runtime.budgetLow() ? this.runtime.budgetFallback() : undefined;
+    const budgetFallback =
+      !workspace &&
+      settings.selection.provider === BUDGET_FALLBACK_PROVIDER &&
+      this.runtime.budgetLow()
+        ? this.runtime.budgetFallback()
+        : undefined;
     // An auto preset is replaced below, once the history is known.
-    let selection = budgetFallback ?? turnSelection(settings.selection, ultracode);
+    let selection =
+      budgetFallback ?? turnSelection(settings.selection, ultracode);
     const started = Date.now();
-    this.log.info({ channel: ctx.channelId, message_id: ctx.messageId,
-      settings_version: this.runtime.snapshot.version, provider: selection.provider,
-      model: selection.model, effort: selection.effort ?? null, subagent_enabled: settings.subagent_enabled,
-      ultra_mode: settings.ultra_mode, multi_agent: settings.multi_agent, ultracode,
-      workflow_keyword: !!ctx.workflowKeyword, jev_enabled: settings.jev_enabled,
-      jev_task_enabled: settings.jev_task_enabled, budget_fallback: Boolean(budgetFallback) }, "Turn started");
+    this.log.info(
+      {
+        channel: ctx.channelId,
+        message_id: ctx.messageId,
+        settings_version: this.runtime.snapshot.version,
+        provider: selection.provider,
+        model: selection.model,
+        effort: selection.effort ?? null,
+        subagent_enabled: settings.subagent_enabled,
+        ultra_mode: settings.ultra_mode,
+        multi_agent: settings.multi_agent,
+        ultracode,
+        workflow_keyword: !!ctx.workflowKeyword,
+        jev_enabled: settings.jev_enabled,
+        jev_task_enabled: settings.jev_task_enabled,
+        budget_fallback: Boolean(budgetFallback),
+      },
+      "Turn started",
+    );
     // A Workspace turn works in the session's container, not in the sandbox.
-    const releaseWorkspace = workspace ? () => {} : this.tools.sandbox.lease(ctx);
+    const releaseWorkspace = workspace
+      ? () => {}
+      : this.tools.sandbox.lease(ctx);
     let failurePhase: FailurePhase = "history_read";
     let checkpointPersisted = false;
     try {
-      const candidate = retry ?? this.checkpoints[`${ctx.channelId}/${ctx.userId}`];
-      const pending = candidate && checkpointInScope(candidate, ctx) && Date.now() - candidate.at < 7200000
+      const candidate =
+        retry ?? this.checkpoints[`${ctx.channelId}/${ctx.userId}`];
+      const pending =
+        candidate &&
+        checkpointInScope(candidate, ctx) &&
+        Date.now() - candidate.at < 7200000 &&
         // A checkpoint written on the other path is not resumed here (a
         // Workspace one holds no conversation at all); it is left to expire.
-        && keyHarness(candidate.selectionKey) === harness
-        ? candidate : undefined;
+        keyHarness(candidate.selectionKey) === harness
+          ? candidate
+          : undefined;
       checkpointPersisted = Boolean(pending);
       if (retry && !pending) throw new Error("再開できる作業はありません。");
       if (pending) ctx.delivered = pending.ctx.delivered;
@@ -651,7 +770,8 @@ export class Hibana {
         // picked up without a new message is counted before it runs, so a bot
         // that keeps restarting resumes it once and then waits for `/retry`.
         const mark = pending?.ctx.workspaceMark;
-        ctx.workspaceMark = mark && !text ? { ...mark, resumes: mark.resumes + 1 } : mark;
+        ctx.workspaceMark =
+          mark && !text ? { ...mark, resumes: mark.resumes + 1 } : mark;
       } else delete ctx.workspaceMark;
       let prior = this.history.get(
         ctx.channelId,
@@ -680,7 +800,9 @@ export class Hibana {
       let routeUsage: Usage | undefined;
       if (budgetFallback && !this.budgetAnnounced.has(ctx.channelId)) {
         this.budgetAnnounced.add(ctx.channelId);
-        await send(budgetHeader(budgetFallback, this.runtime.budgetThreshold()));
+        await send(
+          budgetHeader(budgetFallback, this.runtime.budgetThreshold()),
+        );
       }
       if (isAutoRoute(settings.selection) && !budgetFallback) {
         const route = await this.autoRoute(ctx, text, prior, pending);
@@ -692,29 +814,51 @@ export class Hibana {
         if (route.announce) await send(routeHeader(selection));
       }
       failurePhase = "prompt_assembly";
-      const prefix = workspace ? [] : await assemblePrompt(
-        this.runtime,
-        ctx,
-        this.config.skillsEnabled ? await this.tools.skillCatalog(ctx) : "",
-      );
-      const resumed = pending && !workspace ? resumeCheckpoint(pending, prefix, settings.selection) : undefined;
+      const prefix = workspace
+        ? []
+        : await assemblePrompt(
+            this.runtime,
+            ctx,
+            this.config.skillsEnabled ? await this.tools.skillCatalog(ctx) : "",
+          );
+      const resumed =
+        pending && !workspace
+          ? resumeCheckpoint(pending, prefix, settings.selection)
+          : undefined;
       // Workspace: only what the person wrote for this turn, as the local
       // record of it. An attempt that did not finish left its messages in the
       // checkpoint; earlier turns are in the session and are not sent again.
-      const messages: Message[] = workspace ? structuredClone(pending?.messages ?? []) : resumed?.messages ?? [...prefix, ...prior];
-      const seed = workspace ? 0 : resumed?.historyStart ?? messages.length;
+      const messages: Message[] = workspace
+        ? structuredClone(pending?.messages ?? [])
+        : (resumed?.messages ?? [...prefix, ...prior]);
+      const seed = workspace ? 0 : (resumed?.historyStart ?? messages.length);
       if (workspace) {
-        if (text) messages.push({ role: "user", content: text, images: ctx.images, turnStart: true });
+        if (text)
+          messages.push({
+            role: "user",
+            content: text,
+            images: ctx.images,
+            turnStart: true,
+          });
       } else if (text) {
         // Claude Code attaches these system reminders to a typed prompt only
         // while dynamic workflows are on; /retry resumes add none.
         const workflows = workflowsEnabled(this.config, settings);
-        const reminder = workflows ? ultracodeReminder(messages, ultracode) : undefined;
-        messages.push({ role: "user", content: text, images: ctx.images, turnStart: true });
-        if (workflows && ctx.workflowKeyword) messages.push(workflowKeywordReminder());
+        const reminder = workflows
+          ? ultracodeReminder(messages, ultracode)
+          : undefined;
+        messages.push({
+          role: "user",
+          content: text,
+          images: ctx.images,
+          turnStart: true,
+        });
+        if (workflows && ctx.workflowKeyword)
+          messages.push(workflowKeywordReminder());
         if (reminder) messages.push(reminder);
         const full = reminder?.content === systemReminder(ULTRACODE_ENTER_FULL);
-        if (workflows && (ctx.workflowKeyword || full)) messages.push(...this.authoringReference(ctx, state, messages));
+        if (workflows && (ctx.workflowKeyword || full))
+          messages.push(...this.authoringReference(ctx, state, messages));
       } else {
         // /retry: nothing follows the saved history, so it must not end on
         // the assistant's own draft.
@@ -743,10 +887,17 @@ export class Hibana {
         execute: (name, args, c) => this.tools.execute(name, args, c),
         checkpoint: (messages) => this.saveCheckpoint(ctx, messages, seed, key),
         takeSteering: () => {
-          const pending = state.pending.splice(0).flatMap((m) =>
-            this.keywordPrompts.has(m)
-              ? [m, workflowKeywordReminder(), ...this.authoringReference(ctx, state)]
-              : [m]);
+          const pending = state.pending
+            .splice(0)
+            .flatMap((m) =>
+              this.keywordPrompts.has(m)
+                ? [
+                    m,
+                    workflowKeywordReminder(),
+                    ...this.authoringReference(ctx, state),
+                  ]
+                : [m],
+            );
           if (state.request.signal.aborted)
             state.request = new AbortController();
           return pending;
@@ -757,22 +908,38 @@ export class Hibana {
       // A Workspace turn is the session's own loop.
       const result = workspace
         ? await this.workspace.turn({
-          ctx, settings, key, messages, text, resume: ctx.workspaceMark, steering: state.request.signal,
-          // From here on a restart continues the message instead of sending it again.
-          onSent: async (mark) => {
-            ctx.workspaceMark = mark;
-            await this.saveCheckpoint(ctx, messages, seed, key);
-          },
-        })
-        : this.config.toolsEnabled && this.config.subagentEnabled && settings.subagent_enabled
-        ? await new MultiAgentSession(this.runtime, this.agent, c => this.tools.tools(c), {
-          // A resumed checkpoint continues earlier work; a fresh triage could
-          // pre-start an explorer that repeats research already in the history.
-          triage: pending ? undefined : (c, m) => this.tools.triage(c, m),
-          log: this.log,
-          workflows: { journals: this.tools.workflowJournals, files: this.tools.workflowFiles },
-        }).runRoot(options)
-        : await this.agent.run(options);
+            ctx,
+            settings,
+            key,
+            messages,
+            text,
+            resume: ctx.workspaceMark,
+            steering: state.request.signal,
+            // From here on a restart continues the message instead of sending it again.
+            onSent: async (mark) => {
+              ctx.workspaceMark = mark;
+              await this.saveCheckpoint(ctx, messages, seed, key);
+            },
+          })
+        : this.config.toolsEnabled &&
+            this.config.subagentEnabled &&
+            settings.subagent_enabled
+          ? await new MultiAgentSession(
+              this.runtime,
+              this.agent,
+              (c) => this.tools.tools(c),
+              {
+                // A resumed checkpoint continues earlier work; a fresh triage could
+                // pre-start an explorer that repeats research already in the history.
+                triage: pending ? undefined : (c, m) => this.tools.triage(c, m),
+                log: this.log,
+                workflows: {
+                  journals: this.tools.workflowJournals,
+                  files: this.tools.workflowFiles,
+                },
+              },
+            ).runRoot(options)
+          : await this.agent.run(options);
       if (routeUsage) addUsage(result.usage, routeUsage);
       // The turn's last request renewed the cache this route is kept for.
       if (!workspace) this.routes.touch(ctx.channelId);
@@ -780,13 +947,16 @@ export class Hibana {
       const queued = state.pending.splice(0);
       // Workspace: what the person added meanwhile is answered in one turn. A
       // turn for each would bring its own allowance and re-read the session.
-      const next: Message[] = workspace && queued.length > 1
-        ? [{
-          role: "user",
-          content: queued.map((m) => m.content ?? "").join("\n\n"),
-          images: queued.flatMap((m) => m.images ?? []).slice(0, 4),
-        }]
-        : queued;
+      const next: Message[] =
+        workspace && queued.length > 1
+          ? [
+              {
+                role: "user",
+                content: queued.map((m) => m.content ?? "").join("\n\n"),
+                images: queued.flatMap((m) => m.images ?? []).slice(0, 4),
+              },
+            ]
+          : queued;
       for (const pending of next)
         this.track(
           this.respond(pending.content ?? "", {
@@ -806,7 +976,12 @@ export class Hibana {
       );
       // A Workspace thread's record is never summarized or sent anywhere; it
       // is only kept from growing without end.
-      if (workspace && ctx.thread && this.history.info(ctx.channelId).estimated_tokens > this.config.historyMaxTokens)
+      if (
+        workspace &&
+        ctx.thread &&
+        this.history.info(ctx.channelId).estimated_tokens >
+          this.config.historyMaxTokens
+      )
         this.history.shrink(ctx.channelId);
       failurePhase = "checkpoint_clear";
       await this.clearCheckpoint(ctx);
@@ -852,7 +1027,12 @@ export class Hibana {
       if (!this.shutdown.signal.aborted) {
         const failureCode = classifyFailure(error, failurePhase);
         const httpStatus = httpStatusOf(error);
-        if (!workspace && error instanceof ProviderError && error.kind === "context_length") this.history.shrink(ctx.channelId);
+        if (
+          !workspace &&
+          error instanceof ProviderError &&
+          error.kind === "context_length"
+        )
+          this.history.shrink(ctx.channelId);
         const failureReport: FailureReport = {
           failure_code: failureCode,
           failure_phase: failurePhase,
@@ -889,17 +1069,20 @@ export class Hibana {
         }
         state.accepting = false;
         const reason = providerFailureNotice(error) ?? "処理に失敗しました。";
-        await send(reason + (
-          checkpointPersisted
-            ? " 進捗を保存しました。`/retry` または次のメッセージで再開できます。"
-            : " 設定を確認してもう一度送信してください。"
-        ));
+        await send(
+          reason +
+            (checkpointPersisted
+              ? " 進捗を保存しました。`/retry` または次のメッセージで再開できます。"
+              : " 設定を確認してもう一度送信してください。"),
+        );
       }
       return "";
     } finally {
       // Cleanup is tied to the turn, including cancellation and tool errors;
       // model instructions alone cannot guarantee disconnection after work.
-      await this.tools.media.finishHome(ctx).catch(error => this.report(error));
+      await this.tools.media
+        .finishHome(ctx)
+        .catch((error) => this.report(error));
       releaseWorkspace();
       clearInterval(timer);
       this.active.delete(ctx.channelId);
@@ -908,7 +1091,12 @@ export class Hibana {
   /** Auto routing (#35). A route Jev chose stays while the conversation and
    *  its prompt cache can still be continued; the fallback is never kept, so
    *  the next turn asks Jev again. */
-  private async autoRoute(ctx: Context, text: string | undefined, prior: Message[], pending?: Checkpoint) {
+  private async autoRoute(
+    ctx: Context,
+    text: string | undefined,
+    prior: Message[],
+    pending?: Checkpoint,
+  ) {
     const carried = prior.length > 0 || Boolean(pending);
     const kept = carried ? this.routes.live(ctx.channelId) : undefined;
     let usage: Usage | undefined;
@@ -917,29 +1105,49 @@ export class Hibana {
     // While a route is kept, Jev is asked only when the message names a
     // model, and only a model the user requested replaces the route.
     if (!kept || namesModel(text)) {
-      const decided = await this.tools.route(ctx, text
-        ? [...prior, { role: "user", content: text, images: ctx.images }]
-        : pending?.messages ?? prior);
+      const decided = await this.tools.route(
+        ctx,
+        text
+          ? [...prior, { role: "user", content: text, images: ctx.images }]
+          : (pending?.messages ?? prior),
+      );
       usage = decided?.usage;
       if (!kept) {
-        source = decided ? decided.requested ? "requested" : "jev" : "fallback";
+        source = decided
+          ? decided.requested
+            ? "requested"
+            : "jev"
+          : "fallback";
         selection = decided?.selection ?? routeFallback();
       } else if (decided?.requested && decided.selection.model !== kept.model) {
         source = "requested";
         selection = decided.selection;
       }
-      if (selection && source !== "fallback" && source !== "kept") this.routes.set(ctx.channelId, selection);
+      if (selection && source !== "fallback" && source !== "kept")
+        this.routes.set(ctx.channelId, selection);
       else if (!kept) this.routes.clear(ctx.channelId);
     }
     selection ??= routeFallback();
     // A fallback is chosen again on every turn while Jev is unavailable, so
     // only the first of a run in one conversation is announced.
-    const repeated = source === "fallback" && carried && this.fallbackAnnounced.has(ctx.channelId);
+    const repeated =
+      source === "fallback" &&
+      carried &&
+      this.fallbackAnnounced.has(ctx.channelId);
     if (source === "fallback") this.fallbackAnnounced.add(ctx.channelId);
     else if (source !== "kept") this.fallbackAnnounced.delete(ctx.channelId);
     const announce = source !== "kept" && !repeated;
-    this.log.info({ channel: ctx.channelId, message_id: ctx.messageId, source, announced: announce,
-      model: selection.model, effort: selection.effort ?? null }, "Auto route selected");
+    this.log.info(
+      {
+        channel: ctx.channelId,
+        message_id: ctx.messageId,
+        source,
+        announced: announce,
+        model: selection.model,
+        effort: selection.effort ?? null,
+      },
+      "Auto route selected",
+    );
     return { selection, usage, announce };
   }
   async close() {

@@ -12,9 +12,12 @@ export interface RelayEnv {
   readyTimeoutMs: number;
 }
 
-export function loadEnv(source: Record<string, string | undefined> = process.env): RelayEnv {
+export function loadEnv(
+  source: Record<string, string | undefined> = process.env,
+): RelayEnv {
   const timeout = Number(source.RELAY_READY_TIMEOUT_MS ?? 90_000);
-  if (!Number.isFinite(timeout) || timeout <= 0) throw new Error("RELAY_READY_TIMEOUT_MS must be a positive number");
+  if (!Number.isFinite(timeout) || timeout <= 0)
+    throw new Error("RELAY_READY_TIMEOUT_MS must be a positive number");
   return {
     bind: source.RELAY_BIND ?? "127.0.0.1:8790",
     appDir: source.RELAY_APP_DIR ?? "/opt/hibana",

@@ -4,14 +4,14 @@
 
 ほかのプロバイダーのターンは、これまでどおり bot 自身のループ（`Agent.run`）で動きます。どちらで動くかは、ターンのプロバイダーだけで決まります（`apps/bot/src/workspace/select.ts` の `harnessFor`）。
 
-| | ほかのプロバイダー | `anthropic_workspace` |
-|---|---|---|
-| ループを回すもの | Hibana（`Agent.run`） | Anthropic（Managed Agents のセッション） |
-| システムプロンプト | `apps/bot/prompts/harness/codex.md` と `apps/bot/prompt.md` | `apps/bot/prompts/harness/workspace.md`。Haiku Ultra のセッションは `workspace-ultra.md` を後ろに足す |
-| ツール | シェルとファイルのツールと、`mcp__` 名の統合ツール全件 | Managed Agents の組み込みの 8 個（`bash`・`read` など）と、Hibana のツール最大 76 個（custom tool。`mcp__` を付けない名前） |
-| 作業領域 | bot の機械の Docker サンドボックス。サーバーの通常のチャンネルは 1 つを共有する | Anthropic のクラウドのコンテナ。チャンネル・スレッド・DM ごとに別 |
-| 会話の縮め方 | 古いターンを落とす。スレッドは古い側を要約する | Anthropic 側が持つ。bot は会話を送り直さない |
-| サブエージェント | off / on / ultra / multi（`docs/multi-agent.md`、`docs/ultracode.md`）。`anthropic` は off（#35） | Hibana の委譲は無い。Haiku 5.5 で ultra のときだけ、Managed Agents の dynamic workflows（[Haiku Ultra](#haiku-ultra)） |
+|                    | ほかのプロバイダー                                                                                | `anthropic_workspace`                                                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| ループを回すもの   | Hibana（`Agent.run`）                                                                             | Anthropic（Managed Agents のセッション）                                                                                    |
+| システムプロンプト | `apps/bot/prompts/harness/codex.md` と `apps/bot/prompt.md`                                       | `apps/bot/prompts/harness/workspace.md`。Haiku Ultra のセッションは `workspace-ultra.md` を後ろに足す                       |
+| ツール             | シェルとファイルのツールと、`mcp__` 名の統合ツール全件                                            | Managed Agents の組み込みの 8 個（`bash`・`read` など）と、Hibana のツール最大 76 個（custom tool。`mcp__` を付けない名前） |
+| 作業領域           | bot の機械の Docker サンドボックス。サーバーの通常のチャンネルは 1 つを共有する                   | Anthropic のクラウドのコンテナ。チャンネル・スレッド・DM ごとに別                                                           |
+| 会話の縮め方       | 古いターンを落とす。スレッドは古い側を要約する                                                    | Anthropic 側が持つ。bot は会話を送り直さない                                                                                |
+| サブエージェント   | off / on / ultra / multi（`docs/multi-agent.md`、`docs/ultracode.md`）。`anthropic` は off（#35） | Hibana の委譲は無い。Haiku 5.5 で ultra のときだけ、Managed Agents の dynamic workflows（[Haiku Ultra](#haiku-ultra)）      |
 
 ほかのプロバイダーのターンが送るもの（ツール一覧・プロンプト・設定の解決結果）は、Workspace の鍵を設定してプリセットを公開した状態でも、鍵の無いときとバイト単位で同じです（`workspace-settings.test.ts`）。既存のプロンプトとツール定義のファイル（`prompt.md`、`prompts/harness/codex.md`、`tools/definitions.json`、`tools/codex-definitions.json`）は変えていません。
 
@@ -41,7 +41,6 @@
 - 認証情報は `ANTHROPIC_WORKSPACE_API_KEY` だけです。`ANTHROPIC_API_KEY` は使いません
 - 公式 SDK（`@anthropic-ai/sdk`、0.133.0 に固定）を、この経路だけで使います。ほかのプロバイダーの送受信は従来の実装のままです
 
-
 ## プロンプト
 
 - **システムプロンプト**は `apps/bot/prompts/harness/workspace.md` です。Haiku Ultra のセッションでは、その後ろに `workspace-ultra.md`（workflow run をいつ始めるか、上限、止まった run の扱い）を足します。サーバー・利用者・モデルによらず同じ文字列で、セッションを作るときに渡します（100,000 字まで）。ファイルが無いときは、短い文面で続けずにターンを失敗にします
@@ -54,12 +53,12 @@
 
 ## ツール
 
-| 種類 | 中身 | bot 自身のループのツールとの違い |
-|---|---|---|
-| 組み込み（`agent_toolset_20260401`） | `bash`・`read`・`write`・`edit`・`glob`・`grep`・`web_fetch`・`web_search`。Anthropic のコンテナと Anthropic のサーバーで動く | 名前も説明も Anthropic のもの。**bot は 1 件ごとの権限チェックを挟めません**（permission policy は `always_allow`）。タイムアウトや出力の上限も Anthropic 側で決まる |
-| `send_file` | コンテナの `/mnt/session/outputs/` の下のファイルを、Files API で取り出して Discord に添付する。25 MiB まで。書いた直後のファイルは、一覧に出るまで最長 30 秒待つ | サンドボックスの `send_file` とは別の定義。outputs の下のパスだけを受ける |
-| `AskUserQuestion` | Discord のボタンで質問する | この経路のための定義（名前と入力の形は Claude Code に合わせた）。実行は bot の質問の仕組み（`request_user_input` と同じ）。workflow run の中からは使えない |
-| 統合ツール（最大 74 個） | Discord の読み取り 26 個と変更 31 個、bot の設定とプロフィール（読み取り 5 個、変更 6 個）、外部 MCP（`mcp_list_tools`・`mcp_call_tool`）、公開済みサイトの一覧・取り下げ・延長、`run_jev` | 名前に `mcp__` を付けない（custom tool の名前は `mcp__` で始められないため）。全件をセッションの作成時に渡す |
+| 種類                                 | 中身                                                                                                                                                                                       | bot 自身のループのツールとの違い                                                                                                                                     |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 組み込み（`agent_toolset_20260401`） | `bash`・`read`・`write`・`edit`・`glob`・`grep`・`web_fetch`・`web_search`。Anthropic のコンテナと Anthropic のサーバーで動く                                                              | 名前も説明も Anthropic のもの。**bot は 1 件ごとの権限チェックを挟めません**（permission policy は `always_allow`）。タイムアウトや出力の上限も Anthropic 側で決まる |
+| `send_file`                          | コンテナの `/mnt/session/outputs/` の下のファイルを、Files API で取り出して Discord に添付する。25 MiB まで。書いた直後のファイルは、一覧に出るまで最長 30 秒待つ                          | サンドボックスの `send_file` とは別の定義。outputs の下のパスだけを受ける                                                                                            |
+| `AskUserQuestion`                    | Discord のボタンで質問する                                                                                                                                                                 | この経路のための定義（名前と入力の形は Claude Code に合わせた）。実行は bot の質問の仕組み（`request_user_input` と同じ）。workflow run の中からは使えない           |
+| 統合ツール（最大 74 個）             | Discord の読み取り 26 個と変更 31 個、bot の設定とプロフィール（読み取り 5 個、変更 6 個）、外部 MCP（`mcp_list_tools`・`mcp_call_tool`）、公開済みサイトの一覧・取り下げ・延長、`run_jev` | 名前に `mcp__` を付けない（custom tool の名前は `mcp__` で始められないため）。全件をセッションの作成時に渡す                                                         |
 
 - 76 個は、サーバーの設定で使えるものが全部そろったときの数です。DM では 45 個、外部 MCP が無効なら 74 個、Jev もサイトの公開も設定していない bot では 72 個になります
 - **入れていないもの**（方針は「入れられるものは入れ、入れられないものは無理に入れない」）。どれも、bot の機械のサンドボックスにあるファイルや、bot のイメージに入ったプログラムに依るものです
@@ -92,13 +91,14 @@
 - **セッションの設定は、作ったときに固定されます。** プロンプトやツールの説明を直して配信しても、既にあるセッションは前の内容のまま動きます。ツールの一覧が変わっていることは、ログに `Workspace session keeps an older tool list` と出るだけです。web 検索の有無も同じです。`run_jev` の `images`（#83）も、追加より前に作ったセッションには無く、そのセッションでは画像を渡せません
 - セッションを作り直すのは次のときです
 
-  | きっかけ | 前のセッション |
-  |---|---|
-  | `/clear`、チャンネルやスレッドの削除 | delete（会話も作業ファイルも消える。workflow run が開いたままだと拒否されうる。「限界」） |
-  | サーバーのモデル・effort・サブエージェントのモードの変更（そのサーバーの全チャンネル）、話す人の個人設定などで会話のキーが変わったとき、スレッドの期限切れ | archive（同上） |
-  | Anthropic 側でセッションが無くなっていた（発言を送る前に分かったとき） | 1 回だけ作り直し、利用者に「新しい会話として始めます」と伝える |
+  | きっかけ                                                                                                                                                   | 前のセッション                                                                            |
+  | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+  | `/clear`、チャンネルやスレッドの削除                                                                                                                       | delete（会話も作業ファイルも消える。workflow run が開いたままだと拒否されうる。「限界」） |
+  | サーバーのモデル・effort・サブエージェントのモードの変更（そのサーバーの全チャンネル）、話す人の個人設定などで会話のキーが変わったとき、スレッドの期限切れ | archive（同上）                                                                           |
+  | Anthropic 側でセッションが無くなっていた（発言を送る前に分かったとき）                                                                                     | 1 回だけ作り直し、利用者に「新しい会話として始めます」と伝える                            |
 
   発言を送った後にセッションが無くなったときは、作り直しません（同じ依頼を 2 回実行しないため）。そのターンは失敗になります
+
 - **bot がサーバーから外されても（kick）、そのサーバーのセッションは作り直しも片付けもしません。** 行と、Anthropic 側の会話・作業ファイルは残ります（「限界」）
 - **`/clear` は作業ファイルも消します。** ほかのプロバイダーの `/clear` は会話だけを消し、サンドボックスのファイルは残すので、意味が違います（#76 の 6。未決）
 - コンテナの中身は、**セッションの作成から 30 日で失われます**。使っていても延びません（公開文書の記述）。`/context` の `workspace.container_until` に、作成から 30 日後の日時を目安として出します
@@ -112,16 +112,16 @@
 
 既存の Ultra（[Ultracode](ultracode.md)）と名前は同じですが、中身は別です。
 
-| | Ultra（Ultracode。ほかのプロバイダー） | Haiku Ultra（workspace 経路） |
-|---|---|---|
-| 働く条件 | モードが ultra（モデルを問わない） | モードが ultra で、モデルが Workspace の Haiku 5.5 |
-| 仕組み | Hibana の Workflow ツール（bot の中の QuickJS で動くスクリプト） | Managed Agents の dynamic workflows（Anthropic 側で動く） |
-| effort | xhigh に固定 | 保存値のまま |
-| 使い方 | 実質的な依頼には毎回 | 条件つき。プロンプトに「分けられる大きな仕事のときだけ」「同時に開く run は 1 つまで」と書いてある。始めるかどうかはモデルが決める |
-| キーワード `ultracode` | その回だけ有効になる | 効かない |
-| 上限 | 同時実行数と体数。金額の上限は無い | 1 ターンの金額（既定 $3）と時間（既定 60 分）。同時 64 スレッドなどは Anthropic のサーバーが決める |
-| ターンとの関係 | ターンが終われば止まる | run はセッションの中で動き続ける。bot は run が終わるまで返信を待つ |
-| run の中から使える Hibana のツール | 送信・公開・設定の変更を断る | 読み取りの 26 個だけ（Discord の読み取りのうち、管理の権限が要る 7 個を除いた 19 個と、設定・サイト・MCP の一覧の 7 個）。投稿・ファイルの送信・設定の変更・質問・`run_jev` は断る |
+|                                    | Ultra（Ultracode。ほかのプロバイダー）                           | Haiku Ultra（workspace 経路）                                                                                                                                                      |
+| ---------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 働く条件                           | モードが ultra（モデルを問わない）                               | モードが ultra で、モデルが Workspace の Haiku 5.5                                                                                                                                 |
+| 仕組み                             | Hibana の Workflow ツール（bot の中の QuickJS で動くスクリプト） | Managed Agents の dynamic workflows（Anthropic 側で動く）                                                                                                                          |
+| effort                             | xhigh に固定                                                     | 保存値のまま                                                                                                                                                                       |
+| 使い方                             | 実質的な依頼には毎回                                             | 条件つき。プロンプトに「分けられる大きな仕事のときだけ」「同時に開く run は 1 つまで」と書いてある。始めるかどうかはモデルが決める                                                 |
+| キーワード `ultracode`             | その回だけ有効になる                                             | 効かない                                                                                                                                                                           |
+| 上限                               | 同時実行数と体数。金額の上限は無い                               | 1 ターンの金額（既定 $3）と時間（既定 60 分）。同時 64 スレッドなどは Anthropic のサーバーが決める                                                                                 |
+| ターンとの関係                     | ターンが終われば止まる                                           | run はセッションの中で動き続ける。bot は run が終わるまで返信を待つ                                                                                                                |
+| run の中から使える Hibana のツール | 送信・公開・設定の変更を断る                                     | 読み取りの 26 個だけ（Discord の読み取りのうち、管理の権限が要る 7 個を除いた 19 個と、設定・サイト・MCP の一覧の 7 個）。投稿・ファイルの送信・設定の変更・質問・`run_jev` は断る |
 
 - `WORKFLOWS_ENABLED`・`SUBAGENT_ENABLED`・`TOOLS_ENABLED` のどれかが偽なら、Haiku Ultra も働きません（plain のセッションになります）
 - plain と ultra はエージェントが別なので、Ultra を切り替えるとセッションを作り直します
@@ -228,16 +228,16 @@ budget の定型文は「続けるには、もう一度メッセージを送っ�
 
 既定値と範囲は #76 の 2〜4 のとおりです。環境変数で変えます。範囲の外の値は、起動時にエラーにします。
 
-| 上限 | 環境変数 | 既定 | 達したとき |
-|---|---|---|---|
-| 1 ターンの金額 | `ANTHROPIC_WORKSPACE_TURN_BUDGET_USD`（0.05〜100） | 1 | セッションが止まり、「このターンの費用の上限（$1.00）に達したため、ここで止めました。…」と返す |
-| 同、Haiku Ultra | `ANTHROPIC_WORKSPACE_ULTRA_TURN_BUDGET_USD`（0.05〜100） | 3 | 同上 |
-| 1 日の金額（bot 全体。UTC） | `ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD`（0.01〜10000） | 5 | ターンを始めずに「…1 日の利用額の上限に達しているため、実行しませんでした。…」と返す |
-| 月の金額（bot 全体。UTC） | `ANTHROPIC_WORKSPACE_MONTHLY_BUDGET_USD`（0.01〜100000） | 50 | 同、「今月の利用額の上限」 |
-| 1 ターンの時間 | `ANTHROPIC_WORKSPACE_TURN_TIMEOUT_MS`（1〜86400000） | 1200000（20 分） | 中断して「このターンの時間の上限（20 分）に達したため、中断しました。…」と返す |
-| 同、Haiku Ultra | `ANTHROPIC_WORKSPACE_ULTRA_TURN_TIMEOUT_MS`（同） | 3600000（60 分） | 同上 |
-| 同時に動くターン（bot 全体） | `ANTHROPIC_WORKSPACE_MAX_CONCURRENT`（1〜64） | 2 | 空くまで待つ |
-| 1 回の発言の長さ | `ANTHROPIC_WORKSPACE_INPUT_MAX_CHARS`（1〜1000000） | 60000 | いちばん新しい発言 1 件が超えるときは、送らずに「メッセージが長すぎます…」と返す。まだ送っていない発言と合わせて超えるときは、新しいものから収まるだけを送り、送らなかった件数を返信に付ける（「ターンの流れ」の「再開」） |
+| 上限                         | 環境変数                                                 | 既定             | 達したとき                                                                                                                                                                                                                 |
+| ---------------------------- | -------------------------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 ターンの金額               | `ANTHROPIC_WORKSPACE_TURN_BUDGET_USD`（0.05〜100）       | 1                | セッションが止まり、「このターンの費用の上限（$1.00）に達したため、ここで止めました。…」と返す                                                                                                                             |
+| 同、Haiku Ultra              | `ANTHROPIC_WORKSPACE_ULTRA_TURN_BUDGET_USD`（0.05〜100） | 3                | 同上                                                                                                                                                                                                                       |
+| 1 日の金額（bot 全体。UTC）  | `ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD`（0.01〜10000）    | 5                | ターンを始めずに「…1 日の利用額の上限に達しているため、実行しませんでした。…」と返す                                                                                                                                       |
+| 月の金額（bot 全体。UTC）    | `ANTHROPIC_WORKSPACE_MONTHLY_BUDGET_USD`（0.01〜100000） | 50               | 同、「今月の利用額の上限」                                                                                                                                                                                                 |
+| 1 ターンの時間               | `ANTHROPIC_WORKSPACE_TURN_TIMEOUT_MS`（1〜86400000）     | 1200000（20 分） | 中断して「このターンの時間の上限（20 分）に達したため、中断しました。…」と返す                                                                                                                                             |
+| 同、Haiku Ultra              | `ANTHROPIC_WORKSPACE_ULTRA_TURN_TIMEOUT_MS`（同）        | 3600000（60 分） | 同上                                                                                                                                                                                                                       |
+| 同時に動くターン（bot 全体） | `ANTHROPIC_WORKSPACE_MAX_CONCURRENT`（1〜64）            | 2                | 空くまで待つ                                                                                                                                                                                                               |
+| 1 回の発言の長さ             | `ANTHROPIC_WORKSPACE_INPUT_MAX_CHARS`（1〜1000000）      | 60000            | いちばん新しい発言 1 件が超えるときは、送らずに「メッセージが長すぎます…」と返す。まだ送っていない発言と合わせて超えるときは、新しいものから収まるだけを送り、送らなかった件数を返信に付ける（「ターンの流れ」の「再開」） |
 
 - 金額は、セッションが報告する **list cost**（公開単価での額）です。値引きや請求の単位とは一致しないことがあります。内訳は、モデルのトークン、セッションが `running` の間の $0.08 / 時、web 検索 $10 / 1,000 回です（料金ページの記述）
 - 1 ターンの金額の上限は、Anthropic 側の session budget で置きます。bot が落ちても効きます。budget はモデルへのリクエストの間で判定されるので、**上限をまたいだリクエストは最後まで実行されます**。workflow run では、動いているスレッドごとに 1 リクエストぶん超えることがあります（公開文書の記述）
@@ -314,6 +314,7 @@ budget の定型文は「続けるには、もう一度メッセージを送っ�
   4. 前の作業の最後のイベント（文と、`end_turn` の idle）の `processed_at` が、発言の `processed_at` と同じ時刻である（秒までの精度だと、普通に並びえます。公開文書の例は、どれも秒までの精度です）
 
   このとき、時刻の比較（「より前」だけを前の作業にする）では分けられず、前の作業の最後の文が返信になり、ターンはすぐに終わります。終わるときに budget を「消費済み + 1 セント」に下げるので、発言を取り上げて動き始めた本物のターンも止まります。比較の向きを変えても直りません（同じ時刻のものを前の作業にすると、取り上げと同じ時刻に出た、このターンの呼び出しを断ることになります）。時刻ではなく一覧の順序で分ける案がありますが、実 API の時刻の精度と、一覧が同じ時刻のイベントを起きた順に返すかを smoke（「the event list, newest first」）で見てから、直し方を決めます
+
 - 400 で断られたツールの結果は、公開文書の手順（スレッドの状態を確かめる）を踏まずに、定型の error の結果を 1 回試して、それも断られたら捨てます。遅すぎた結果と、内容が受け取られなかった結果を、bot は見分けません
 - 1 日と月の判定は、多めに数える側に倒しています（新しいセッションごとに 1 セント、使用量の報告があるのに額の報告が無い区間は枠の全額、チェックポイントだけが覚えていたセッションは累計の全額）。実際より早く上限に達して、ターンを断ることがあります。チェックポイントだけが覚えていたセッションの額は、今のターンのモデルの行に足すので、モデル別の内訳は実際と違いえます
   - 少なく数える側の穴は、次の 4 つです。どの場合も、1 ターンの上限（session budget）は Anthropic 側で効きます
@@ -352,15 +353,15 @@ workspace 経路のシステムプロンプトとツールの説明は、公開�
 
 Claude Code に同梱の claude-api スキルの資料は、workspace 経路の設計の調査に使いました。そこにある例文は写していません。同梱の資料にしか無い事実（シェルの作業ディレクトリのパスなど）は、プロンプトに書いていません。
 
-| 対象 | 参照した公開文書 | 文面 |
-|---|---|---|
-| `prompts/harness/workspace.md` の「How a turn works」「Replies in Discord」「Doing the work」「Actions that affect others」「Settings」 | <https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices>（「Tool usage」「Minimizing hallucinations in agentic coding」「Optimize parallel tool calling」「Balancing autonomy and safety」と、Haiku 5.5 / Opus 5.5 のモデル別の節） | 自作。PR #73（保留中）の Claude ハーネスのプロンプト（同じく自作）の文を土台にした |
-| 同「The workspace」 | <https://platform.claude.com/docs/en/managed-agents/environments>（Networking、Environment lifecycle）、<https://platform.claude.com/docs/en/managed-agents/cloud-sandboxes-reference>、<https://platform.claude.com/docs/en/managed-agents/tools>、<https://platform.claude.com/docs/en/managed-agents/events-and-streaming>（Resume an idle session。コンテナの中身が作成から 30 日で失われること） | 自作。公開文書に根拠が無い 3 点（後のターンでプロセスが残るとは限らない、`ffprobe` の有無、メッセージを読み直すと新しい添付 URL が得られる）は、条件つきの言い方で書いた |
-| 同「Attachments」「Delivering results」「Not available here」 | <https://platform.claude.com/docs/en/managed-agents/files>、<https://platform.claude.com/docs/en/managed-agents/define-outcomes>（Retrieve deliverables） | 自作。名前を挙げる Hibana のツールは `send_file` だけ |
-| `prompts/harness/workspace-ultra.md` | <https://platform.claude.com/docs/en/managed-agents/multiagent-orchestration>（Tell the agent when to use a run）、<https://platform.claude.com/docs/en/managed-agents/workflow-runs>、<https://platform.claude.com/docs/en/managed-agents/budgets> | 自作。公開文書の例文は使っていない。「10 件を超えるくらい」という目安と「残りは自分でやる」も自作 |
-| workspace 経路の組み込みツール（`agent_toolset_20260401`） | <https://platform.claude.com/docs/en/managed-agents/tools> | 名前も説明も Anthropic の提供。Hibana は書いていない |
-| workspace 経路の custom tool の説明 | 同上（Best practices for custom tool definitions）、<https://platform.claude.com/docs/en/managed-agents/files> | `workspace/tools.ts` で書き直した 9 個は自作。残りは `tools/definitions.json` の 66 個のままと、`AskUserQuestion`（自作。名前と入力の項目名は Claude Code に合わせた。<https://code.claude.com/docs/en/tools-reference>） |
-| workspace 経路のセッション・イベント・budget の扱い、進捗と上限の定型文 | 上の各ページと、<https://platform.claude.com/docs/en/managed-agents/sessions>、<https://platform.claude.com/docs/en/managed-agents/session-operations>、<https://platform.claude.com/docs/en/about-claude/pricing>、SDK 0.133.0 の型定義 | 定型文（日本語）と、ツール呼び出しを実行せずに閉じるときにモデルへ返す英語の文（`workspace/runner.ts`）は自作。公開文書と型定義が食い違うところは、型定義に合わせた。budget で止まったセッションへの送り方は、budgets のページの「When a session reaches its budget」「Resume a session at its budget」に合わせた |
+| 対象                                                                                                                                    | 参照した公開文書                                                                                                                                                                                                                                                                                                                                                                                      | 文面                                                                                                                                                                                                                                                                                                              |
+| --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prompts/harness/workspace.md` の「How a turn works」「Replies in Discord」「Doing the work」「Actions that affect others」「Settings」 | <https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices>（「Tool usage」「Minimizing hallucinations in agentic coding」「Optimize parallel tool calling」「Balancing autonomy and safety」と、Haiku 5.5 / Opus 5.5 のモデル別の節）                                                                                                                 | 自作。PR #73（保留中）の Claude ハーネスのプロンプト（同じく自作）の文を土台にした                                                                                                                                                                                                                                |
+| 同「The workspace」                                                                                                                     | <https://platform.claude.com/docs/en/managed-agents/environments>（Networking、Environment lifecycle）、<https://platform.claude.com/docs/en/managed-agents/cloud-sandboxes-reference>、<https://platform.claude.com/docs/en/managed-agents/tools>、<https://platform.claude.com/docs/en/managed-agents/events-and-streaming>（Resume an idle session。コンテナの中身が作成から 30 日で失われること） | 自作。公開文書に根拠が無い 3 点（後のターンでプロセスが残るとは限らない、`ffprobe` の有無、メッセージを読み直すと新しい添付 URL が得られる）は、条件つきの言い方で書いた                                                                                                                                          |
+| 同「Attachments」「Delivering results」「Not available here」                                                                           | <https://platform.claude.com/docs/en/managed-agents/files>、<https://platform.claude.com/docs/en/managed-agents/define-outcomes>（Retrieve deliverables）                                                                                                                                                                                                                                             | 自作。名前を挙げる Hibana のツールは `send_file` だけ                                                                                                                                                                                                                                                             |
+| `prompts/harness/workspace-ultra.md`                                                                                                    | <https://platform.claude.com/docs/en/managed-agents/multiagent-orchestration>（Tell the agent when to use a run）、<https://platform.claude.com/docs/en/managed-agents/workflow-runs>、<https://platform.claude.com/docs/en/managed-agents/budgets>                                                                                                                                                   | 自作。公開文書の例文は使っていない。「10 件を超えるくらい」という目安と「残りは自分でやる」も自作                                                                                                                                                                                                                 |
+| workspace 経路の組み込みツール（`agent_toolset_20260401`）                                                                              | <https://platform.claude.com/docs/en/managed-agents/tools>                                                                                                                                                                                                                                                                                                                                            | 名前も説明も Anthropic の提供。Hibana は書いていない                                                                                                                                                                                                                                                              |
+| workspace 経路の custom tool の説明                                                                                                     | 同上（Best practices for custom tool definitions）、<https://platform.claude.com/docs/en/managed-agents/files>                                                                                                                                                                                                                                                                                        | `workspace/tools.ts` で書き直した 9 個は自作。残りは `tools/definitions.json` の 66 個のままと、`AskUserQuestion`（自作。名前と入力の項目名は Claude Code に合わせた。<https://code.claude.com/docs/en/tools-reference>）                                                                                         |
+| workspace 経路のセッション・イベント・budget の扱い、進捗と上限の定型文                                                                 | 上の各ページと、<https://platform.claude.com/docs/en/managed-agents/sessions>、<https://platform.claude.com/docs/en/managed-agents/session-operations>、<https://platform.claude.com/docs/en/about-claude/pricing>、SDK 0.133.0 の型定義                                                                                                                                                              | 定型文（日本語）と、ツール呼び出しを実行せずに閉じるときにモデルへ返す英語の文（`workspace/runner.ts`）は自作。公開文書と型定義が食い違うところは、型定義に合わせた。budget で止まったセッションへの送り方は、budgets のページの「When a session reaches its budget」「Resume a session at its budget」に合わせた |
 
 ## 実 API での確認
 
@@ -413,18 +414,19 @@ bun run workspace-smoke --cleanup      # 以前の実行が残したものを消
   - セッションを一覧より先に読みます。一覧が「still queued」なら、セッションを読んだ時点でも、発言は取り上げ前でした
   - 読み方（左が出力、右が、その形のときに言えること）
 
-    | 出力 | 言えること |
-    |---|---|
-    | `no list cost`、数字がすべて 0、`still queued` | 前提どおり |
-    | `a list cost of 0 cents`（または別の額）、`still queued` | 取り上げ前から額を報告する API。「使用済みなのに額が無い」の判定も、取り上げ前の発言を調べる処理も、通らない |
-    | `no list cost` で、active seconds かトークンが 1 以上、`still queued` | 取り上げ前から使用量だけを報告する API。同じ人が言い直した 2 つ目のターンは `list_cost_missing` で失敗する |
-    | `not among the N message(s) listed, by the id the send returned` | 送った発言が、一覧（新しい順の最初のページ）に載っていない。取り上げ前のイベントを一覧に載せない API なら、残っている発言が分からず、idle のセッションとして送ることになる |
-    | `already processed (so the session may have been read after it was taken up)` | 読むのが間に合わなかった。前提については何も言えない |
-    | `a list cost the bot cannot read` | `list_cost` はあるが、bot が額として読めない形（USD の整数セントの文字列でない） |
-    | `the session could not be read`、`the list of messages could not be read`、`the send returned no id for the message` | その読み取りができなかった（ターンは続く） |
+    | 出力                                                                                                                 | 言えること                                                                                                                                                                 |
+    | -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+    | `no list cost`、数字がすべて 0、`still queued`                                                                       | 前提どおり                                                                                                                                                                 |
+    | `a list cost of 0 cents`（または別の額）、`still queued`                                                             | 取り上げ前から額を報告する API。「使用済みなのに額が無い」の判定も、取り上げ前の発言を調べる処理も、通らない                                                               |
+    | `no list cost` で、active seconds かトークンが 1 以上、`still queued`                                                | 取り上げ前から使用量だけを報告する API。同じ人が言い直した 2 つ目のターンは `list_cost_missing` で失敗する                                                                 |
+    | `not among the N message(s) listed, by the id the send returned`                                                     | 送った発言が、一覧（新しい順の最初のページ）に載っていない。取り上げ前のイベントを一覧に載せない API なら、残っている発言が分からず、idle のセッションとして送ることになる |
+    | `already processed (so the session may have been read after it was taken up)`                                        | 読むのが間に合わなかった。前提については何も言えない                                                                                                                       |
+    | `a list cost the bot cannot read`                                                                                    | `list_cost` はあるが、bot が額として読めない形（USD の整数セントの文字列でない）                                                                                           |
+    | `the session could not be read`、`the list of messages could not be read`、`the send returned no id for the message` | その読み取りができなかった（ターンは続く）                                                                                                                                 |
 
   - 限界: 観測は、1 回の実行につき 1 回（新しいセッションの最初の発言）だけです。取り上げの速さは制御できず、2 回の読み取りより先に取り上げられると「already processed」になります（取り直しはしません）。「1 つ目が取り上げ前のうちに 2 つ目を送る」形は作っていません。Haiku Ultra のセッションでは読みません（観測するターンの選び方の代案は、Ultra の最初の発言でも読む、全ターンで読む、です）
   - 確かめたのは、スクリプトの写し（実行部分を切り落としたもの）を、127.0.0.1 の偽のサーバーに向けた範囲だけです（リポジトリの自動テストにはありません）。出たのは、表の 1・2・5 行目、`a list cost the bot cannot read`、セッションを読めない場合、一覧を読めない場合、発言を送った後でターンが失敗する場合の 7 通りです。`not among …` と `the send returned no id …` の行、「`no list cost` で使用量が 1 以上」の形は、出していません
+
 - web 検索が無効（`WEB_SEARCH_ENABLED=false` か `ANTHROPIC_WORKSPACE_WEB_ENABLED=false`）だと、budget に達させるステップは「not run」で FAIL になります（web 検索で額を使う作りのため）。`ANTHROPIC_WORKSPACE_NETWORKING=limited` のときにこのステップが通るかは未確認です
 - モデルの振る舞いに依るステップ（run を始める、指定のコマンドを実行する）は、API が正しくても FAIL することがあります
 - smoke を実行しても通らない経路は、「検証していない範囲」に挙げています
@@ -438,12 +440,12 @@ bun run workspace-smoke --cleanup      # 以前の実行が残したものを消
 - 条件: bun 1.4.3、`@anthropic-ai/sdk` 0.133.0、モデルは `claude-haiku-5-5`、effort は medium、networking は `unrestricted`、web 検索は有効。鍵は、`apps/bot/.env` の `ANTHROPIC_API_KEY` の値を、実行のプロセスにだけ `ANTHROPIC_WORKSPACE_API_KEY` として渡しました（ファイルには書いていません。bot のコードの「互いにフォールバックしない」は変えていません）
 - 上限は合計 $1。使ったのは、セッションが報告した list cost の合計で **$0.22** です（請求額は確かめていません）
 
-| 回 | 引数 | 結果 | セッションの list cost | 時刻（UTC） |
-|---|---|---|---|---|
-| 1 | `--budget 0.6` | 22/22 が PASS | $0.05 | 05:39:01〜05:40:32 |
-| 2 | `--bot-only --budget 0.4` | 11/11 が PASS | $0.03（6 ターン） | 05:42:00〜05:42:47 |
-| 3 | `--budget 0.5` | 23/23 が PASS | $0.04 | 05:43:50〜05:45:49 |
-| 4 | `--bot-only --ultra --budget 0.3` | 12/12 が PASS | $0.10（Ultra なしの 6 ターンが $0.03、Haiku Ultra の 1 ターンが $0.07） | 07:17:21〜07:18:37 |
+| 回  | 引数                              | 結果          | セッションの list cost                                                  | 時刻（UTC）        |
+| --- | --------------------------------- | ------------- | ----------------------------------------------------------------------- | ------------------ |
+| 1   | `--budget 0.6`                    | 22/22 が PASS | $0.05                                                                   | 05:39:01〜05:40:32 |
+| 2   | `--bot-only --budget 0.4`         | 11/11 が PASS | $0.03（6 ターン）                                                       | 05:42:00〜05:42:47 |
+| 3   | `--budget 0.5`                    | 23/23 が PASS | $0.04                                                                   | 05:43:50〜05:45:49 |
+| 4   | `--bot-only --ultra --budget 0.3` | 12/12 が PASS | $0.10（Ultra なしの 6 ターンが $0.03、Haiku Ultra の 1 ターンが $0.07） | 07:17:21〜07:18:37 |
 
 - 1 回目と 2 回目は、コミットする前の作業ツリーで流しました。3 回目は、開き直しの項目を足し、下の観測の誤りを直した版です
 - 4 回目は、bot 自身のターンの区間の取り直しです（コミット `6f4b8fd`）。最初に試みたとき（`--bot-only`）は、実行環境の権限の仕組みが実行を止めたので、流していません。その後、その実行の承認を得て（上限 $0.3）、同じ区間の最後に Haiku Ultra のターンを 1 回足して、同じ上限で流しました
@@ -453,32 +455,32 @@ bun run workspace-smoke --cleanup      # 以前の実行が残したものを消
 
 観測したこと（「検証していない範囲」で前提として書いていたものを含みます）:
 
-| 項目 | 観測 |
-|---|---|
-| 作成 | environment、エージェント、ツール定義 76 個（bot の区間は 72 個）のセッションが受け付けられた。`anyOf`・`oneOf`・`minProperties` を含むスキーマも、`mcp_` で始まる名前も通った |
-| effort | セッションは `medium` と返した。`xhigh` と `max` も Haiku 5.5 で受け付けられた |
-| エージェントの名前 | 一意ではない（同じ名前でもう 1 つ作れた）。保存したファイルを消した後、environment もエージェントも名前とラベルから見つけ直した |
-| `list_cost` | 作成直後のセッションから、0 セントとして報告される。使った後に欠けることは無かった。1 セントに満たない使用は 0 セントと出た（3 回目の最初のターンの後。入力 23,090 トークンのうち 22,842 がキャッシュ、出力 113 トークン） |
-| 最初の発言の直後 | 2 回とも「already processed」で、取り上げのほうが速く、取り上げ前の値は読めなかった。読めた値は、list cost 0 セント、稼働 0.175 秒・0.242 秒、トークン 0 |
-| `processed_at` | 取り上げの時点に付く（エージェントの最初のイベントと同じ時刻で、idle になる 1.3〜1.5 秒前）。一覧の全イベントに小数秒がある（79 件中 79、95 件中 95）。隣り合う同じ時刻の組は 32 組・38 組あった |
-| 発言とストリーム | 自分の発言は、処理済みの形で 1 回届く。取り上げ前の形では届かない。budget で止まった後に送った発言も同じ |
-| 発言と一覧 | 送ったばかりの発言は、新しい順の一覧の先頭に、送信が返した id で載る。取り上げ前の発言は `processed_at` なしで載る（budget で止まった後に送った発言で観測）。`types` の絞り込みは効いた（全イベント 79〜95 件に対し、発言は 8〜9 件） |
-| イベントの一覧 | `order=desc` は新しい順。上限を指定しない 1 ページに 95 件が全部載り、次のページは無かった |
-| ストリームの形 | フレームの名前はすべて `message`。コマンドの実行中は 20 秒間、何も届かない（ping もコメント行も無い） |
-| ストリームの開き直し | 無音の上限を 6 秒にしたターンで、ストリームを 4 回開き、ターンは `end_turn` で終わって、コマンドの出力は返信に 1 回だけ出た |
-| 組み込みツール | `bash`・`write`・`read`・`web_fetch`・`web_search` が呼ばれた。コマンドは `/` で始まり、`ffprobe` は `/usr/bin/ffprobe` にあった |
-| 画像 | `data:` の PNG を付けた発言で、色を答えた |
-| custom tool | 呼び出しと結果の往復が通った。失敗の結果（`is_error: true`）も受け付けられた |
-| Files API | outputs のファイルは、書いてから約 5 秒で一覧に載った（custom tool の呼び出しを待たせている間に載る）。`scope` はそのセッション、`downloadable` は true。**サブディレクトリのファイルは、ディレクトリなしの名前で載る**。同じ名前で書き直すと、一覧は 1 件のままで、内容が新しくなる |
-| interrupt | idle のセッションへの単独の interrupt は受け付けられ、処理済みとして一覧に載り、セッションは idle のまま。実行中の interrupt は 1.4〜1.5 秒でターンを止め、枠を戻せた |
-| budget | 枠 1 セントのターンは、web 検索 1 回の後、budget で止まった。消費済み以下の budget への更新は HTTP 400 `invalid_request_error` で、`details` も `error_code` も無く、メッセージが `budget.max_list_cost` に触れる。runner は文面で見分けた |
-| budget で止まった後 | budget を上げると、前の作業が再開した（モデルへのリクエスト 1 回）。発言と一緒に送った interrupt の後には進まず、発言はその後で取り上げられた |
-| archive | 1 回目で `archived_at` が付き、`status` は `terminated` になる。2 回目も受け付けられ、`archived_at` が変わる。archive 済みのセッションの delete は受け付けられた |
-| bot 自身のターン | 6 ターンとも返信した（2 回目と 4 回目で同じ結果）。registry を通ったのは `read_messages`・`get_bot_settings`・`send_message`・`add_reaction`・`send_file`・断られた `read_messages`。bot の台帳は 4 セント（セッションの報告 3 セント + 新しいセッションの 1 セント）。`/clear` でセッションは削除された |
-| Haiku Ultra のセッション（4 回目） | Ultra を保存した後の発言で、bot は ultra の variant のセッションを新しく作った。Haiku 5.5 のエージェントで workflows は有効にでき、作成時の上書きの後も、セッションのエージェントに `multiagent_20261001`（workflows が有効、subagents と advisor は無効）が残った |
-| workflow run（4 回目） | 「エージェント 2 つの run を 1 つ」と頼んだ発言で、run が 1 つ作られ、終わった（開いたまま残った run は無い）。ストリームには `workflow_run.created`・`workflow_run.status_running`・`workflow_run.phase_started`・`workflow_run.phase_ended`・`workflow_run.status_ended` が 1 回ずつ、`session.thread_created` と `session.thread_status_terminated` が 2 回ずつ届いた。**`workflow_run.error` も 1 回届いた**（`workflow_run.created` より前。種類と文面は記録していない。その後に run が作られて完了した。bot は、このイベントを状況の 1 行として出すだけで、ターンは続ける） |
-| run のエージェントからのツール呼び出し（4 回目） | run のエージェントの `read_messages` は、registry が worker として実行し、返信にその内容が出た。run のエージェントの `send_message` は、registry が断り（「An agent of a workflow run cannot use send_message. …」）、Discord には何も投稿されず、返信は断られたと答えた。呼び出しが届いた時点で、bot はそのスレッドの run と、run を始めた人を知っていた（知らなければ、呼び出しは実行されない）。結果は、スレッドの指定なし（`custom_tool_use_id` だけ）で送って、受け付けられた |
-| Haiku Ultra の 1 ターンの使用量（4 回目） | セッションの報告は 7 セント、稼働 18.61 秒、入力 28 トークン、キャッシュからの読み 251,287、キャッシュへの書き 85,418、出力 2,486 トークン。bot の台帳は 8 セント増えた（セッションの報告 7 セント + 新しいセッションの 1 セント）。1 回の値で、run の大きさで変わる |
+| 項目                                             | 観測                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 作成                                             | environment、エージェント、ツール定義 76 個（bot の区間は 72 個）のセッションが受け付けられた。`anyOf`・`oneOf`・`minProperties` を含むスキーマも、`mcp_` で始まる名前も通った                                                                                                                                                                                                                                                                                                                                                                                                    |
+| effort                                           | セッションは `medium` と返した。`xhigh` と `max` も Haiku 5.5 で受け付けられた                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| エージェントの名前                               | 一意ではない（同じ名前でもう 1 つ作れた）。保存したファイルを消した後、environment もエージェントも名前とラベルから見つけ直した                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `list_cost`                                      | 作成直後のセッションから、0 セントとして報告される。使った後に欠けることは無かった。1 セントに満たない使用は 0 セントと出た（3 回目の最初のターンの後。入力 23,090 トークンのうち 22,842 がキャッシュ、出力 113 トークン）                                                                                                                                                                                                                                                                                                                                                        |
+| 最初の発言の直後                                 | 2 回とも「already processed」で、取り上げのほうが速く、取り上げ前の値は読めなかった。読めた値は、list cost 0 セント、稼働 0.175 秒・0.242 秒、トークン 0                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `processed_at`                                   | 取り上げの時点に付く（エージェントの最初のイベントと同じ時刻で、idle になる 1.3〜1.5 秒前）。一覧の全イベントに小数秒がある（79 件中 79、95 件中 95）。隣り合う同じ時刻の組は 32 組・38 組あった                                                                                                                                                                                                                                                                                                                                                                                  |
+| 発言とストリーム                                 | 自分の発言は、処理済みの形で 1 回届く。取り上げ前の形では届かない。budget で止まった後に送った発言も同じ                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 発言と一覧                                       | 送ったばかりの発言は、新しい順の一覧の先頭に、送信が返した id で載る。取り上げ前の発言は `processed_at` なしで載る（budget で止まった後に送った発言で観測）。`types` の絞り込みは効いた（全イベント 79〜95 件に対し、発言は 8〜9 件）                                                                                                                                                                                                                                                                                                                                             |
+| イベントの一覧                                   | `order=desc` は新しい順。上限を指定しない 1 ページに 95 件が全部載り、次のページは無かった                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ストリームの形                                   | フレームの名前はすべて `message`。コマンドの実行中は 20 秒間、何も届かない（ping もコメント行も無い）                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ストリームの開き直し                             | 無音の上限を 6 秒にしたターンで、ストリームを 4 回開き、ターンは `end_turn` で終わって、コマンドの出力は返信に 1 回だけ出た                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 組み込みツール                                   | `bash`・`write`・`read`・`web_fetch`・`web_search` が呼ばれた。コマンドは `/` で始まり、`ffprobe` は `/usr/bin/ffprobe` にあった                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 画像                                             | `data:` の PNG を付けた発言で、色を答えた                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| custom tool                                      | 呼び出しと結果の往復が通った。失敗の結果（`is_error: true`）も受け付けられた                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Files API                                        | outputs のファイルは、書いてから約 5 秒で一覧に載った（custom tool の呼び出しを待たせている間に載る）。`scope` はそのセッション、`downloadable` は true。**サブディレクトリのファイルは、ディレクトリなしの名前で載る**。同じ名前で書き直すと、一覧は 1 件のままで、内容が新しくなる                                                                                                                                                                                                                                                                                              |
+| interrupt                                        | idle のセッションへの単独の interrupt は受け付けられ、処理済みとして一覧に載り、セッションは idle のまま。実行中の interrupt は 1.4〜1.5 秒でターンを止め、枠を戻せた                                                                                                                                                                                                                                                                                                                                                                                                             |
+| budget                                           | 枠 1 セントのターンは、web 検索 1 回の後、budget で止まった。消費済み以下の budget への更新は HTTP 400 `invalid_request_error` で、`details` も `error_code` も無く、メッセージが `budget.max_list_cost` に触れる。runner は文面で見分けた                                                                                                                                                                                                                                                                                                                                        |
+| budget で止まった後                              | budget を上げると、前の作業が再開した（モデルへのリクエスト 1 回）。発言と一緒に送った interrupt の後には進まず、発言はその後で取り上げられた                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| archive                                          | 1 回目で `archived_at` が付き、`status` は `terminated` になる。2 回目も受け付けられ、`archived_at` が変わる。archive 済みのセッションの delete は受け付けられた                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| bot 自身のターン                                 | 6 ターンとも返信した（2 回目と 4 回目で同じ結果）。registry を通ったのは `read_messages`・`get_bot_settings`・`send_message`・`add_reaction`・`send_file`・断られた `read_messages`。bot の台帳は 4 セント（セッションの報告 3 セント + 新しいセッションの 1 セント）。`/clear` でセッションは削除された                                                                                                                                                                                                                                                                          |
+| Haiku Ultra のセッション（4 回目）               | Ultra を保存した後の発言で、bot は ultra の variant のセッションを新しく作った。Haiku 5.5 のエージェントで workflows は有効にでき、作成時の上書きの後も、セッションのエージェントに `multiagent_20261001`（workflows が有効、subagents と advisor は無効）が残った                                                                                                                                                                                                                                                                                                                |
+| workflow run（4 回目）                           | 「エージェント 2 つの run を 1 つ」と頼んだ発言で、run が 1 つ作られ、終わった（開いたまま残った run は無い）。ストリームには `workflow_run.created`・`workflow_run.status_running`・`workflow_run.phase_started`・`workflow_run.phase_ended`・`workflow_run.status_ended` が 1 回ずつ、`session.thread_created` と `session.thread_status_terminated` が 2 回ずつ届いた。**`workflow_run.error` も 1 回届いた**（`workflow_run.created` より前。種類と文面は記録していない。その後に run が作られて完了した。bot は、このイベントを状況の 1 行として出すだけで、ターンは続ける） |
+| run のエージェントからのツール呼び出し（4 回目） | run のエージェントの `read_messages` は、registry が worker として実行し、返信にその内容が出た。run のエージェントの `send_message` は、registry が断り（「An agent of a workflow run cannot use send_message. …」）、Discord には何も投稿されず、返信は断られたと答えた。呼び出しが届いた時点で、bot はそのスレッドの run と、run を始めた人を知っていた（知らなければ、呼び出しは実行されない）。結果は、スレッドの指定なし（`custom_tool_use_id` だけ）で送って、受け付けられた                                                                                                |
+| Haiku Ultra の 1 ターンの使用量（4 回目）        | セッションの報告は 7 セント、稼働 18.61 秒、入力 28 トークン、キャッシュからの読み 251,287、キャッシュへの書き 85,418、出力 2,486 トークン。bot の台帳は 8 セント増えた（セッションの報告 7 セント + 新しいセッションの 1 セント）。1 回の値で、run の大きさで変わる                                                                                                                                                                                                                                                                                                              |
 
 その実行で見ていないもの: スクリプト側の Ultra の区間（budget で止めた run が、interrupt の後に budget を上げても止まったままか、開いた run を発言で止められるか、run の中の `bash`）、run が開いたままのセッションの delete / archive、ターンをまたいで続く run、run を始めた人と別の人のターンでの呼び出しの断り、Sonnet 5.5・Opus 5.5、`AskUserQuestion`（人の操作を待つため）、実際の Discord、`limited` の networking、1 日・月の上限に達したときの断り、再起動をまたぐ再開、5 分を超える無音、数十分のターン。
 

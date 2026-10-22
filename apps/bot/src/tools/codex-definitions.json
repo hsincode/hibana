@@ -20,9 +20,7 @@
             "description": "Maximum command runtime in milliseconds. Defaults to 120000 ms."
           }
         },
-        "required": [
-          "command"
-        ],
+        "required": ["command"],
         "additionalProperties": false
       }
     }
@@ -40,9 +38,7 @@
             "description": "The patch text in codex patch format."
           }
         },
-        "required": [
-          "patch"
-        ],
+        "required": ["patch"],
         "additionalProperties": false
       }
     }
@@ -71,25 +67,16 @@
                 },
                 "status": {
                   "type": "string",
-                  "enum": [
-                    "pending",
-                    "in_progress",
-                    "completed"
-                  ],
+                  "enum": ["pending", "in_progress", "completed"],
                   "description": "Step status."
                 }
               },
-              "required": [
-                "step",
-                "status"
-              ],
+              "required": ["step", "status"],
               "additionalProperties": false
             }
           }
         },
-        "required": [
-          "plan"
-        ],
+        "required": ["plan"],
         "additionalProperties": false
       }
     }
@@ -107,9 +94,7 @@
             "description": "Local filesystem path to an image file."
           }
         },
-        "required": [
-          "path"
-        ],
+        "required": ["path"],
         "additionalProperties": false
       }
     }
@@ -127,9 +112,7 @@
             "description": "Search query"
           }
         },
-        "required": [
-          "query"
-        ],
+        "required": ["query"],
         "additionalProperties": false
       }
     }

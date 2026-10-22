@@ -6,6 +6,7 @@
 - 置き換える／置き換えられた ADR: なし
 
 ## 要求と決定
+
 - プロダクトの特性と、満たす要求:
   - 配信の経路は本番の API・Web・bot を書き換える。同じ commit のワークフローが、日によって違うコードを実行しないこと
   - これまでは action をタグ（`@v4`）で指定し、Vercel CLI は `npx --yes vercel@59.14.0` で実行のたびに 37 個の依存を解決していた（#1 の観察 9）
@@ -25,6 +26,7 @@
     - 手動: PR が増えない。古い版が残りやすい
 
 ## 影響
+
 - 得られる効果: ワークフローが実行する action と Vercel CLI が、commit ごとに決まる
 - 費用・運用の負荷・残る制約:
   - Dependabot の PR を読んでマージする作業が増える。`tools/vercel/` と `.github/` だけの変更なので、マージしても API・Web・bot は配信されない。新しい CLI が使われるのは、その次の配信から
@@ -37,6 +39,7 @@
   - `tools/vercel/bun.lock` と `package.json` が食い違うと、`--frozen-lockfile` が配信の前に失敗する
 
 ## 実装と検証
+
 - 適用した commit・構成図: この ADR を追加した PR
 - 要求ごとの検証記録:
   - 固定の検査: `scripts/workflow-pins.test.ts`。1 か所をタグ指定に戻すと失敗する（2026-10-04 に確認）
@@ -47,5 +50,6 @@
   - Dependabot: #7 のマージの直後に #16（checkout 4.4.0 → 7.0.1）と #17（upload-artifact 4.6.2 → 7.0.1）を開いた。差分は commit SHA と版のコメントの両方を更新していた。2 件ともマージし、マージ後の検査は成功した（https://github.com/hsincode/hibana/actions/runs/37193353942）
 
 ## 見直す条件
+
 - Dependabot の PR が多すぎて読めなくなったとき（グループ化するか、頻度を下げる）
 - `tools/vercel/` の install が配信の時間を目立って延ばすとき

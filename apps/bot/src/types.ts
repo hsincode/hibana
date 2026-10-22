@@ -108,8 +108,12 @@ export type Context = {
 // Only explicitly scoped copies inherit task ownership. Ordinary spreads used
 // for new turns/subagents must not acquire the parent's home connection.
 const contextTasks = new WeakMap<Context, Context>();
-export const contextTask = (ctx: Context): Context => contextTasks.get(ctx) ?? ctx;
-export function scopedContext(ctx: Context, overrides: Partial<Context>): Context {
+export const contextTask = (ctx: Context): Context =>
+  contextTasks.get(ctx) ?? ctx;
+export function scopedContext(
+  ctx: Context,
+  overrides: Partial<Context>,
+): Context {
   const scoped = { ...ctx, ...overrides };
   contextTasks.set(scoped, contextTask(ctx));
   return scoped;

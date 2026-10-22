@@ -39,12 +39,25 @@ type BudgetFallbackResponse = {
 /** 閾値は入力中の文字列のまま持つ。空欄や途中の「1.」も打てるように。 */
 type Draft = Fallback & { threshold: string };
 
-const usdFormat = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
-const usd = (n: number) => (n < 0 ? `−${usdFormat.format(-n)}` : usdFormat.format(n));
-const EFFORT_LABEL: Record<string, string> = { low: "Low", medium: "Medium", high: "High", xhigh: "XHigh", max: "Max" };
+const usdFormat = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+});
+const usd = (n: number) =>
+  n < 0 ? `−${usdFormat.format(-n)}` : usdFormat.format(n);
+const EFFORT_LABEL: Record<string, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "XHigh",
+  max: "Max",
+};
 
 /** 入力された閾値。範囲外・1 セント未満の端数・数でないものは null。 */
-function parseThreshold(raw: string, range: { min_usd: number; max_usd: number }): number | null {
+function parseThreshold(
+  raw: string,
+  range: { min_usd: number; max_usd: number },
+): number | null {
   const text = raw.trim();
   if (!/^\d+(\.\d{1,2})?$/.test(text)) return null;
   const n = Number(text);
@@ -78,27 +91,51 @@ export function BudgetFallbackPanel({ reloadKey }: { reloadKey: string }) {
     };
   }, [reloadKey, saves]);
 
-  const range = data?.threshold_range ?? { min_usd: 0, max_usd: Number.MAX_SAFE_INTEGER, default_usd: 10 };
-  const saved: Draft | null = data ? { ...data.fallback, threshold: String(data.threshold_usd) } : null;
+  const range = data?.threshold_range ?? {
+    min_usd: 0,
+    max_usd: Number.MAX_SAFE_INTEGER,
+    default_usd: 10,
+  };
+  const saved: Draft | null = data
+    ? { ...data.fallback, threshold: String(data.threshold_usd) }
+    : null;
   const shown = draft ?? saved;
   const threshold = shown ? parseThreshold(shown.threshold, range) : null;
   const thresholdInvalid = Boolean(shown && threshold === null);
   const dirty = Boolean(
     draft &&
-      data &&
-      (draft.preset !== data.fallback.preset || draft.effort !== data.fallback.effort || threshold !== data.threshold_usd),
+    data &&
+    (draft.preset !== data.fallback.preset ||
+      draft.effort !== data.fallback.effort ||
+      threshold !== data.threshold_usd),
   );
-  const label = (preset: string) => data?.presets.find((p) => p.id === preset)?.label ?? preset;
+  const label = (preset: string) =>
+    data?.presets.find((p) => p.id === preset)?.label ?? preset;
 
   async function save() {
     if (!draft || threshold === null) return;
     setSaving(true);
     try {
-      const r = await api<{ fallback: Fallback; threshold_usd: number }>("/api/budget-fallback", {
-        method: "PUT",
-        body: JSON.stringify({ preset: draft.preset, effort: draft.effort, threshold_usd: threshold }),
-      });
-      setData((d) => (d ? { ...d, fallback: r.fallback, threshold_usd: r.threshold_usd ?? threshold } : d));
+      const r = await api<{ fallback: Fallback; threshold_usd: number }>(
+        "/api/budget-fallback",
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            preset: draft.preset,
+            effort: draft.effort,
+            threshold_usd: threshold,
+          }),
+        },
+      );
+      setData((d) =>
+        d
+          ? {
+              ...d,
+              fallback: r.fallback,
+              threshold_usd: r.threshold_usd ?? threshold,
+            }
+          : d,
+      );
       setDraft(null);
       setSaves((n) => n + 1);
       push("ok", "保存しました。bot には 2 分ほどで届きます");
@@ -116,8 +153,10 @@ export function BudgetFallbackPanel({ reloadKey }: { reloadKey: string }) {
         {data && <StatusBadge status={data.status} />}
       </div>
       <p className="budget-desc">
-        今日の推計を含めた今月の残りが {data ? usd(data.threshold_usd) : "閾値"} を切ると、Anthropic API
-        のターン（Auto を含む）をこのモデルに切り替えます。Anthropic Workspace と、ほかのプロバイダーは切り替えません。
+        今日の推計を含めた今月の残りが {data ? usd(data.threshold_usd) : "閾値"}{" "}
+        を切ると、Anthropic API のターン（Auto
+        を含む）をこのモデルに切り替えます。Anthropic Workspace
+        と、ほかのプロバイダーは切り替えません。
       </p>
 
       {err && <p className="stat-note is-error">{err}</p>}
@@ -174,7 +213,9 @@ export function BudgetFallbackPanel({ reloadKey }: { reloadKey: string }) {
                     max={data.threshold_range?.max_usd}
                     step={0.01}
                     value={shown.threshold}
-                    onChange={(e) => setDraft({ ...shown, threshold: e.target.value })}
+                    onChange={(e) =>
+                      setDraft({ ...shown, threshold: e.target.value })
+                    }
                     disabled={saving}
                   />
                 </span>
@@ -189,12 +230,24 @@ export function BudgetFallbackPanel({ reloadKey }: { reloadKey: string }) {
                   保存
                 </button>
                 {(dirty || thresholdInvalid) && (
-                  <button type="button" className="btn" disabled={saving} onClick={() => setDraft(null)}>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={saving}
+                    onClick={() => setDraft(null)}
+                  >
                     元に戻す
                   </button>
                 )}
               </div>
-              <p id={`${id}-th`} className={thresholdInvalid ? "stat-note is-error budget-hint" : "stat-note budget-hint"}>
+              <p
+                id={`${id}-th`}
+                className={
+                  thresholdInvalid
+                    ? "stat-note is-error budget-hint"
+                    : "stat-note budget-hint"
+                }
+              >
                 {data.threshold_range
                   ? `閾値は ${usd(data.threshold_range.min_usd)}〜${usd(data.threshold_range.max_usd)}（月の予算）、1 セント単位。既定は ${usd(data.threshold_range.default_usd)}。`
                   : "閾値は 1 セント単位で入力します。"}
@@ -206,7 +259,8 @@ export function BudgetFallbackPanel({ reloadKey }: { reloadKey: string }) {
               <div>
                 <dt>フォールバックモデル</dt>
                 <dd>
-                  {label(shown.preset)} · {EFFORT_LABEL[shown.effort] ?? shown.effort}
+                  {label(shown.preset)} ·{" "}
+                  {EFFORT_LABEL[shown.effort] ?? shown.effort}
                 </dd>
               </div>
               <div>
@@ -215,7 +269,9 @@ export function BudgetFallbackPanel({ reloadKey }: { reloadKey: string }) {
               </div>
             </dl>
           )}
-          {data.can_edit || <p className="stat-note">変更できるのは Administrator です。</p>}
+          {data.can_edit || (
+            <p className="stat-note">変更できるのは Administrator です。</p>
+          )}
         </>
       )}
       <ToastArea toasts={toasts} />
@@ -224,27 +280,38 @@ export function BudgetFallbackPanel({ reloadKey }: { reloadKey: string }) {
 }
 
 function StatusBadge({ status }: { status: Status }) {
-  if (!status.configured || "error" in status) return <Badge>判定できません</Badge>;
-  return status.low ? <Badge tone="danger">切り替え中</Badge> : <Badge tone="ok">通常のモデル</Badge>;
+  if (!status.configured || "error" in status)
+    return <Badge>判定できません</Badge>;
+  return status.low ? (
+    <Badge tone="danger">切り替え中</Badge>
+  ) : (
+    <Badge tone="ok">通常のモデル</Badge>
+  );
 }
 
 function StatusNote({ status }: { status: Status }) {
   if (!status.configured)
     return (
       <p className="stat-note">
-        API サーバーに ANTHROPIC_ADMIN_API_KEY が無いため、残りを判定できません。この間は切り替えません。
+        API サーバーに ANTHROPIC_ADMIN_API_KEY
+        が無いため、残りを判定できません。この間は切り替えません。
       </p>
     );
   if ("error" in status)
     return (
       <p className="stat-note is-error">
-        いまの残りを読めませんでした（{status.error}）。bot は最後に読めた判定のまま動きます。
+        いまの残りを読めませんでした（{status.error}）。bot
+        は最後に読めた判定のまま動きます。
       </p>
     );
   return (
     <p className="stat-note">
-      今日の推計を含めた残り <strong className="budget-amount">{usd(status.remaining_after_today_usd)}</strong>
-      （今月の残り {usd(status.remaining_usd)} − 今日の推計 {usd(status.today_usd)}）。
+      今日の推計を含めた残り{" "}
+      <strong className="budget-amount">
+        {usd(status.remaining_after_today_usd)}
+      </strong>
+      （今月の残り {usd(status.remaining_usd)} − 今日の推計{" "}
+      {usd(status.today_usd)}）。
       {status.low
         ? "Anthropic API のターンは、いまフォールバックモデルで動いています。"
         : `${usd(status.threshold_usd)} を切るまでは、選ばれたモデルのまま動きます。`}

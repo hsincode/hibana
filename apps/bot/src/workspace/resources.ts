@@ -12,7 +12,11 @@ import type {
   BetaManagedAgentsBudgetLimit,
   BetaManagedAgentsSession,
 } from "@anthropic-ai/sdk/resources/beta/sessions/sessions";
-import { ultraSupported, WORKSPACE_PROVIDER, WORKSPACE_ULTRA_MODEL } from "@hibana/shared/catalog";
+import {
+  ultraSupported,
+  WORKSPACE_PROVIDER,
+  WORKSPACE_ULTRA_MODEL,
+} from "@hibana/shared/catalog";
 import type { Logger } from "pino";
 import { recommendedEffort, type Selection } from "../config";
 import { atomicJson, readJson, Serial } from "../io";
@@ -22,8 +26,11 @@ import { apiErrorInfo, toProviderError } from "./client";
 import type { WorkspaceVariant } from "./select";
 
 /** The tool list a session is created with; the tools side builds it. */
-export type SessionTools = NonNullable<BetaManagedAgentsAgentWithOverridesParams["tools"]>;
-export type WorkspaceNetworking = BetaUnrestrictedNetwork | BetaLimitedNetworkParams;
+export type SessionTools = NonNullable<
+  BetaManagedAgentsAgentWithOverridesParams["tools"]
+>;
+export type WorkspaceNetworking =
+  BetaUnrestrictedNetwork | BetaLimitedNetworkParams;
 
 const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
 export type WorkspaceEffort = (typeof EFFORT_LEVELS)[number];
@@ -32,21 +39,33 @@ export type WorkspaceEffort = (typeof EFFORT_LEVELS)[number];
  *  harness: the default differs by model, and `none` has no counterpart here,
  *  so it becomes the lowest level. */
 export function workspaceEffort(selection: Selection): WorkspaceEffort {
-  const wire = wireEffort(selection.model, selection.effort ?? recommendedEffort(selection.model, selection.provider));
-  return (EFFORT_LEVELS as readonly string[]).includes(wire ?? "") ? (wire as WorkspaceEffort) : "low";
+  const wire = wireEffort(
+    selection.model,
+    selection.effort ?? recommendedEffort(selection.model, selection.provider),
+  );
+  return (EFFORT_LEVELS as readonly string[]).includes(wire ?? "")
+    ? (wire as WorkspaceEffort)
+    : "low";
 }
 
 /** An amount the API reports, in whole US cents. Nothing when it is missing
  *  or in a form this code does not count in: unknown, never zero. */
-export const cents = (amount?: BetaMonetaryAmount | null): number | undefined =>
-  amount?.currency === "USD" && typeof amount.amount === "string" && /^\d+$/.test(amount.amount)
+export const cents = (
+  amount?: BetaMonetaryAmount | null,
+): number | undefined =>
+  amount?.currency === "USD" &&
+  typeof amount.amount === "string" &&
+  /^\d+$/.test(amount.amount)
     ? Number(amount.amount)
     : undefined;
 /** A session budget of that many cents. The API takes the amount as a string
  *  of minor units, at least one. */
 export const budgetLimit = (cents: number): BetaManagedAgentsBudgetLimit => ({
   type: "limit",
-  max_list_cost: { amount: String(Math.max(1, Math.round(cents))), currency: "USD" },
+  max_list_cost: {
+    amount: String(Math.max(1, Math.round(cents))),
+    currency: "USD",
+  },
 });
 
 /** Whose resources these are: how their names start, and the `metadata.app`
@@ -55,7 +74,10 @@ export const budgetLimit = (cents: number): BetaManagedAgentsBudgetLimit => ({
  *  what it checks is the bot's code, and removes what it created afterwards.
  *  Nothing is adopted across two identities, by name or from the file. */
 export type WorkspaceIdentity = { prefix: string; app: string };
-const BOT_IDENTITY: WorkspaceIdentity = { prefix: "hibana-workspace", app: "hibana" };
+const BOT_IDENTITY: WorkspaceIdentity = {
+  prefix: "hibana-workspace",
+  app: "hibana",
+};
 
 type StoredResource = { id: string; spec: string };
 type StoredAgent = StoredResource & { version: number };
@@ -73,10 +95,13 @@ type Stored = {
 // Stored with the agent only to satisfy the required field. Every session
 // replaces the model, the system prompt and the tools with its own.
 const AGENT_MODEL = WORKSPACE_ULTRA_MODEL;
-const ENVIRONMENT_DESCRIPTION = "Cloud container for Hibana's Anthropic Workspace sessions.";
+const ENVIRONMENT_DESCRIPTION =
+  "Cloud container for Hibana's Anthropic Workspace sessions.";
 const AGENT_DESCRIPTION: Record<WorkspaceVariant, string> = {
-  plain: "Hibana's Anthropic Workspace agent. Each session sets its own model, prompt and tools.",
-  ultra: "Hibana's Anthropic Workspace agent with dynamic workflows. Each session sets its own prompt and tools.",
+  plain:
+    "Hibana's Anthropic Workspace agent. Each session sets its own model, prompt and tools.",
+  ultra:
+    "Hibana's Anthropic Workspace agent with dynamic workflows. Each session sets its own prompt and tools.",
 };
 /** What the Haiku Ultra agent is created with. Workflows only: the block's
  *  defaults would also enable subagents. */
@@ -92,17 +117,27 @@ const LIST_SCAN_MAX = 500;
 
 /** Names a definition: the first 8 hex digits of its creation request's hash
  *  (without the name and metadata, which carry this value). */
-const specOf = (request: unknown) => createHash("sha256").update(JSON.stringify(request)).digest("hex").slice(0, 8);
+const specOf = (request: unknown) =>
+  createHash("sha256")
+    .update(JSON.stringify(request))
+    .digest("hex")
+    .slice(0, 8);
 
-type MultiagentLike = {
-  type: string;
-  workflows?: { type: string; predefined_agents?: unknown[] | null } | null;
-  subagents?: { type: string } | null;
-  advisor?: { type: string } | null;
-} | null | undefined;
+type MultiagentLike =
+  | {
+      type: string;
+      workflows?: { type: string; predefined_agents?: unknown[] | null } | null;
+      subagents?: { type: string } | null;
+      advisor?: { type: string } | null;
+    }
+  | null
+  | undefined;
 /** What a resolved multiagent block has that its variant must not, in a fixed
  *  word for the log, or nothing when it is as intended. */
-export function multiagentMismatch(multiagent: MultiagentLike, variant: WorkspaceVariant): string | undefined {
+export function multiagentMismatch(
+  multiagent: MultiagentLike,
+  variant: WorkspaceVariant,
+): string | undefined {
   if (!multiagent) return variant === "ultra" ? "no_multiagent" : undefined;
   if (multiagent.type !== "multiagent_20261001") return "other_multiagent_type";
   if (multiagent.subagents?.type !== "disabled") return "subagents_enabled";
@@ -110,7 +145,9 @@ export function multiagentMismatch(multiagent: MultiagentLike, variant: Workspac
   const workflows = multiagent.workflows?.type === "enabled";
   if (variant === "plain") return workflows ? "workflows_enabled" : undefined;
   if (!workflows) return "workflows_disabled";
-  return multiagent.workflows?.predefined_agents?.length ? "predefined_agents" : undefined;
+  return multiagent.workflows?.predefined_agents?.length
+    ? "predefined_agents"
+    : undefined;
 }
 // A dated snapshot of the same model is the same model.
 const sameModel = (actual: string | undefined, wanted: string) =>
@@ -130,7 +167,10 @@ export class WorkspaceResources {
   constructor(
     private client: Anthropic,
     private options: {
-      path: string; baseUrl: string; networking: WorkspaceNetworking; log?: Logger;
+      path: string;
+      baseUrl: string;
+      networking: WorkspaceNetworking;
+      log?: Logger;
       identity?: WorkspaceIdentity;
     },
   ) {
@@ -140,12 +180,21 @@ export class WorkspaceResources {
   /** The environment and the variant's agent, created if they do not exist.
    *  Calls are serialized: a turn that arrives while another is creating the
    *  resources waits and uses the same ones. */
-  ensure(variant: WorkspaceVariant, signal?: AbortSignal): Promise<{ environmentId: string; agent: { id: string; version: number } }> {
+  ensure(
+    variant: WorkspaceVariant,
+    signal?: AbortSignal,
+  ): Promise<{
+    environmentId: string;
+    agent: { id: string; version: number };
+  }> {
     return this.serial.run(async () => {
       const stored = await this.load();
       const environment = await this.environment(stored, signal);
       const agent = await this.agent(stored, variant, signal);
-      return { environmentId: environment.id, agent: { id: agent.id, version: agent.version } };
+      return {
+        environmentId: environment.id,
+        agent: { id: agent.id, version: agent.version },
+      };
     });
   }
 
@@ -154,8 +203,12 @@ export class WorkspaceResources {
    *  second, unknown session behind. */
   async createSession(
     spec: {
-      variant: WorkspaceVariant; selection: Selection; system: string; tools: SessionTools;
-      budgetCents: number; channelId: string;
+      variant: WorkspaceVariant;
+      selection: Selection;
+      system: string;
+      tools: SessionTools;
+      budgetCents: number;
+      channelId: string;
     },
     signal?: AbortSignal,
   ): Promise<{ session: BetaManagedAgentsSession; effort?: string }> {
@@ -169,26 +222,37 @@ export class WorkspaceResources {
       const resources = await this.ensure(spec.variant, signal);
       let session: BetaManagedAgentsSession;
       try {
-        session = await this.client.beta.sessions.create({
-          agent: {
-            type: "agent_with_overrides",
-            id: resources.agent.id,
-            version: resources.agent.version,
-            model: { id: spec.selection.model, effort },
-            system: spec.system,
-            tools: spec.tools,
+        session = await this.client.beta.sessions.create(
+          {
+            agent: {
+              type: "agent_with_overrides",
+              id: resources.agent.id,
+              version: resources.agent.version,
+              model: { id: spec.selection.model, effort },
+              system: spec.system,
+              tools: spec.tools,
+            },
+            environment_id: resources.environmentId,
+            budget: budgetLimit(spec.budgetCents),
+            metadata: {
+              app: this.identity.app,
+              variant: spec.variant,
+              channel,
+            },
+            title: `${this.identity.app} ${spec.variant} ${channel.slice(0, 8)}`,
           },
-          environment_id: resources.environmentId,
-          budget: budgetLimit(spec.budgetCents),
-          metadata: { app: this.identity.app, variant: spec.variant, channel },
-          title: `${this.identity.app} ${spec.variant} ${channel.slice(0, 8)}`,
-        }, { maxRetries: 0, signal });
+          { maxRetries: 0, signal },
+        );
       } catch (error) {
         if (signal?.aborted) throw signal.reason;
         const status = apiErrorInfo(error).status;
         // An agent or environment archived outside the bot is reported here.
         // Only what is confirmed gone is created again, and only once.
-        if (!retried && (status === 404 || status === 400) && await this.forgetMissing(spec.variant, resources, signal))
+        if (
+          !retried &&
+          (status === 404 || status === 400) &&
+          (await this.forgetMissing(spec.variant, resources, signal))
+        )
           continue;
         throw toProviderError(error, "request", spec.selection.model);
       }
@@ -203,26 +267,42 @@ export class WorkspaceResources {
     // The bot's own file carries no label and stays as it was written before
     // there was one.
     const empty = (): Stored => ({
-      version: 1, base_url: this.options.baseUrl, ...(app !== BOT_IDENTITY.app && { app }), agents: {},
+      version: 1,
+      base_url: this.options.baseUrl,
+      ...(app !== BOT_IDENTITY.app && { app }),
+      agents: {},
     });
     const resource = (value: unknown): StoredResource | undefined => {
       const v = value as Partial<StoredResource> | null | undefined;
-      return v && typeof v.id === "string" && typeof v.spec === "string" ? { id: v.id, spec: v.spec } : undefined;
+      return v && typeof v.id === "string" && typeof v.spec === "string"
+        ? { id: v.id, spec: v.spec }
+        : undefined;
     };
     let stored = empty();
     try {
-      const raw = await readJson<Partial<Stored> | null>(this.options.path, null);
-      if (raw?.version === 1 && raw.base_url === this.options.baseUrl && (raw.app ?? BOT_IDENTITY.app) === app) {
+      const raw = await readJson<Partial<Stored> | null>(
+        this.options.path,
+        null,
+      );
+      if (
+        raw?.version === 1 &&
+        raw.base_url === this.options.baseUrl &&
+        (raw.app ?? BOT_IDENTITY.app) === app
+      ) {
         stored.environment = resource(raw.environment);
         for (const variant of ["plain", "ultra"] as const) {
           const agent = resource(raw.agents?.[variant]);
           const version = raw.agents?.[variant]?.version;
-          if (agent && typeof version === "number") stored.agents[variant] = { ...agent, version };
+          if (agent && typeof version === "number")
+            stored.agents[variant] = { ...agent, version };
         }
       }
     } catch {
       // A damaged file costs one lookup: the resources are found again by name.
-      this.options.log?.warn({ path: this.options.path }, "workspace resources file is unreadable; looking the resources up again");
+      this.options.log?.warn(
+        { path: this.options.path },
+        "workspace resources file is unreadable; looking the resources up again",
+      );
       stored = empty();
     }
     return (this.stored = stored);
@@ -231,7 +311,10 @@ export class WorkspaceResources {
     return atomicJson(this.options.path, this.stored);
   }
 
-  private async environment(stored: Stored, signal?: AbortSignal): Promise<StoredResource> {
+  private async environment(
+    stored: Stored,
+    signal?: AbortSignal,
+  ): Promise<StoredResource> {
     const request = {
       config: { type: "cloud" as const, networking: this.options.networking },
       description: ENVIRONMENT_DESCRIPTION,
@@ -241,17 +324,33 @@ export class WorkspaceResources {
     const { prefix, app } = this.identity;
     const name = `${prefix}-env-${spec}`;
     const matches = (e: BetaEnvironment) =>
-      e.name === name && e.archived_at === null && e.metadata?.app === app && e.metadata?.spec === spec
-      && this.networkingMatches(e);
-    const environment = await this.call(signal, async () =>
-      await this.find(this.client.beta.environments.list({}, { signal }), matches)
-      ?? await this.client.beta.environments.create({ name, ...request, metadata: { app, spec } }, { maxRetries: 0, signal }));
+      e.name === name &&
+      e.archived_at === null &&
+      e.metadata?.app === app &&
+      e.metadata?.spec === spec &&
+      this.networkingMatches(e);
+    const environment = await this.call(
+      signal,
+      async () =>
+        (await this.find(
+          this.client.beta.environments.list({}, { signal }),
+          matches,
+        )) ??
+        (await this.client.beta.environments.create(
+          { name, ...request, metadata: { app, spec } },
+          { maxRetries: 0, signal },
+        )),
+    );
     stored.environment = { id: environment.id, spec };
     await this.save();
     return stored.environment;
   }
 
-  private async agent(stored: Stored, variant: WorkspaceVariant, signal?: AbortSignal): Promise<StoredAgent> {
+  private async agent(
+    stored: Stored,
+    variant: WorkspaceVariant,
+    signal?: AbortSignal,
+  ): Promise<StoredAgent> {
     const request = {
       model: AGENT_MODEL,
       description: AGENT_DESCRIPTION[variant],
@@ -265,14 +364,32 @@ export class WorkspaceResources {
     // An agent edited outside the bot keeps its name and metadata, so what is
     // adopted is checked against the definition, not only against its labels.
     const matches = (a: BetaManagedAgentsAgent) =>
-      a.name === name && a.archived_at === null && a.metadata?.app === app && a.metadata?.spec === spec
-      && sameModel(a.model?.id, AGENT_MODEL) && !a.mcp_servers?.length && !a.skills?.length
-      && !multiagentMismatch(a.multiagent, variant);
-    const agent = await this.call(signal, async () =>
-      await this.find(this.client.beta.agents.list({}, { signal }), matches)
-      ?? await this.client.beta.agents.create({ name, ...request, metadata: { app, variant, spec } }, { maxRetries: 0, signal }));
+      a.name === name &&
+      a.archived_at === null &&
+      a.metadata?.app === app &&
+      a.metadata?.spec === spec &&
+      sameModel(a.model?.id, AGENT_MODEL) &&
+      !a.mcp_servers?.length &&
+      !a.skills?.length &&
+      !multiagentMismatch(a.multiagent, variant);
+    const agent = await this.call(
+      signal,
+      async () =>
+        (await this.find(
+          this.client.beta.agents.list({}, { signal }),
+          matches,
+        )) ??
+        (await this.client.beta.agents.create(
+          { name, ...request, metadata: { app, variant, spec } },
+          { maxRetries: 0, signal },
+        )),
+    );
     const mismatch = multiagentMismatch(agent.multiagent, variant);
-    if (mismatch) this.options.log?.warn({ agent: agent.id, variant, mismatch }, "workspace agent was created with a different multiagent setting");
+    if (mismatch)
+      this.options.log?.warn(
+        { agent: agent.id, variant, mismatch },
+        "workspace agent was created with a different multiagent setting",
+      );
     stored.agents[variant] = { id: agent.id, version: agent.version, spec };
     await this.save();
     return stored.agents[variant];
@@ -280,18 +397,26 @@ export class WorkspaceResources {
 
   private networkingMatches(environment: BetaEnvironment): boolean {
     if (environment.config.type !== "cloud") return false;
-    const actual = environment.config.networking, wanted = this.options.networking;
+    const actual = environment.config.networking,
+      wanted = this.options.networking;
     if (actual.type !== wanted.type) return false;
     if (actual.type !== "limited" || wanted.type !== "limited") return true;
-    const hosts = (list?: string[] | null) => JSON.stringify([...(list ?? [])].sort());
-    return hosts(actual.allowed_hosts) === hosts(wanted.allowed_hosts)
-      && actual.allow_package_managers === (wanted.allow_package_managers ?? false)
-      && actual.allow_mcp_servers === (wanted.allow_mcp_servers ?? false);
+    const hosts = (list?: string[] | null) =>
+      JSON.stringify([...(list ?? [])].sort());
+    return (
+      hosts(actual.allowed_hosts) === hosts(wanted.allowed_hosts) &&
+      actual.allow_package_managers ===
+        (wanted.allow_package_managers ?? false) &&
+      actual.allow_mcp_servers === (wanted.allow_mcp_servers ?? false)
+    );
   }
 
   /** The first listed item that matches. A create whose response was lost,
    *  or a lost file, is recovered this way instead of creating a duplicate. */
-  private async find<T>(items: AsyncIterable<T>, matches: (item: T) => boolean): Promise<T | undefined> {
+  private async find<T>(
+    items: AsyncIterable<T>,
+    matches: (item: T) => boolean,
+  ): Promise<T | undefined> {
     let scanned = 0;
     for await (const item of items) {
       if (matches(item)) return item;
@@ -299,7 +424,10 @@ export class WorkspaceResources {
     }
   }
 
-  private async call<T>(signal: AbortSignal | undefined, run: () => Promise<T>): Promise<T> {
+  private async call<T>(
+    signal: AbortSignal | undefined,
+    run: () => Promise<T>,
+  ): Promise<T> {
     try {
       return await run();
     } catch (error) {
@@ -318,8 +446,12 @@ export class WorkspaceResources {
     return this.serial.run(async () => {
       const stored = await this.load();
       // Another turn already replaced it.
-      let changed = stored.environment?.id !== used.environmentId || stored.agents[variant]?.id !== used.agent.id;
-      const gone = async (retrieve: () => Promise<{ archived_at: string | null }>) => {
+      let changed =
+        stored.environment?.id !== used.environmentId ||
+        stored.agents[variant]?.id !== used.agent.id;
+      const gone = async (
+        retrieve: () => Promise<{ archived_at: string | null }>,
+      ) => {
         try {
           return (await retrieve()).archived_at !== null;
         } catch (error) {
@@ -328,13 +460,25 @@ export class WorkspaceResources {
           return apiErrorInfo(error).status === 404;
         }
       };
-      if (stored.environment?.id === used.environmentId
-        && await gone(() => this.client.beta.environments.retrieve(used.environmentId, {}, { signal }))) {
+      if (
+        stored.environment?.id === used.environmentId &&
+        (await gone(() =>
+          this.client.beta.environments.retrieve(
+            used.environmentId,
+            {},
+            { signal },
+          ),
+        ))
+      ) {
         delete stored.environment;
         changed = true;
       }
-      if (stored.agents[variant]?.id === used.agent.id
-        && await gone(() => this.client.beta.agents.retrieve(used.agent.id, {}, { signal }))) {
+      if (
+        stored.agents[variant]?.id === used.agent.id &&
+        (await gone(() =>
+          this.client.beta.agents.retrieve(used.agent.id, {}, { signal }),
+        ))
+      ) {
         delete stored.agents[variant];
         changed = true;
       }
@@ -352,11 +496,15 @@ export class WorkspaceResources {
   ) {
     const model = sameModel(session.agent?.model?.id, spec.selection.model);
     if (!model || session.budget == null) {
-      await this.client.beta.sessions.archive(session.id, {}, { signal }).catch(() => {});
+      await this.client.beta.sessions
+        .archive(session.id, {}, { signal })
+        .catch(() => {});
       if (signal?.aborted) throw signal.reason;
       const failure = new ProviderError("protocol", false);
       failure.diagnostics = {
-        phase: "request", provider: WORKSPACE_PROVIDER, model: spec.selection.model,
+        phase: "request",
+        provider: WORKSPACE_PROVIDER,
+        model: spec.selection.model,
         code: model ? "session_without_budget" : "session_model_mismatch",
       };
       throw failure;
@@ -364,6 +512,10 @@ export class WorkspaceResources {
     // Whether the override keeps the agent's multiagent block is not verified
     // against the API yet, so a difference is logged instead of failing.
     const mismatch = multiagentMismatch(session.agent.multiagent, spec.variant);
-    if (mismatch) this.options.log?.warn({ session: session.id, variant: spec.variant, mismatch }, "workspace session multiagent differs from its variant");
+    if (mismatch)
+      this.options.log?.warn(
+        { session: session.id, variant: spec.variant, mismatch },
+        "workspace session multiagent differs from its variant",
+      );
   }
 }

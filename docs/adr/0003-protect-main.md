@@ -6,6 +6,7 @@
 - 置き換える／置き換えられた ADR: なし
 
 ## 要求と決定
+
 - プロダクトの特性と、満たす要求:
   - main への push は、そのまま本番の API・Web・bot に配信される
   - bot はホストの Docker・VPN コンテナ・音声合成に依存し、Discord のトークンも 1 つなので、本番と同じ環境を別に作りにくい（#3）
@@ -24,6 +25,7 @@
   - ステージングの常設は、範囲を決めたときに「やらないこと」とした（#3）
 
 ## 影響
+
 - 得られる効果: 検査を通っていない変更と、PR を通らない変更は main に入らない。持ち主の権限で動く AI も main へ直接 push できない
 - 費用・運用の負荷・残る制約:
   - 緊急の修正でも PR と検査（数分）を待つ
@@ -33,12 +35,16 @@
   - 緊急時に保護を外す手順は下のとおり。外した事実と理由を Issue に残す
 
 ## 実装と検証
+
 - 適用した commit・構成図: リポジトリの設定なので commit はない。2026-10-04 17:17 JST に、#5 の 16 の決定に基づいて API で設定した
 - 設定の内容（`gh api repos/hsincode/hibana/branches/main/protection` で確かめられる）:
 
   ```json
   {
-    "required_status_checks": { "strict": false, "contexts": ["checks", "container"] },
+    "required_status_checks": {
+      "strict": false,
+      "contexts": ["checks", "container"]
+    },
     "enforce_admins": true,
     "required_pull_request_reviews": { "required_approving_review_count": 0 },
     "restrictions": null,
@@ -59,6 +65,7 @@
 5. 戻したことを `gh api repos/hsincode/hibana/branches/main/protection --jq .enforce_admins.enabled` で確かめ、Issue に書く
 
 ## 見直す条件
+
 - 検査を通った変更が本番で壊れることが続いたとき（プレビューか、承認つきの配信を足す）
 - 緊急時に保護を外すことが繰り返されるとき
 - 開発者が増えたとき（承認の必要数を上げる）

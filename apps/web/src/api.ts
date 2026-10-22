@@ -1,4 +1,9 @@
-import type { MultiAgentRoles, SubagentModel, SubagentEffort, ServiceTier } from "@hibana/shared/settings";
+import type {
+  MultiAgentRoles,
+  SubagentModel,
+  SubagentEffort,
+  ServiceTier,
+} from "@hibana/shared/settings";
 const API =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(
     /\/$/,

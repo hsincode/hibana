@@ -10,7 +10,12 @@ import {
   subagentModelTitle,
   subagentNoticeLine,
 } from "../multi-agent";
-import { assertChildSelection, forkMessages, selectChild, teamTools } from "../multi-agent-policy";
+import {
+  assertChildSelection,
+  forkMessages,
+  selectChild,
+  teamTools,
+} from "../multi-agent-policy";
 import { Runtime } from "../runtime";
 import { ToolRegistry } from "../tools";
 import { assemblePrompt } from "../harness";
@@ -45,15 +50,15 @@ const call = (name: string, args: Json) => ({
 test("subagent start notice uses the catalog name and one task line", () => {
   const luna = { provider: "codex_plus", model: "gpt-6-luna", effort: "max" };
   expect(subagentModelTitle(luna)).toBe("GPT 6 Luna");
-  expect(subagentModelTitle({ provider: "codex_pro", model: "gpt-6-luna" })).toBe(
-    "GPT 6 Luna",
-  );
+  expect(
+    subagentModelTitle({ provider: "codex_pro", model: "gpt-6-luna" }),
+  ).toBe("GPT 6 Luna");
   expect(
     subagentModelTitle({ provider: "claude_kiro", model: "claude-opus-5" }),
   ).toBe("Claude Opus 5");
-  expect(
-    subagentModelTitle({ provider: "custom", model: "gpt-oss-20b" }),
-  ).toBe("GPT Oss 20b");
+  expect(subagentModelTitle({ provider: "custom", model: "gpt-oss-20b" })).toBe(
+    "GPT Oss 20b",
+  );
   expect(
     formatSubagentStartNotice(luna, "  ワークスペースの構成を調べます。  "),
   ).toBe("サブエージェント: GPT 6 Luna\nワークスペースの構成を調べます。");
@@ -64,9 +69,9 @@ test("subagent start notice uses the catalog name and one task line", () => {
   expect(subagentNoticeLine("ワークスペースを調べます")).toBe(
     "ワークスペースを調べます",
   );
-  expect(() => subagentNoticeLine("Inspect the workspace and report the layout.")).toThrow(
-    "Japanese",
-  );
+  expect(() =>
+    subagentNoticeLine("Inspect the workspace and report the layout."),
+  ).toThrow("Japanese");
 });
 
 const options = (ctx: Context, runtime: Runtime): AgentOptions => ({
@@ -189,125 +194,148 @@ test("fork history follows HsinCLI recent-turn policy and repairs in-flight tool
 });
 
 test.each([{ LLM_EFFORT: "ultra" }, { LLM_EFFORT: "low", ULTRA_MODE: "true" }])(
-  "real agent loop runs asynchronous children and grandchildren with %j", async (env) => {
-  const runtime = new Runtime(config(env));
-  const seen = new Map<string, number>();
-  const requests: { path: string; messages: Message[]; tools: string[] }[] = [];
-  const llm = new LlmClient(runtime.config, async (_url, init) => {
-    const body = JSON.parse(String(init?.body));
-    const messages: Message[] = body.messages;
-    const role = [...messages]
-      .reverse()
-      .find((m) => m.content?.startsWith("<multi_agent_role>"))!.content!;
-    const path = /You are (\/root[^,]*)/.exec(role)![1]!;
-    const round = seen.get(path) ?? 0;
-    seen.set(path, round + 1);
-    requests.push({
-      path,
-      messages,
-      tools: body.tools.map(
-        (t: { function: { name: string } }) => t.function.name,
-      ),
-    });
-    expect(body.reasoning_effort).toBe(env.LLM_EFFORT === "ultra" ? "max" : "low");
-    // Ultra is Ultracode now: individual agents keep the explicit Codex
-    // policy and the standing opt-in belongs to the Workflow tool.
-    expect(messages.some(m => m.content?.includes("Do not spawn sub-agents unless the user"))).toBe(true);
-    expect(messages.some(m => m.content?.includes("Proactive multi-agent delegation is active"))).toBe(false);
-    expect(messages.some((m) => "turnStart" in m || "internal" in m)).toBe(
-      false,
-    );
-    let calls;
-    if (path === "/root" && round === 0)
-      calls = [
-        call("spawn_agent", {
-          task_name: "worker",
-          message: "Investigate and delegate a check",
-          notice: "調査を分担して確認します",
-        }),
-        call("spawn_agent", {
-          task_name: "sibling",
-          message: "Independent check",
-          notice: "別件を独立して確認します",
-        }),
-      ];
-    if (path === "/root/worker" && round === 0)
-      calls = [
-        call("spawn_agent", {
-          task_name: "check",
-          message: "Nested check",
-          notice: "細部を追加で確認します",
-          fork_turns: "none",
-        }),
-      ];
-    return Response.json({
-      choices: [
-        {
-          message: {
-            role: "assistant",
-            content: calls ? null : `${path} result`,
-            tool_calls: calls,
+  "real agent loop runs asynchronous children and grandchildren with %j",
+  async (env) => {
+    const runtime = new Runtime(config(env));
+    const seen = new Map<string, number>();
+    const requests: { path: string; messages: Message[]; tools: string[] }[] =
+      [];
+    const llm = new LlmClient(runtime.config, async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      const messages: Message[] = body.messages;
+      const role = [...messages]
+        .reverse()
+        .find((m) => m.content?.startsWith("<multi_agent_role>"))!.content!;
+      const path = /You are (\/root[^,]*)/.exec(role)![1]!;
+      const round = seen.get(path) ?? 0;
+      seen.set(path, round + 1);
+      requests.push({
+        path,
+        messages,
+        tools: body.tools.map(
+          (t: { function: { name: string } }) => t.function.name,
+        ),
+      });
+      expect(body.reasoning_effort).toBe(
+        env.LLM_EFFORT === "ultra" ? "max" : "low",
+      );
+      // Ultra is Ultracode now: individual agents keep the explicit Codex
+      // policy and the standing opt-in belongs to the Workflow tool.
+      expect(
+        messages.some((m) =>
+          m.content?.includes("Do not spawn sub-agents unless the user"),
+        ),
+      ).toBe(true);
+      expect(
+        messages.some((m) =>
+          m.content?.includes("Proactive multi-agent delegation is active"),
+        ),
+      ).toBe(false);
+      expect(messages.some((m) => "turnStart" in m || "internal" in m)).toBe(
+        false,
+      );
+      let calls;
+      if (path === "/root" && round === 0)
+        calls = [
+          call("spawn_agent", {
+            task_name: "worker",
+            message: "Investigate and delegate a check",
+            notice: "調査を分担して確認します",
+          }),
+          call("spawn_agent", {
+            task_name: "sibling",
+            message: "Independent check",
+            notice: "別件を独立して確認します",
+          }),
+        ];
+      if (path === "/root/worker" && round === 0)
+        calls = [
+          call("spawn_agent", {
+            task_name: "check",
+            message: "Nested check",
+            notice: "細部を追加で確認します",
+            fork_turns: "none",
+          }),
+        ];
+      return Response.json({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: calls ? null : `${path} result`,
+              tool_calls: calls,
+            },
+            finish_reason: "stop",
           },
-          finish_reason: "stop",
-        },
-      ],
-      usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 },
+        ],
+        usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 },
+      });
     });
-  });
-  const agent = new Agent(llm),
-    client = new Client({ intents: [] }),
-    registry = new ToolRegistry(runtime, client, agent);
-  const ctx = context(),
-    base = options(ctx, runtime);
-  base.messages = [
-    ...(await assemblePrompt(runtime, ctx, "")),
-    ...base.messages,
-  ];
-  base.execute = (name, args, c) => registry.execute(name, args, c);
-  const session = new MultiAgentSession(runtime, agent, (c) =>
-    registry.tools(c),
-  );
-  try {
-    const result = await session.runRoot(base);
-    expect(result.text).toBe("/root result");
-    expect([...seen.keys()].sort()).toEqual([
-      "/root",
-      "/root/sibling",
-      "/root/worker",
-      "/root/worker/check",
-    ]);
-    expect(
-      result.messages.some(
-        (m) =>
-          m.content?.includes("Message Type: FINAL_ANSWER") &&
-          m.content.includes("/root/worker result"),
-      ),
-    ).toBe(true);
-    expect(
-      requests
-        .filter((r) => r.path === "/root/worker")
-        .at(-1)!
-        .messages.some((m) => m.content?.includes("/root/worker/check result")),
-    ).toBe(true);
-    expect(
-      requests.every(
-        (r) =>
-          r.tools.includes("agents__spawn_agent") &&
-          r.tools.includes("request_user_input"),
-      ),
-    ).toBe(true);
-    // Workflow and TaskStop belong to root, like Claude Code's main loop.
-    expect(requests.every((r) => r.tools.includes("Workflow") === (r.path === "/root"))).toBe(true);
-    expect(requests.every((r) => r.tools.includes("TaskStop") === (r.path === "/root"))).toBe(true);
-    expect(result.usage.total_tokens).toBe(requests.length * 3);
-    await expect(session.execute("list_agents", {}, ctx)).rejects.toThrow(
-      "no longer active",
+    const agent = new Agent(llm),
+      client = new Client({ intents: [] }),
+      registry = new ToolRegistry(runtime, client, agent);
+    const ctx = context(),
+      base = options(ctx, runtime);
+    base.messages = [
+      ...(await assemblePrompt(runtime, ctx, "")),
+      ...base.messages,
+    ];
+    base.execute = (name, args, c) => registry.execute(name, args, c);
+    const session = new MultiAgentSession(runtime, agent, (c) =>
+      registry.tools(c),
     );
-  } finally {
-    await registry.close();
-    client.destroy();
-  }
-});
+    try {
+      const result = await session.runRoot(base);
+      expect(result.text).toBe("/root result");
+      expect([...seen.keys()].sort()).toEqual([
+        "/root",
+        "/root/sibling",
+        "/root/worker",
+        "/root/worker/check",
+      ]);
+      expect(
+        result.messages.some(
+          (m) =>
+            m.content?.includes("Message Type: FINAL_ANSWER") &&
+            m.content.includes("/root/worker result"),
+        ),
+      ).toBe(true);
+      expect(
+        requests
+          .filter((r) => r.path === "/root/worker")
+          .at(-1)!
+          .messages.some((m) =>
+            m.content?.includes("/root/worker/check result"),
+          ),
+      ).toBe(true);
+      expect(
+        requests.every(
+          (r) =>
+            r.tools.includes("agents__spawn_agent") &&
+            r.tools.includes("request_user_input"),
+        ),
+      ).toBe(true);
+      // Workflow and TaskStop belong to root, like Claude Code's main loop.
+      expect(
+        requests.every(
+          (r) => r.tools.includes("Workflow") === (r.path === "/root"),
+        ),
+      ).toBe(true);
+      expect(
+        requests.every(
+          (r) => r.tools.includes("TaskStop") === (r.path === "/root"),
+        ),
+      ).toBe(true);
+      expect(result.usage.total_tokens).toBe(requests.length * 3);
+      await expect(session.execute("list_agents", {}, ctx)).rejects.toThrow(
+        "no longer active",
+      );
+    } finally {
+      await registry.close();
+      client.destroy();
+    }
+  },
+);
 
 // Drive the scheduler directly so cancellation and steering races are repeatable
 // without network timing or sleeping for the production wait timeout.
@@ -514,97 +542,230 @@ test("user steering interrupts wait_agent without cancelling the task tree", asy
 test("Discord and agent messages have unique schemas and independent dispatch", async () => {
   const runtime = new Runtime(config());
   const agent = new Agent(new LlmClient(runtime.config));
-  const registry = new ToolRegistry(runtime, new Client({ intents: [] }), agent);
+  const registry = new ToolRegistry(
+    runtime,
+    new Client({ intents: [] }),
+    agent,
+  );
   const invocations: { kind: string; name: string; args: Json }[] = [];
   const ctx = context();
-  ctx.team = { execute: async (name: string, args: Json) => {
-    invocations.push({ kind: "agent", name, args }); return { ok: true };
-  } } as unknown as MultiAgentSession;
+  ctx.team = {
+    execute: async (name: string, args: Json) => {
+      invocations.push({ kind: "agent", name, args });
+      return { ok: true };
+    },
+  } as unknown as MultiAgentSession;
   registry.discord.execute = async (name, args) => {
-    invocations.push({ kind: "discord", name, args }); return { ok: true };
+    invocations.push({ kind: "discord", name, args });
+    return { ok: true };
   };
   const tools = registry.tools(ctx);
-  expect(new Set(tools.map(t => t.function.name)).size).toBe(tools.length);
-  expect(tools.find(t => t.function.name === "agents__send_message")?.function.parameters.required).toEqual(["target", "message"]);
-  expect(tools.find(t => t.function.name === "mcp__discord__send_message")?.function.parameters.properties).toHaveProperty("channel_id");
-  await registry.execute("agents__send_message", { target: "worker", message: "continue" }, ctx);
-  await registry.execute("mcp__discord__send_message", { channel_id: "12345", content: "hello" }, ctx);
-  expect(invocations.map(i => [i.kind, i.name])).toEqual([["agent", "send_message"], ["discord", "send_message"]]);
-  await expect(registry.execute("agents__send_message", { channel_id: "12345", content: "wrong schema" }, ctx)).rejects.toThrow("Invalid arguments");
-  await expect(registry.execute("mcp__discord__send_message", { target: "worker", message: "wrong schema" }, ctx)).rejects.toThrow("Invalid arguments");
+  expect(new Set(tools.map((t) => t.function.name)).size).toBe(tools.length);
+  expect(
+    tools.find((t) => t.function.name === "agents__send_message")?.function
+      .parameters.required,
+  ).toEqual(["target", "message"]);
+  expect(
+    tools.find((t) => t.function.name === "mcp__discord__send_message")
+      ?.function.parameters.properties,
+  ).toHaveProperty("channel_id");
+  await registry.execute(
+    "agents__send_message",
+    { target: "worker", message: "continue" },
+    ctx,
+  );
+  await registry.execute(
+    "mcp__discord__send_message",
+    { channel_id: "12345", content: "hello" },
+    ctx,
+  );
+  expect(invocations.map((i) => [i.kind, i.name])).toEqual([
+    ["agent", "send_message"],
+    ["discord", "send_message"],
+  ]);
+  await expect(
+    registry.execute(
+      "agents__send_message",
+      { channel_id: "12345", content: "wrong schema" },
+      ctx,
+    ),
+  ).rejects.toThrow("Invalid arguments");
+  await expect(
+    registry.execute(
+      "mcp__discord__send_message",
+      { target: "worker", message: "wrong schema" },
+      ctx,
+    ),
+  ).rejects.toThrow("Invalid arguments");
   const withoutTeam = { ...ctx, team: undefined };
-  expect(registry.tools(withoutTeam).some(t => t.function.name === "agents__send_message")).toBe(false);
-  expect(registry.tools(withoutTeam).some(t => t.function.name === "mcp__discord__send_message")).toBe(true);
-  await expect(registry.execute("agents__send_message", { target: "worker", message: "no session" }, withoutTeam)).rejects.toThrow();
+  expect(
+    registry
+      .tools(withoutTeam)
+      .some((t) => t.function.name === "agents__send_message"),
+  ).toBe(false);
+  expect(
+    registry
+      .tools(withoutTeam)
+      .some((t) => t.function.name === "mcp__discord__send_message"),
+  ).toBe(true);
+  await expect(
+    registry.execute(
+      "agents__send_message",
+      { target: "worker", message: "no session" },
+      withoutTeam,
+    ),
+  ).rejects.toThrow();
 });
 
-
 test("ChatGPT children use master-account availability for inherited and fixed policies", () => {
-  const runtime = new Runtime(config({ WEB_API_URL: "https://settings.example.com", WEB_INTERNAL_TOKEN: "fixture" }));
+  const runtime = new Runtime(
+    config({
+      WEB_API_URL: "https://settings.example.com",
+      WEB_INTERNAL_TOKEN: "fixture",
+    }),
+  );
   const ctx = context();
   const parent = { provider: "chatgpt", model: "gpt-6-luna", effort: "high" };
   runtime.snapshot.chatgpt_available = true;
   expect(runtime.config.endpoints.chatgpt?.apiKey).toBeFalsy();
   expect(runtime.canSelect("chatgpt-luna", ctx.userId)).toBe(true);
-  for (const policy of [{ mode: "auto" }, { mode: "same" }, { mode: "fixed", preset: "chatgpt-luna" }] as const) {
-    runtime.snapshot.guilds.g1 = { ...emptyGuild(), subagent_model: policy, subagent_effort: { mode: "same" } };
+  for (const policy of [
+    { mode: "auto" },
+    { mode: "same" },
+    { mode: "fixed", preset: "chatgpt-luna" },
+  ] as const) {
+    runtime.snapshot.guilds.g1 = {
+      ...emptyGuild(),
+      subagent_model: policy,
+      subagent_effort: { mode: "same" },
+    };
     expect(selectChild(runtime, ctx, parent, {})).toEqual(parent);
   }
   runtime.snapshot.guilds.g1!.subagent_model = { mode: "auto" };
-  expect(selectChild(runtime, ctx, runtime.config.selection, { model: "chatgpt-luna" }).provider).toBe("chatgpt");
+  expect(
+    selectChild(runtime, ctx, runtime.config.selection, {
+      model: "chatgpt-luna",
+    }).provider,
+  ).toBe("chatgpt");
 
   // Spawn and follow-up share this guard; dormant children must lose access
   // when the master account is disabled, even though their model is unchanged.
   runtime.snapshot.chatgpt_available = false;
-  expect(() => assertChildSelection(runtime, ctx, parent)).toThrow("unavailable");
+  expect(() => assertChildSelection(runtime, ctx, parent)).toThrow(
+    "unavailable",
+  );
   runtime.snapshot.chatgpt_available = true;
   runtime.snapshot.unpublished_presets = ["chatgpt-luna"];
-  expect(() => assertChildSelection(runtime, ctx, parent)).toThrow("unavailable");
+  expect(() => assertChildSelection(runtime, ctx, parent)).toThrow(
+    "unavailable",
+  );
   runtime.snapshot.unpublished_presets = [];
   runtime.snapshot.premium_presets = ["chatgpt-luna"];
-  expect(() => assertChildSelection(runtime, ctx, parent)).toThrow("unavailable");
+  expect(() => assertChildSelection(runtime, ctx, parent)).toThrow(
+    "unavailable",
+  );
   runtime.snapshot.user_roles[ctx.userId] = "premium";
   expect(() => assertChildSelection(runtime, ctx, parent)).not.toThrow();
   runtime.config.webApiUrl = "";
-  expect(() => assertChildSelection(runtime, ctx, parent)).toThrow("unavailable");
+  expect(() => assertChildSelection(runtime, ctx, parent)).toThrow(
+    "unavailable",
+  );
 });
 
 test("master-account availability never supplies credentials for other child providers", () => {
-  const runtime = new Runtime(config({ CODEX_PRO_API_KEY: "", WEB_API_URL: "https://settings.example.com", WEB_INTERNAL_TOKEN: "fixture" }));
+  const runtime = new Runtime(
+    config({
+      CODEX_PRO_API_KEY: "",
+      WEB_API_URL: "https://settings.example.com",
+      WEB_INTERNAL_TOKEN: "fixture",
+    }),
+  );
   runtime.snapshot.chatgpt_available = true;
-  expect(() => selectChild(runtime, context(), runtime.config.selection, { model: "pro-luna" })).toThrow("unavailable");
-  expect(() => assertChildSelection(runtime, context(), { provider: "custom", model: "custom-model" })).toThrow("unavailable");
+  expect(() =>
+    selectChild(runtime, context(), runtime.config.selection, {
+      model: "pro-luna",
+    }),
+  ).toThrow("unavailable");
+  expect(() =>
+    assertChildSelection(runtime, context(), {
+      provider: "custom",
+      model: "custom-model",
+    }),
+  ).toThrow("unavailable");
 });
 
 test("Ultra completes an inherited ChatGPT worker through the agent loop", async () => {
-  const runtime = new Runtime(config({
-    PROVIDER: "chatgpt", LLM_MODEL: "gpt-6-luna",
-    WEB_API_URL: "https://settings.example.com", WEB_INTERNAL_TOKEN: "fixture",
-  }));
+  const runtime = new Runtime(
+    config({
+      PROVIDER: "chatgpt",
+      LLM_MODEL: "gpt-6-luna",
+      WEB_API_URL: "https://settings.example.com",
+      WEB_INTERNAL_TOKEN: "fixture",
+    }),
+  );
   runtime.snapshot.chatgpt_available = true;
   const llm = new LlmClient(runtime.config);
   const visited = new Set<string>();
   let rootCalls = 0;
   llm.complete = async (selection, messages, tools) => {
     expect(selection.provider).toBe("chatgpt");
-    expect(messages.some(m => m.content?.includes("Do not spawn sub-agents unless the user"))).toBe(true);
-    expect(tools.some(t => t.function.name === "agents__spawn_agent")).toBe(true);
-    const identity = [...messages].reverse().find(m => m.content?.startsWith("<multi_agent_role>"))!.content!;
+    expect(
+      messages.some((m) =>
+        m.content?.includes("Do not spawn sub-agents unless the user"),
+      ),
+    ).toBe(true);
+    expect(tools.some((t) => t.function.name === "agents__spawn_agent")).toBe(
+      true,
+    );
+    const identity = [...messages]
+      .reverse()
+      .find((m) => m.content?.startsWith("<multi_agent_role>"))!.content!;
     const path = /You are (\/root[^,]*)/.exec(identity)![1]!;
     visited.add(path);
-    const calls = path === "/root" && rootCalls++ === 0
-      ? [call("spawn_agent", { task_name: "worker", message: "Independent check", notice: "独立した確認を進めます" })]
-      : undefined;
-    return { message: { role: "assistant", content: calls ? null : `${path} result`, tool_calls: calls as never }, usage: emptyUsage(), incomplete: false };
+    const calls =
+      path === "/root" && rootCalls++ === 0
+        ? [
+            call("spawn_agent", {
+              task_name: "worker",
+              message: "Independent check",
+              notice: "独立した確認を進めます",
+            }),
+          ]
+        : undefined;
+    return {
+      message: {
+        role: "assistant",
+        content: calls ? null : `${path} result`,
+        tool_calls: calls as never,
+      },
+      usage: emptyUsage(),
+      incomplete: false,
+    };
   };
-  const agent = new Agent(llm), client = new Client({ intents: [] });
+  const agent = new Agent(llm),
+    client = new Client({ intents: [] });
   const registry = new ToolRegistry(runtime, client, agent);
-  const ctx = context(), base = options(ctx, runtime);
-  base.messages = [...await assemblePrompt(runtime, ctx, ""), ...base.messages];
+  const ctx = context(),
+    base = options(ctx, runtime);
+  base.messages = [
+    ...(await assemblePrompt(runtime, ctx, "")),
+    ...base.messages,
+  ];
   base.execute = (name, args, c) => registry.execute(name, args, c);
   try {
-    const result = await new MultiAgentSession(runtime, agent, c => registry.tools(c)).runRoot(base);
+    const result = await new MultiAgentSession(runtime, agent, (c) =>
+      registry.tools(c),
+    ).runRoot(base);
     expect([...visited].sort()).toEqual(["/root", "/root/worker"]);
-    expect(result.messages.some(m => m.content?.includes("Message Type: FINAL_ANSWER") && m.content.includes("/root/worker result"))).toBe(true);
-  } finally { await registry.close(); client.destroy(); }
+    expect(
+      result.messages.some(
+        (m) =>
+          m.content?.includes("Message Type: FINAL_ANSWER") &&
+          m.content.includes("/root/worker result"),
+      ),
+    ).toBe(true);
+  } finally {
+    await registry.close();
+    client.destroy();
+  }
 });

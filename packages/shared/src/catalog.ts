@@ -294,9 +294,25 @@ export const MODEL_PRESETS = [
   },
   // Match Codex Pro's model and publication defaults, with independent
   // credentials. Public models are usable by Free users after staff login.
-  { id: "chatgpt-sol", provider: "chatgpt", model: "gpt-6.1-sol", label: "ChatGPT / GPT-6.1 Sol" },
-  { id: "chatgpt-luna", provider: "chatgpt", model: "gpt-6-luna", label: "ChatGPT / GPT-6 Luna" },
-  { id: "chatgpt-astra", provider: "chatgpt", model: "gpt-6-astra", label: "ChatGPT / GPT-6 Astra", published: false },
+  {
+    id: "chatgpt-sol",
+    provider: "chatgpt",
+    model: "gpt-6.1-sol",
+    label: "ChatGPT / GPT-6.1 Sol",
+  },
+  {
+    id: "chatgpt-luna",
+    provider: "chatgpt",
+    model: "gpt-6-luna",
+    label: "ChatGPT / GPT-6 Luna",
+  },
+  {
+    id: "chatgpt-astra",
+    provider: "chatgpt",
+    model: "gpt-6-astra",
+    label: "ChatGPT / GPT-6 Astra",
+    published: false,
+  },
 ] as const;
 
 /** Retired DeepSeek preset ids → current catalog id. Dashboard PATCH + leftover rows. */
@@ -322,10 +338,22 @@ export function canonicalPresetId(raw: string): string {
 
 /** Retired wire ids on the accounts that shipped them. Custom and OpenRouter
  *  keep a literal model string — those endpoints are not this catalog. */
-const MODEL_WIRE_ALIASES: Record<string, { model: string; providers: readonly string[] }> = {
-  "gpt-5.6-sol": { model: "gpt-6.1-sol", providers: ["codex_plus", "codex_pro", "chatgpt"] },
-  "gpt-6-sol": { model: "gpt-6.1-sol", providers: ["codex_plus", "codex_pro", "chatgpt"] },
-  "gpt-5.6-luna": { model: "gpt-6-luna", providers: ["codex_plus", "codex_pro", "chatgpt"] },
+const MODEL_WIRE_ALIASES: Record<
+  string,
+  { model: string; providers: readonly string[] }
+> = {
+  "gpt-5.6-sol": {
+    model: "gpt-6.1-sol",
+    providers: ["codex_plus", "codex_pro", "chatgpt"],
+  },
+  "gpt-6-sol": {
+    model: "gpt-6.1-sol",
+    providers: ["codex_plus", "codex_pro", "chatgpt"],
+  },
+  "gpt-5.6-luna": {
+    model: "gpt-6-luna",
+    providers: ["codex_plus", "codex_pro", "chatgpt"],
+  },
   "claude-fable-5": { model: "claude-fable-5-1", providers: ["claude_max"] },
 };
 
@@ -357,7 +385,10 @@ export const AUTO_ROUTE_REQUEST_ONLY = [
 ] as const;
 
 /** Used whenever Jev cannot classify the request. */
-export const AUTO_ROUTE_FALLBACK = { model: "claude-haiku-5-5", effort: "high" } as const;
+export const AUTO_ROUTE_FALLBACK = {
+  model: "claude-haiku-5-5",
+  effort: "high",
+} as const;
 
 /** Anthropic turns, auto included, run without subagents (#35). */
 export function subagentsUnsupported(provider: string | undefined): boolean {
@@ -377,14 +408,23 @@ export const WORKSPACE_ULTRA_MODEL = "claude-haiku-5-5";
  *  delegation. An `anthropic` turn runs without subagents (#35), so nothing
  *  does there. The dashboard and the bot's `resolve` both ask this, through
  *  `effectiveSubagentMode`. */
-export function ultraSupported(selection: { provider: string; model: string }): boolean {
+export function ultraSupported(selection: {
+  provider: string;
+  model: string;
+}): boolean {
   return selection.provider === WORKSPACE_PROVIDER
     ? selection.model === WORKSPACE_ULTRA_MODEL
     : !subagentsUnsupported(selection.provider);
 }
 
-export function isAutoRoute(selection: { provider: string; model: string }): boolean {
-  return selection.provider === AUTO_ROUTE_PROVIDER && selection.model === AUTO_ROUTE_MODEL;
+export function isAutoRoute(selection: {
+  provider: string;
+  model: string;
+}): boolean {
+  return (
+    selection.provider === AUTO_ROUTE_PROVIDER &&
+    selection.model === AUTO_ROUTE_MODEL
+  );
 }
 
 export const REASONING_EFFORTS = [
@@ -442,14 +482,15 @@ export function isPresetId(raw: string): boolean {
  *  (#76). Its models are the ones `anthropic` already offers to a child. */
 export function isChildPresetId(raw: string): boolean {
   const id = canonicalPresetId(raw);
-  return SELECTABLE_PRESETS.some((p) => p.id === id && p.provider !== WORKSPACE_PROVIDER);
+  return SELECTABLE_PRESETS.some(
+    (p) => p.id === id && p.provider !== WORKSPACE_PROVIDER,
+  );
 }
 
 /** Catalog floor role. `null` = anyone may pick it. Dashboard overlay is `isPremium`. */
 export function minRoleForPreset(id: string): string | null {
   const p = MODEL_PRESETS.find((x) => x.id === id) as
-    | { min_role?: string }
-    | undefined;
+    { min_role?: string } | undefined;
   const r = p?.min_role?.trim().toLowerCase();
   return r || null;
 }
@@ -567,13 +608,32 @@ export const ANTHROPIC_PRICES: Record<
   string,
   AnthropicPrice & { long?: { above: number } & AnthropicPrice }
 > = {
-  "claude-opus-5-5": { input: 4, cache_write_1h: 8, cache_read: 0.2, output: 20 },
-  "claude-sonnet-5-5": { input: 2, cache_write_1h: 4, cache_read: 0.1, output: 10 },
+  "claude-opus-5-5": {
+    input: 4,
+    cache_write_1h: 8,
+    cache_read: 0.2,
+    output: 20,
+  },
+  "claude-sonnet-5-5": {
+    input: 2,
+    cache_write_1h: 4,
+    cache_read: 0.1,
+    output: 10,
+  },
   // Haiku 5.5 bills a whole request at the higher row once its prompt,
   // cache reads and writes included, is over 100,000 tokens.
   "claude-haiku-5-5": {
-    input: 0.1, cache_write_1h: 0.2, cache_read: 0.01, output: 0.5,
-    long: { above: 100_000, input: 0.5, cache_write_1h: 1, cache_read: 0.05, output: 2.5 },
+    input: 0.1,
+    cache_write_1h: 0.2,
+    cache_read: 0.01,
+    output: 0.5,
+    long: {
+      above: 100_000,
+      input: 0.5,
+      cache_write_1h: 1,
+      cache_read: 0.05,
+      output: 2.5,
+    },
   },
 };
 
@@ -582,16 +642,25 @@ export const ANTHROPIC_PRICES: Record<
  *  writes, as the bot's normalized usage does. */
 export function anthropicCost(
   model: string,
-  usage: { prompt: number; cache_read: number; cache_write: number; output: number },
+  usage: {
+    prompt: number;
+    cache_read: number;
+    cache_write: number;
+    output: number;
+  },
 ): number | undefined {
   const row = ANTHROPIC_PRICES[model];
   if (!row) return undefined;
   const price = row.long && usage.prompt > row.long.above ? row.long : row;
-  const uncached = Math.max(0, usage.prompt - usage.cache_read - usage.cache_write);
+  const uncached = Math.max(
+    0,
+    usage.prompt - usage.cache_read - usage.cache_write,
+  );
   return (
-    uncached * price.input +
-    usage.cache_write * price.cache_write_1h +
-    usage.cache_read * price.cache_read +
-    usage.output * price.output
-  ) / 1_000_000;
+    (uncached * price.input +
+      usage.cache_write * price.cache_write_1h +
+      usage.cache_read * price.cache_read +
+      usage.output * price.output) /
+    1_000_000
+  );
 }

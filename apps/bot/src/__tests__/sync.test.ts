@@ -333,6 +333,23 @@ describe("budget status (#89)", () => {
     expect(runtime.snapshot.budget?.remaining_after_today_usd).toBeNull();
   });
 
+  test("keeps the threshold the API decided with, for the notice (#95)", async () => {
+    const { api, runtime, sync } = fixture({ pollMs: 10, maxMs: 40, budgetMs: 0 });
+    // An API from before #95 sends no threshold: the notice says $10.
+    api.budget = low;
+    await sync.start();
+    await until(() => runtime.budgetLow());
+    expect(runtime.budgetThreshold()).toBe(10);
+    api.budget = { ...low, threshold_usd: 25 };
+    await until(() => runtime.budgetThreshold() === 25);
+    expect(runtime.snapshot.budget?.threshold_usd).toBe(25);
+    // A threshold of the wrong type is ignored, not a failure: `low` decides.
+    api.budget = { ...low, threshold_usd: "25" };
+    await until(() => runtime.snapshot.budget?.threshold_usd === undefined);
+    expect(runtime.budgetLow()).toBe(true);
+    expect(runtime.budgetThreshold()).toBe(10);
+  });
+
   test("is asked once per interval, not on every snapshot poll", async () => {
     const { api, runtime, sync } = fixture();
     api.budget = low;

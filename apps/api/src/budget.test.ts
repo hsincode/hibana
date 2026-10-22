@@ -1,6 +1,6 @@
 // The budget fallback (#89): the API decides from the cost report and today's
 // estimate whether Anthropic API turns switch, and stores the model they
-// switch to.
+// switch to and the threshold that switches them (#95).
 import { describe, expect, test } from "bun:test";
 import { createApp } from "./create-app";
 import { loadTestEnv } from "./env";
@@ -123,10 +123,10 @@ describe("GET /internal/budget", () => {
 });
 
 describe("/api/budget-fallback", () => {
-  test("every logged-in user sees the model and the status; staff may edit", async () => {
+  test("every logged-in user sees the model, the threshold and the status; only an Administrator may edit (#95)", async () => {
     const { call } = await setup(ADMIN_KEY, anthropic("18500", 1_500_000));
     expect((await call("/api/budget-fallback")).status).toBe(401);
-    for (const [user, edit] of [["free-1", false], ["premium-1", false], ["mod-1", true], ["admin-1", true]] as const) {
+    for (const [user, edit] of [["free-1", false], ["premium-1", false], ["mod-1", false], ["admin-1", true]] as const) {
       const res = await call("/api/budget-fallback", { session: user });
       expect(res.status).toBe(200);
       expect(res.headers.get("cache-control")).toBe("no-store");
@@ -135,7 +135,8 @@ describe("/api/budget-fallback", () => {
       // The owner's default (#89).
       expect(body.fallback).toEqual({ preset: "anthropic-haiku-5-5", effort: "high" });
       expect(body.threshold_usd).toBe(10);
-      expect(body.status).toMatchObject({ configured: true, low: true });
+      expect(body.threshold_range).toEqual({ min_usd: 0, max_usd: 200, default_usd: 10 });
+      expect(body.status).toMatchObject({ configured: true, low: true, threshold_usd: 10 });
     }
   });
 
@@ -165,9 +166,9 @@ describe("/api/budget-fallback", () => {
     const before = await (await call("/internal/snapshot", { headers: INTERNAL })).json();
     expect(before.budget_fallback).toEqual({ preset: "anthropic-haiku-5-5", effort: "high" });
 
-    const saved = await call("/api/budget-fallback", { session: "mod-1", method: "PUT", body: { preset: "anthropic-sonnet-5-5", effort: "medium" } });
+    const saved = await call("/api/budget-fallback", { session: "admin-1", method: "PUT", body: { preset: "anthropic-sonnet-5-5", effort: "medium" } });
     expect(saved.status).toBe(200);
-    expect(await saved.json()).toEqual({ fallback: { preset: "anthropic-sonnet-5-5", effort: "medium" } });
+    expect(await saved.json()).toEqual({ fallback: { preset: "anthropic-sonnet-5-5", effort: "medium" }, threshold_usd: 10 });
 
     const etag = `"${before.version}"`;
     const after = await call("/internal/snapshot", { headers: { ...INTERNAL, "if-none-match": etag } });
@@ -178,12 +179,15 @@ describe("/api/budget-fallback", () => {
     expect((await (await call("/api/budget-fallback", { session: "free-1" })).json()).fallback.preset).toBe("anthropic-sonnet-5-5");
   });
 
-  test("only staff may change it, and only to an Anthropic API preset that is public", async () => {
+  test("only an Administrator may change it, and only to an Anthropic API preset that is public", async () => {
     const { call, store } = await setup(ADMIN_KEY);
     const put = (session: string | undefined, body: unknown) => call("/api/budget-fallback", { session, method: "PUT", body });
     expect((await put(undefined, { preset: "anthropic-opus-5-5", effort: "high" })).status).toBe(401);
     expect((await put("free-1", { preset: "anthropic-opus-5-5", effort: "high" })).status).toBe(403);
     expect((await put("premium-1", { preset: "anthropic-opus-5-5", effort: "high" })).status).toBe(403);
+    // Moderators could until #95.
+    expect((await put("mod-1", { preset: "anthropic-opus-5-5", effort: "high" })).status).toBe(403);
+    expect((await put("mod-1", { preset: "anthropic-haiku-5-5", effort: "high", threshold_usd: 50 })).status).toBe(403);
     for (const body of [
       { preset: "anthropic-auto", effort: "high" },
       { preset: "anthropic-workspace-haiku-5-5", effort: "high" },
@@ -198,5 +202,74 @@ describe("/api/budget-fallback", () => {
     expect((await put("admin-1", { preset: "anthropic-sonnet-5-5", effort: "high" })).status).toBe(400);
     // Nothing was stored by the refused writes.
     expect(await store.getMeta("budget_fallback")).toBeNull();
+    expect(await store.getMeta("budget_fallback_threshold")).toBeNull();
+  });
+});
+
+describe("budget threshold (#95)", () => {
+  const put = (call: Awaited<ReturnType<typeof setup>>["call"], body: unknown, session = "admin-1") =>
+    call("/api/budget-fallback", { session, method: "PUT", body });
+
+  test("an Administrator's threshold decides /internal/budget, and the page shows it", async () => {
+    // $200 − $185 spent = $15 left; today $6 → $9 left: low at the default $10.
+    const { call, store } = await setup(ADMIN_KEY, anthropic("18500", 1_500_000));
+    const saved = await put(call, { preset: "anthropic-haiku-5-5", effort: "high", threshold_usd: 5 });
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toEqual({ fallback: { preset: "anthropic-haiku-5-5", effort: "high" }, threshold_usd: 5 });
+    expect(await store.getMeta("budget_fallback_threshold")).toBe("5");
+
+    // $9 is not below $5.
+    const internal = await (await call("/internal/budget", { headers: INTERNAL })).json();
+    expect(internal).toMatchObject({ threshold_usd: 5, low: false });
+    const page = await (await call("/api/budget-fallback", { session: "free-1" })).json();
+    expect(page.threshold_usd).toBe(5);
+    expect(page.status).toMatchObject({ threshold_usd: 5, low: false });
+
+    // $9 is below $9.01.
+    expect((await put(call, { preset: "anthropic-haiku-5-5", effort: "high", threshold_usd: 9.01 })).status).toBe(200);
+    expect(await (await call("/internal/budget", { headers: INTERNAL })).json()).toMatchObject({ threshold_usd: 9.01, low: true });
+  });
+
+  test("the threshold stays out of the bot's snapshot, which keeps the shape older bots parse", async () => {
+    const { call } = await setup(ADMIN_KEY);
+    expect((await put(call, { preset: "anthropic-sonnet-5-5", effort: "medium", threshold_usd: 25 })).status).toBe(200);
+    const snapshot = await (await call("/internal/snapshot", { headers: INTERNAL })).json();
+    expect(snapshot.budget_fallback).toEqual({ preset: "anthropic-sonnet-5-5", effort: "medium" });
+    expect(JSON.stringify(snapshot)).not.toContain("threshold");
+  });
+
+  test("saving without a threshold keeps the stored one", async () => {
+    const { call } = await setup(ADMIN_KEY);
+    expect((await put(call, { preset: "anthropic-haiku-5-5", effort: "high", threshold_usd: 30 })).status).toBe(200);
+    // A page from before #95 sends the model only.
+    const saved = await put(call, { preset: "anthropic-sonnet-5-5", effort: "low" });
+    expect(await saved.json()).toEqual({ fallback: { preset: "anthropic-sonnet-5-5", effort: "low" }, threshold_usd: 30 });
+  });
+
+  test("whole cents from $0 to the monthly budget; anything else is refused and nothing is stored", async () => {
+    const { call, store } = await setup(ADMIN_KEY);
+    for (const threshold_usd of [-1, 200.01, 1.005, "10", null, 1e309])
+      expect((await put(call, { preset: "anthropic-haiku-5-5", effort: "high", threshold_usd })).status).toBe(400);
+    expect(await store.getMeta("budget_fallback_threshold")).toBeNull();
+    expect(await store.getMeta("budget_fallback")).toBeNull();
+
+    for (const threshold_usd of [0, 200, 12.34]) {
+      const res = await put(call, { preset: "anthropic-haiku-5-5", effort: "high", threshold_usd });
+      expect(res.status).toBe(200);
+      expect((await res.json()).threshold_usd).toBe(threshold_usd);
+    }
+  });
+
+  test("$0 switches only once the budget is exceeded", async () => {
+    // $200 − $199 = $1 left; today $2 → −$1.
+    const { call } = await setup(ADMIN_KEY, anthropic("19900", 500_000));
+    expect((await put(call, { preset: "anthropic-haiku-5-5", effort: "high", threshold_usd: 0 })).status).toBe(200);
+    expect(await (await call("/internal/budget", { headers: INTERNAL })).json()).toMatchObject({ threshold_usd: 0, low: true });
+  });
+
+  test("a stored threshold that no longer parses reads as the default $10", async () => {
+    const { call, store } = await setup(ADMIN_KEY, anthropic("18500", 1_500_000));
+    await store.setMeta("budget_fallback_threshold", "500");
+    expect(await (await call("/internal/budget", { headers: INTERNAL })).json()).toMatchObject({ threshold_usd: 10, low: true });
   });
 });

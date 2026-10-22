@@ -17,6 +17,7 @@ import {
 } from "./catalog";
 import {
   canAssignRole,
+  canManageBudget,
   canManageUsers,
   canModerate,
   canSelectPreset,
@@ -69,14 +70,30 @@ import {
 } from "./store";
 import { guildId, guildSkills, skillAction, skillRow } from "./skills";
 import { ChatgptAccounts, ChatgptError } from "./chatgpt";
-import { CostReport, CostReportError, parseMonth } from "./analytics";
+import { CostReport, CostReportError, MONTHLY_BUDGET_USD, parseMonth } from "./analytics";
 import {
   BUDGET_FALLBACK_EFFORTS,
-  BUDGET_FALLBACK_THRESHOLD_USD,
+  DEFAULT_BUDGET_FALLBACK_THRESHOLD_USD,
   budgetFallbackSchema,
+  budgetThresholdSchema,
   isBudgetFallbackPreset,
   parseBudgetFallback,
+  parseBudgetThreshold,
 } from "@hibana/shared/budget";
+
+/**
+ * What the dashboard saves (#89, #95): the fallback model and effort, and the
+ * threshold. The threshold may be left out, which keeps the stored one, so a
+ * page from before #95 saving the model does not reset it.
+ */
+const budgetFallbackPutSchema = budgetFallbackSchema.extend({
+  threshold_usd: budgetThresholdSchema(MONTHLY_BUDGET_USD).optional(),
+});
+
+/** The threshold is apart from `budget_fallback`: the API decides, so the bot's
+ *  snapshot does not carry it, and the snapshot keeps the shape older bots parse. */
+const loadBudgetThreshold = async (store: Store) =>
+  parseBudgetThreshold(await store.getMeta("budget_fallback_threshold"), MONTHLY_BUDGET_USD);
 
 async function loadSnapshot(
   store: Store,
@@ -983,8 +1000,9 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
       return costReport.today();
     })
     // The model Anthropic API turns switch to while the month's budget is
-    // nearly spent, and whether they do now (#89). Everyone who may read the
-    // cost may read this; only those who may manage the model catalog change it.
+    // nearly spent, the threshold that switches them, and whether they do now
+    // (#89, #95). Everyone who may read the cost may read this; only an
+    // Administrator changes it.
     .get("/api/budget-fallback", async ({ cookie, set }) => {
       set.headers["cache-control"] = "no-store";
       const s = await requireSession(cookieSid(cookie as never));
@@ -997,11 +1015,12 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
         return { error: "forbidden" };
       }
       const unpublished = await loadUnpublished(store);
+      const threshold = await loadBudgetThreshold(store);
       // A failed status still shows the setting: the page says why instead.
       let status: unknown = { configured: false };
       if (costReport.configured) {
         try {
-          status = await costReport.budget();
+          status = await costReport.budget(threshold);
         } catch (e) {
           if (!(e instanceof CostReportError)) throw e;
           status = { configured: true, error: e.message };
@@ -1009,7 +1028,9 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
       }
       return {
         fallback: parseBudgetFallback(await store.getMeta("budget_fallback")),
-        threshold_usd: BUDGET_FALLBACK_THRESHOLD_USD,
+        threshold_usd: threshold,
+        // The range a threshold may be stored in (#95), for the form.
+        threshold_range: { min_usd: 0, max_usd: MONTHLY_BUDGET_USD, default_usd: DEFAULT_BUDGET_FALLBACK_THRESHOLD_USD },
         // Unpublished presets may not have a live wire id yet, so they are
         // not offered. One stored before it was hidden is listed so the
         // page can name it; the bot runs the default instead (runtime.ts).
@@ -1019,7 +1040,7 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           published: !unpublished.includes(p.id),
         })),
         efforts: BUDGET_FALLBACK_EFFORTS,
-        can_edit: canManageUsers(s.role),
+        can_edit: canManageBudget(s.role),
         status,
       };
     })
@@ -1029,27 +1050,31 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
         set.status = 401;
         return { error: "unauthorized" };
       }
-      if (!canManageUsers(s.role)) {
+      if (!canManageBudget(s.role)) {
         set.status = 403;
         return { error: "forbidden" };
       }
-      const parsed = budgetFallbackSchema.safeParse(body);
+      const parsed = budgetFallbackPutSchema.safeParse(body);
       if (!parsed.success) {
         set.status = 400;
         return { error: parsed.error.issues.map((i) => i.message).join("; ") };
       }
-      if ((await loadUnpublished(store)).includes(parsed.data.preset)) {
+      const { threshold_usd, ...fallback } = parsed.data;
+      if ((await loadUnpublished(store)).includes(fallback.preset)) {
         set.status = 400;
         return { error: "unpublished preset" };
       }
-      await store.setMeta("budget_fallback", JSON.stringify(parsed.data));
-      // The snapshot carries it to the bot; bump so it is not answered 304.
+      if (threshold_usd !== undefined) await store.setMeta("budget_fallback_threshold", JSON.stringify(threshold_usd));
+      await store.setMeta("budget_fallback", JSON.stringify(fallback));
+      // The snapshot carries the model to the bot; bump so it is not answered
+      // 304. The threshold reaches it through `/internal/budget` instead.
       await store.bumpVersion();
       await publish();
-      return { fallback: parsed.data };
+      return { fallback, threshold_usd: await loadBudgetThreshold(store) };
     })
     // The bot asks this every few minutes (#89). It has no Admin API key: the
-    // decision is made here, from the same figures the page shows.
+    // decision is made here, from the same figures the page shows and the
+    // threshold stored on it (#95).
     .get("/internal/budget", async ({ request, set }) => {
       if (!requireInternal(request.headers.get("authorization") ?? undefined)) {
         set.status = 401;
@@ -1058,7 +1083,7 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
       if (!costReport.configured) return { configured: false };
       // A CostReportError becomes its status (502/429) in onError; the bot
       // keeps the last answer it had.
-      return costReport.budget();
+      return costReport.budget(await loadBudgetThreshold(store));
     })
     .post("/internal/logs", async ({ request, set, body }) => {
       if (!requireInternal(request.headers.get("authorization") ?? undefined)) {

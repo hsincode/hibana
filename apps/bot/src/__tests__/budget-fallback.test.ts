@@ -126,6 +126,11 @@ test("the Discord notice names the threshold and the model", () => {
     .toBe("今月の利用料の残りが $10 を切ったため、**Haiku 5.5 High** で応答します");
   expect(budgetHeader({ provider: "anthropic", model: "claude-opus-5-5", effort: "max" }))
     .toBe("今月の利用料の残りが $10 を切ったため、**Opus 5.5 Max** で応答します");
+  // The threshold an Administrator stored (#95).
+  expect(budgetHeader({ provider: "anthropic", model: "claude-haiku-5-5", effort: "high" }, 25))
+    .toBe("今月の利用料の残りが $25 を切ったため、**Haiku 5.5 High** で応答します");
+  expect(budgetHeader({ provider: "anthropic", model: "claude-haiku-5-5", effort: "high" }, 7.5))
+    .toBe("今月の利用料の残りが $7.50 を切ったため、**Haiku 5.5 High** で応答します");
 });
 
 test("a turn on the auto preset skips routing, says so once, and keeps its conversation for afterwards", async () => {
@@ -181,8 +186,10 @@ test("a turn on the auto preset skips routing, says so once, and keeps its conve
   expect(history).toContain("難しい設計の相談");
   expect(history).toContain("続けて");
 
-  // A later fallback is announced again.
-  await bot.runtime.setBudget(low);
+  // A later fallback is announced again, with the threshold the API decided
+  // with (#95).
+  await bot.runtime.setBudget({ ...low, threshold_usd: 25 });
   await bot.respond("もう一度", { ...ctx });
   expect(notices()).toHaveLength(2);
+  expect(notices().at(-1)).toBe("今月の利用料の残りが $25 を切ったため、**Haiku 5.5 High** で応答します");
 });

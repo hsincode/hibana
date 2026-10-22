@@ -224,22 +224,23 @@ cost report に載らない進行中の日（UTC）は、APIの `GET /api/analyt
 - 手元のテスト（`apps/api/src/analytics.test.ts`、`apps/web/tests/analytics.spec.ts`）だけです。usage report の応答は公式の API リファレンスの形に合わせた代用です
 - 未確認: 実際の usage report の応答、進行中の1分・1時間が返るか、推計と翌日の確定額との差、本番（Vercel）での動作。手元に Admin API キーがないため、実 API は呼んでいません
 
-### 予算が少ないときのモデル（2026-10-18）
+### 予算が少ないときのモデル（2026-10-18、閾値の設定は 2026-10-23）
 
-「今月の残り」から「今日の推計」を引いた額が $10 を切ると、bot は Anthropic API（provider `anthropic`）のターンをフォールバックモデルに切り替えます（[#89](https://github.com/hsincode/hibana/issues/89)）。既定は Anthropic / Claude Haiku 5.5、effort high です。
+「今月の残り」から「今日の推計」を引いた額が閾値（既定 $10）を切ると、bot は Anthropic API（provider `anthropic`）のターンをフォールバックモデルに切り替えます（[#89](https://github.com/hsincode/hibana/issues/89)）。既定は Anthropic / Claude Haiku 5.5、effort high です。
 
-- 判定は API の `GET /internal/budget` がします。上の cost report と usage report を、ページと同じ1分のキャッシュから読みます。どちらかが失敗したら、判定せずにエラーを返します
+- 判定は API の `GET /internal/budget` がします。上の cost report と usage report を、ページと同じ1分のキャッシュから読み、保存された閾値と比べます。どちらかが失敗したら、判定せずにエラーを返します
 - bot は設定のポーリング（30秒ごと）のついでに、2分に1回これを読みます（`apps/bot/src/sync.ts` の `BUDGET_POLL_MS`）。答えは状態ファイル（`runtime_state.json` の `budget`）に保つので、再起動しても最後の判定のまま動きます。読めなかったときは最後の判定を保ち、一度も読めていなければ切り替えません。API に Admin API キーがないときは、切り替えません
 - 切り替えは、Anthropic へ送る直前（`LlmClient.complete`）でします。メインのターン、ほかのプロバイダーの親から Anthropic のプリセットで動く子、履歴の圧縮も切り替わります。Auto (Jev) のターンは経路を選ばずにフォールバックで動きます。Anthropic Workspace と、ほかのプロバイダーは切り替えません
-- 会話履歴は保存されたモデルのまま続きます。予算が戻れば、同じ会話を元のモデルで続けます。チャンネルで最初に切り替わったターンでは、Discord に「今月の利用料の残りが $10 を切ったため、…で応答します」と一行出します
-- フォールバックモデルは、ダッシュボードの「利用料」の「予算が少ないときのモデル」で選びます。選べるのは Anthropic API の公開中のプリセット（Auto を除く）と、effort low〜max です。会話履歴に Anthropic の思考ブロックが残るため、別のプロバイダーは選べません。変えられるのは Administrator / Moderator（`can_manage_users`）で、保存は設定のスナップショットで bot に届きます。保存したプリセットが後から非公開になったら、bot は既定で動きます
-- 閾値 $10 は `packages/shared/src/budget.ts` の `BUDGET_FALLBACK_THRESHOLD_USD` です。画面からは変えられません
+- 会話履歴は保存されたモデルのまま続きます。予算が戻れば、同じ会話を元のモデルで続けます。チャンネルで最初に切り替わったターンでは、Discord に「今月の利用料の残りが $10 を切ったため、…で応答します」と一行出します。金額は `/internal/budget` が返した閾値です（それを返さない古い API なら $10）
+- フォールバックモデルと閾値は、ダッシュボードの「利用料」の「予算が少ないときのモデル」で決めます。変えられるのは Administrator（`WEB_ADMIN_IDS`）だけです（`canManageBudget`、[#95](https://github.com/hsincode/hibana/issues/95)。#89 では Moderator もモデルを変えられました）。ほかの人は、いまの値を見るだけです
+- 選べるモデルは Anthropic API の公開中のプリセット（Auto を除く）と、effort low〜max です。会話履歴に Anthropic の思考ブロックが残るため、別のプロバイダーは選べません。保存は設定のスナップショットで bot に届きます。保存したプリセットが後から非公開になったら、bot は既定で動きます
+- 閾値は $0〜$200（`MONTHLY_BUDGET_USD`）の 1 セント単位です。$0 なら、予算を超えるまで切り替えません。設定 DB の meta `budget_fallback_threshold` に保存し、API の判定にだけ使います（bot へのスナップショットには入れません）。保存がないとき、月の予算を下げて範囲の外になったときは、既定の $10（`packages/shared/src/budget.ts` の `DEFAULT_BUDGET_FALLBACK_THRESHOLD_USD`）で判定します。保存した閾値は、bot が次に `/internal/budget` を読んだとき（最大2分後）に効きます
 - UTC の日付が変わった直後、前日の分が cost report に載るまでの間は、前日の分がどちらの数字にも入りません。その間は残りを多めに見ます
 
-検証の範囲（2026-10-18）:
+検証の範囲（2026-10-18、閾値は 2026-10-23）:
 
 - 手元のテスト（`apps/api/src/budget.test.ts`、`apps/bot/src/__tests__/budget-fallback.test.ts`、`apps/bot/src/__tests__/sync.test.ts`、`packages/shared/src/__tests__/budget.test.ts`、`apps/web/tests/analytics.spec.ts`）だけです。Anthropic の応答は代用です
-- 未確認: 実際の Admin API での判定、本番（Vercel・VPS）での切り替え、フォールバックで動いたターンの実際の応答
+- 未確認: 実際の Admin API での判定、本番（Vercel・VPS）での切り替え、フォールバックで動いたターンの実際の応答、本番の DB（Supabase）に閾値を保存して読み直すこと
 
 ## 会話履歴と Auto Routing の経路の保存（2026-10-10）
 

@@ -1,4 +1,4 @@
-import { BUDGET_FALLBACK_THRESHOLD_USD } from "@hibana/shared/budget";
+import { DEFAULT_BUDGET_FALLBACK_THRESHOLD_USD, formatThreshold } from "@hibana/shared/budget";
 import {
   AUTO_ROUTE_FALLBACK,
   AUTO_ROUTE_LEVELS,
@@ -138,9 +138,10 @@ export function routeHeader(selection: Selection): string {
 }
 
 /** Notice posted in a channel the first time one of its turns runs on the
- *  budget fallback (#89). Discord only, like `routeHeader`. */
-export function budgetHeader(selection: Selection): string {
-  return `今月の利用料の残りが $${BUDGET_FALLBACK_THRESHOLD_USD} を切ったため、**${modelName(selection, selection.effort ?? "")}** で応答します`;
+ *  budget fallback (#89). Discord only, like `routeHeader`. The threshold is
+ *  the one the settings API decided with (#95). */
+export function budgetHeader(selection: Selection, thresholdUsd = DEFAULT_BUDGET_FALLBACK_THRESHOLD_USD): string {
+  return `今月の利用料の残りが ${formatThreshold(thresholdUsd)} を切ったため、**${modelName(selection, selection.effort ?? "")}** で応答します`;
 }
 
 type Route = { selection: Selection; at: number };

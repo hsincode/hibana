@@ -60,6 +60,7 @@ type CostReply = { status?: number; json: unknown };
 const budgetFixture = (over: Record<string, unknown> = {}) => ({
   fallback: { preset: "anthropic-haiku-5-5", effort: "high" },
   threshold_usd: 10,
+  threshold_range: { min_usd: 0, max_usd: 200, default_usd: 10 },
   presets: [
     { id: "anthropic-haiku-5-5", label: "Anthropic / Claude Haiku 5.5", published: true },
     { id: "anthropic-sonnet-5-5", label: "Anthropic / Claude Sonnet 5.5", published: true },
@@ -90,6 +91,7 @@ async function mockApi(
   const months: (string | null)[] = [];
   const todays = { count: 0 };
   const budgetWrites: unknown[] = [];
+  let stored: { fallback: unknown; threshold_usd: number } | null = null;
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/api/me")
@@ -118,11 +120,14 @@ async function mockApi(
     }
     if (url.pathname === "/api/budget-fallback") {
       if (route.request().method() === "PUT") {
-        const body = route.request().postDataJSON();
-        budgetWrites.push(body);
-        return route.fulfill({ json: { fallback: body } });
+        const { threshold_usd, ...fallback } = route.request().postDataJSON();
+        budgetWrites.push({ ...fallback, threshold_usd });
+        stored = { fallback, threshold_usd };
+        return route.fulfill({ json: stored });
       }
-      return route.fulfill(budget());
+      // Like the API, a read after a save returns what was saved.
+      const reply = budget();
+      return route.fulfill(stored ? { ...reply, json: { ...(reply.json as object), ...stored } } : reply);
     }
     throw new Error(`Unexpected API request: ${url.pathname}`);
   });
@@ -341,7 +346,7 @@ test.describe("budget fallback (#89)", () => {
   const panel = (page: Page) => page.locator(".budget-panel");
 
   for (const width of [1440, 390]) {
-    test(`staff see the state and change the model: ${width}px`, async ({ page }) => {
+    test(`an Administrator sees the state and changes the model and the threshold: ${width}px`, async ({ page }) => {
       const { budgetWrites } = await mockApi(page, byMonth);
       await page.setViewportSize({ width, height: 900 });
       await page.goto("/analytics");
@@ -361,8 +366,20 @@ test.describe("budget fallback (#89)", () => {
       await page.getByRole("option", { name: "Medium" }).click();
       await expect(save).toBeEnabled();
       await save.click();
-      await expect.poll(() => budgetWrites).toEqual([{ preset: "anthropic-sonnet-5-5", effort: "medium" }]);
-      await expect(page.getByText("フォールバックモデルを保存しました")).toBeVisible();
+      await expect.poll(() => budgetWrites).toEqual([{ preset: "anthropic-sonnet-5-5", effort: "medium", threshold_usd: 10 }]);
+      await expect(page.getByText("保存しました。bot には 2 分ほどで届きます")).toBeVisible();
+      await expect(save).toBeDisabled();
+
+      // The threshold (#95).
+      const threshold = panel(page).getByRole("spinbutton", { name: "切り替える閾値（USD）" });
+      await expect(threshold).toHaveValue("10");
+      await expect(panel(page)).toContainText("閾値は $0.00〜$200.00（月の予算）、1 セント単位。既定は $10.00。");
+      await threshold.fill("25.5");
+      await expect(save).toBeEnabled();
+      await save.click();
+      await expect.poll(() => budgetWrites.at(-1)).toEqual({ preset: "anthropic-sonnet-5-5", effort: "medium", threshold_usd: 25.5 });
+      await expect(panel(page)).toContainText("$25.50 を切ると");
+      await expect(threshold).toHaveValue("25.5");
       await expect(save).toBeDisabled();
 
       // Nothing sticks out of a narrow screen.
@@ -385,9 +402,31 @@ test.describe("budget fallback (#89)", () => {
     await expect(panel(page)).toContainText("今日の推計を含めた残り $7.50");
     await expect(panel(page)).toContainText("いまフォールバックモデルで動いています");
     await expect(panel(page)).toContainText("Anthropic / Claude Haiku 5.5 · High");
-    await expect(panel(page)).toContainText("変更できるのは Administrator / Moderator です");
+    await expect(panel(page)).toContainText("閾値$10.00");
+    await expect(panel(page)).toContainText("変更できるのは Administrator です");
     await expect(panel(page).getByRole("combobox")).toHaveCount(0);
+    await expect(panel(page).getByRole("spinbutton")).toHaveCount(0);
     await expect(panel(page).getByRole("button", { name: "保存" })).toHaveCount(0);
+  });
+
+  test("a threshold out of range or finer than a cent is not saved (#95)", async ({ page }) => {
+    const { budgetWrites } = await mockApi(page, byMonth);
+    await page.goto("/analytics");
+    const threshold = panel(page).getByRole("spinbutton", { name: "切り替える閾値（USD）" });
+    const save = panel(page).getByRole("button", { name: "保存" });
+    for (const bad of ["200.01", "-1", "1.005", ""]) {
+      await threshold.fill(bad);
+      await expect(threshold).toHaveAttribute("aria-invalid", "true");
+      await expect(panel(page)).toContainText("この値では保存できません");
+      await expect(save).toBeDisabled();
+    }
+    // 元に戻す restores the stored value.
+    await panel(page).getByRole("button", { name: "元に戻す" }).click();
+    await expect(threshold).toHaveValue("10");
+    await expect(threshold).toHaveAttribute("aria-invalid", "false");
+    await threshold.fill("0");
+    await save.click();
+    await expect.poll(() => budgetWrites).toEqual([{ preset: "anthropic-haiku-5-5", effort: "high", threshold_usd: 0 }]);
   });
 
   test("says when it cannot tell, and why", async ({ page }) => {

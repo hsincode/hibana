@@ -98,12 +98,18 @@
 .budget-amount { font-family: var(--font-mono); font-weight: 400; color: var(--ink); }
 .budget-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-3); }
 .budget-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: var(--muted); font-size: var(--fs-xs); }
-.budget-field:first-child { flex: 1 1 280px; max-width: 420px; }
-.budget-field:nth-child(2) { flex: 0 1 160px; }
+.budget-field-model { flex: 1 1 280px; max-width: 420px; }
+.budget-field-effort { flex: 0 1 160px; }
+.budget-field-threshold { flex: 0 1 150px; }
+.budget-usd { display: flex; align-items: center; gap: 6px; color: var(--ink-2); font-family: var(--font-mono); font-size: var(--fs-sm); }
+.budget-usd .input { flex: 1; min-width: 0; }
 .budget-actions { display: flex; gap: var(--sp-2); }
 .budget-actions .btn { min-height: 36px; padding-inline: 18px; }
-.budget-current { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; color: var(--muted); font-size: var(--fs-xs); }
-.budget-current strong { color: var(--ink); font-size: var(--fs-sm); font-weight: 500; overflow-wrap: anywhere; }
+.budget-hint { flex-basis: 100%; }
+.budget-current { display: flex; flex-wrap: wrap; gap: 6px var(--sp-5); margin: 0; }
+.budget-current > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; min-width: 0; }
+.budget-current dt { color: var(--muted); font-size: var(--fs-xs); }
+.budget-current dd { margin: 0; color: var(--ink); font-size: var(--fs-sm); font-weight: 500; overflow-wrap: anywhere; }
 
 @media (max-width: 900px) {
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -116,7 +122,7 @@
     border-left: 0; border-right: 0; border-radius: 0;
   }
   .chart-panel.frame::before, .budget-panel.frame::before { inset: -1px 0; }
-  .budget-field:first-child, .budget-field:nth-child(2) { flex-basis: 100%; max-width: none; }
+  .budget-field-model, .budget-field-effort, .budget-field-threshold { flex-basis: 100%; max-width: none; }
   .budget-actions { width: 100%; }
   .budget-actions .btn { flex: 1; min-height: 40px; }
   .guild-grid { gap: var(--sp-4); }

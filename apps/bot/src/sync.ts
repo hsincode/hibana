@@ -68,6 +68,7 @@ export class WebSync {
         configured?: unknown;
         low?: unknown;
         remaining_after_today_usd?: unknown;
+        threshold_usd?: unknown;
       };
       if (body.configured === false) {
         await this.runtime.setBudget({ low: false, remaining_after_today_usd: null, checked_at: now });
@@ -75,7 +76,13 @@ export class WebSync {
       }
       if (typeof body.low !== "boolean" || typeof body.remaining_after_today_usd !== "number")
         throw new Error("Budget status: unexpected response");
-      await this.runtime.setBudget({ low: body.low, remaining_after_today_usd: body.remaining_after_today_usd, checked_at: now });
+      await this.runtime.setBudget({
+        low: body.low,
+        remaining_after_today_usd: body.remaining_after_today_usd,
+        // Only for the Discord notice: `low` already is the decision (#95).
+        ...(typeof body.threshold_usd === "number" && Number.isFinite(body.threshold_usd) ? { threshold_usd: body.threshold_usd } : {}),
+        checked_at: now,
+      });
     } catch (e) {
       if (!this.abort.signal.aborted) this.onError(e);
     }

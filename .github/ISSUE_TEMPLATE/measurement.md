@@ -1,8 +1,8 @@
 ---
 name: 計測記録
 about: 性能を測り、ボトルネックを特定し、改善を検証する
-title: "[計測] "
-labels: ["measurement"]
+title: ""
+labels: ["計測"]
 ---
 
 ## 目的と、事前に決めた判定基準

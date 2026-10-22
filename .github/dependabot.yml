@@ -1,17 +1,21 @@
 # Version updates for what the workflows run: the actions (pinned by commit
 # SHA) and the Vercel CLI (pinned by tools/vercel/bun.lock). The application
 # dependencies are not listed: updating the root lockfile redeploys the bot.
+# Labels are named here because the repository uses Japanese label names;
+# without them Dependabot would recreate its default English labels.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    labels: ["依存関係", "GitHub Actions"]
     commit-message:
       prefix: ci
   - package-ecosystem: bun
     directory: /tools/vercel
     schedule:
       interval: weekly
+    labels: ["依存関係", "JavaScript"]
     commit-message:
       prefix: ci

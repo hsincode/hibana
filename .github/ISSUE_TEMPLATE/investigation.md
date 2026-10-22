@@ -1,8 +1,8 @@
 ---
 name: 調査記録
 about: バグの発生環境・原因を切り分ける。検証するたびにコメントで追記する
-title: "[調査] "
-labels: ["investigation"]
+title: ""
+labels: ["調査"]
 ---
 
 ## 調査対象

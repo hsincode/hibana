@@ -30,7 +30,11 @@ export interface VerifyOptions {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function get(base: string, path: string, bypass: string | undefined): Promise<Response> {
+async function get(
+  base: string,
+  path: string,
+  bypass: string | undefined,
+): Promise<Response> {
   return fetch(new URL(path, base), {
     headers: bypass ? { "x-vercel-protection-bypass": bypass } : {},
     // A redirect here is the protection's login page, not the app.
@@ -48,25 +52,48 @@ function unexpected(path: string, response: Response): Check {
     // The app's own redirect rules answered instead of the deployment.
     hint = ` (redirected to ${location})`;
   }
-  return { ok: false, detail: `${path} answered HTTP ${response.status}${hint}` };
+  return {
+    ok: false,
+    detail: `${path} answered HTTP ${response.status}${hint}`,
+  };
 }
 
-async function checkApi(base: string, sha: string, bypass: string | undefined): Promise<Check> {
+async function checkApi(
+  base: string,
+  sha: string,
+  bypass: string | undefined,
+): Promise<Check> {
   const health = await get(base, "/healthz", bypass);
   if (health.status !== 200) return unexpected("/healthz", health);
   const version = await get(base, "/version", bypass);
   if (version.status !== 200) return unexpected("/version", version);
-  const commit = ((await version.json().catch(() => null)) as { commit?: unknown } | null)?.commit;
-  if (commit !== sha) return { ok: false, detail: `/version reports commit ${String(commit)}, expected ${sha}` };
+  const commit = (
+    (await version.json().catch(() => null)) as { commit?: unknown } | null
+  )?.commit;
+  if (commit !== sha)
+    return {
+      ok: false,
+      detail: `/version reports commit ${String(commit)}, expected ${sha}`,
+    };
   return { ok: true, detail: `api serves ${sha}` };
 }
 
-async function checkWeb(base: string, sha: string, bypass: string | undefined): Promise<Check> {
+async function checkWeb(
+  base: string,
+  sha: string,
+  bypass: string | undefined,
+): Promise<Check> {
   const page = await get(base, "/", bypass);
   if (page.status !== 200) return unexpected("/", page);
   const html = await page.text();
-  const commit = /<meta\s+name="hibana-commit"\s+content="([^"]*)"/.exec(html)?.[1];
-  if (commit !== sha) return { ok: false, detail: `the page was built from commit ${String(commit)}, expected ${sha}` };
+  const commit = /<meta\s+name="hibana-commit"\s+content="([^"]*)"/.exec(
+    html,
+  )?.[1];
+  if (commit !== sha)
+    return {
+      ok: false,
+      detail: `the page was built from commit ${String(commit)}, expected ${sha}`,
+    };
   const script = /<script[^>]*\ssrc="([^"]+)"/.exec(html)?.[1];
   if (!script) return { ok: false, detail: "the page loads no script" };
   const asset = await get(base, script, bypass);
@@ -74,15 +101,27 @@ async function checkWeb(base: string, sha: string, bypass: string | undefined): 
   return { ok: true, detail: `web serves ${sha}` };
 }
 
-export async function verify(target: Target, url: string, sha: string, options: VerifyOptions = {}): Promise<Check> {
+export async function verify(
+  target: Target,
+  url: string,
+  sha: string,
+  options: VerifyOptions = {},
+): Promise<Check> {
   const attempts = options.attempts ?? 12;
   const delayMs = options.delayMs ?? 5000;
   let last: Check = { ok: false, detail: "not checked" };
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
-      last = await (target === "api" ? checkApi : checkWeb)(url, sha, options.bypass);
+      last = await (target === "api" ? checkApi : checkWeb)(
+        url,
+        sha,
+        options.bypass,
+      );
     } catch (err) {
-      last = { ok: false, detail: err instanceof Error ? err.message : String(err) };
+      last = {
+        ok: false,
+        detail: err instanceof Error ? err.message : String(err),
+      };
     }
     if (last.ok) return last;
     if (attempt < attempts) await sleep(delayMs);
@@ -92,11 +131,17 @@ export async function verify(target: Target, url: string, sha: string, options: 
 
 if (import.meta.main) {
   const [target, url, sha] = process.argv.slice(2);
-  if ((target !== "api" && target !== "web") || !url || !/^[0-9a-f]{40}$/.test(sha ?? "")) {
+  if (
+    (target !== "api" && target !== "web") ||
+    !url ||
+    !/^[0-9a-f]{40}$/.test(sha ?? "")
+  ) {
     console.error("usage: verify-deployment.ts <api|web> <url> <40-char sha>");
     process.exit(2);
   }
-  const result = await verify(target, url, sha!, { bypass: process.env.VERCEL_BYPASS || undefined });
+  const result = await verify(target, url, sha!, {
+    bypass: process.env.VERCEL_BYPASS || undefined,
+  });
   console.log(`${result.ok ? "ok" : "FAILED"}: ${result.detail}`);
   process.exit(result.ok ? 0 : 1);
 }

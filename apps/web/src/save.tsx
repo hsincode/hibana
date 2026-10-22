@@ -22,9 +22,9 @@ export type Pulse = { n: number; failed: boolean };
 
 /* ---------- 上部バーの保存状態 ---------- */
 /** null は「このページに自動保存は無い」。上部バーは何も出さない。 */
-export const SaveStatusContext = createContext<(state: SaveState | null) => void>(
-  () => {},
-);
+export const SaveStatusContext = createContext<
+  (state: SaveState | null) => void
+>(() => {});
 
 /** ページの保存状態を上部バーへ届ける。ページを離れたら表示を消す。 */
 export function useReportSave(state: SaveState | null): void {
@@ -209,7 +209,9 @@ export function useRowTarget(ready: boolean): void {
   const row = (location.state as { row?: string } | null)?.row;
   useEffect(() => {
     if (!ready || !row) return;
-    const el = document.querySelector<HTMLElement>(`[data-row="${CSS.escape(row)}"]`);
+    const el = document.querySelector<HTMLElement>(
+      `[data-row="${CSS.escape(row)}"]`,
+    );
     if (!el) return;
     el.scrollIntoView({ block: "center" });
     el.classList.add("is-target");

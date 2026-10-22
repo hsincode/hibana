@@ -70,7 +70,12 @@ import {
 } from "./store";
 import { guildId, guildSkills, skillAction, skillRow } from "./skills";
 import { ChatgptAccounts, ChatgptError } from "./chatgpt";
-import { CostReport, CostReportError, MONTHLY_BUDGET_USD, parseMonth } from "./analytics";
+import {
+  CostReport,
+  CostReportError,
+  MONTHLY_BUDGET_USD,
+  parseMonth,
+} from "./analytics";
 import {
   BUDGET_FALLBACK_EFFORTS,
   DEFAULT_BUDGET_FALLBACK_THRESHOLD_USD,
@@ -93,7 +98,10 @@ const budgetFallbackPutSchema = budgetFallbackSchema.extend({
 /** The threshold is apart from `budget_fallback`: the API decides, so the bot's
  *  snapshot does not carry it, and the snapshot keeps the shape older bots parse. */
 const loadBudgetThreshold = async (store: Store) =>
-  parseBudgetThreshold(await store.getMeta("budget_fallback_threshold"), MONTHLY_BUDGET_USD);
+  parseBudgetThreshold(
+    await store.getMeta("budget_fallback_threshold"),
+    MONTHLY_BUDGET_USD,
+  );
 
 async function loadSnapshot(
   store: Store,
@@ -124,7 +132,9 @@ async function loadSnapshot(
   const premium_presets = premiumPresetIds(
     parsePremiumOverrides(await store.getMeta("preset_premium")),
   );
-  const budget_fallback = parseBudgetFallback(await store.getMeta("budget_fallback"));
+  const budget_fallback = parseBudgetFallback(
+    await store.getMeta("budget_fallback"),
+  );
   const artifact_commands = (await store.listArtifactCommands()).map((c) => ({
     id: c.id,
     token: c.token,
@@ -147,7 +157,7 @@ async function loadSnapshot(
     budget_fallback,
     artifact_commands,
     skill_commands,
-    chatgpt_available: await chatgpt?.available() ?? false,
+    chatgpt_available: (await chatgpt?.available()) ?? false,
   };
   // Skip caching a torn read: a write between the loads and versionAfter
   // would pin old rows under the new version until the next bump.
@@ -174,9 +184,17 @@ export type AppHooks = {
 };
 
 export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
-  const chatgpt = new ChatgptAccounts(store, env.sessionSecret, hooks.chatgptFetch);
+  const chatgpt = new ChatgptAccounts(
+    store,
+    env.sessionSecret,
+    hooks.chatgptFetch,
+  );
   const now = hooks.now ?? Date.now;
-  const costReport = new CostReport(env.anthropicAdminKey, hooks.anthropicFetch, now);
+  const costReport = new CostReport(
+    env.anthropicAdminKey,
+    hooks.anthropicFetch,
+    now,
+  );
   const cross = cookieCrossOrigin(env);
   const cookieOpts = {
     httpOnly: true,
@@ -229,415 +247,186 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
   // is enough for a 30-day window and keeps the hot path a single INSERT batch.
   let lastPrune = 0;
 
-  return new Elysia()
-    .use(
-      cors({
-        origin: env.frontendOrigin,
-        credentials: true,
-      }),
-    )
-    .onError(({ error, set }) => {
-      if (error instanceof ChatgptError || error instanceof CostReportError) {
-        set.status = error.status;
-        return { error: error.message };
-      }
-      const msg = error instanceof Error ? error.message : String(error);
-      if (
-        msg.includes("required") ||
-        msg.includes("unknown") ||
-        msg.includes("invalid")
-      ) {
-        set.status = 400;
-        return { error: msg };
-      }
-      set.status = 500;
-      return { error: "internal error" };
-    })
-    .get("/healthz", () => "ok")
-    // Not a secret: the repository is public and the commit is on GitHub.
-    .get("/version", () => ({ commit: env.commit }))
-    .group("/api/chatgpt", app => app
-      .onBeforeHandle(async ({ cookie, request, set }) => {
-        set.headers["cache-control"] = "no-store";
-        const s = await requireSession(cookieSid(cookie as never));
-        if (!s) { set.status = 401; return { error: "unauthorized" }; }
-        if (!canManageUsers(s.role)) { set.status = 403; return { error: "forbidden" }; }
-        // Cross-site session cookies are needed by the dashboard; CORS alone
-        // does not prevent another website from submitting a mutation.
-        if (request.method !== "GET" && request.headers.get("origin") !== new URL(env.frontendOrigin).origin) {
-          set.status = 403; return { error: "forbidden origin" };
+  return (
+    new Elysia()
+      .use(
+        cors({
+          origin: env.frontendOrigin,
+          credentials: true,
+        }),
+      )
+      .onError(({ error, set }) => {
+        if (error instanceof ChatgptError || error instanceof CostReportError) {
+          set.status = error.status;
+          return { error: error.message };
         }
-      })
-      .get("/accounts", async () => ({ accounts: await chatgpt.list() }))
-      .post("/login", async ({ cookie }) => chatgpt.start(cookieSid(cookie as never)!))
-      .post("/login/:id", async ({ cookie, params }) => {
-        const result = await chatgpt.poll(cookieSid(cookie as never)!, params.id);
-        if (result.status === "complete") { await store.bumpVersion(); await publish(); }
-        return result;
-      })
-      .patch("/accounts/:id", async ({ params, body, set }) => {
-        const enabled = (body as { enabled?: unknown } | null)?.enabled;
-        if (typeof enabled !== "boolean") { set.status = 400; return { error: "enabled boolean required" }; }
-        const result = await chatgpt.manage(params.id, enabled);
-        await store.bumpVersion(); await publish();
-        return result;
-      })
-      .delete("/accounts/:id", async ({ params }) => {
-        const result = await chatgpt.manage(params.id, null);
-        await store.bumpVersion(); await publish();
-        return result;
-      }))
-    .post("/internal/chatgpt/credential", async ({ headers, set }) => {
-      set.headers["cache-control"] = "no-store";
-      if (!requireInternal(headers.authorization)) { set.status = 401; return { error: "unauthorized" }; }
-      return chatgpt.credential();
-    })
-    .get("/auth/discord", async ({ set, redirect }) => {
-      if (!env.discordClientId || !env.discordClientSecret) {
-        set.status = 503;
-        return {
-          error:
-            "Discord OAuth is not configured (DISCORD_CLIENT_ID / DISCORD_CLIENT_SECRET)",
-        };
-      }
-      const state = randomUrlSafe(16);
-      const verifier = randomUrlSafe(32);
-      await store.putPending(state, verifier);
-      const challenge = await s256Challenge(verifier);
-      // Elysia 1.4: `set.redirect` is deprecated and a no-op through `.handle()`.
-      return redirect(authorizeUrl(env, state, challenge));
-    })
-    .get("/auth/discord/callback", async ({ query, set, cookie, redirect }) => {
-      const code = String(query.code ?? "");
-      const state = String(query.state ?? "");
-      const verifier = await store.takePending(state);
-      if (!code || !verifier) {
-        set.status = 400;
-        return { error: "invalid oauth callback" };
-      }
-      const tok = await exchangeCode(env, code, verifier);
-      const me = await fetchMe(tok.access_token);
-      await store.upsertUser({
-        discord_id: me.id,
-        username: me.global_name || me.username,
-        avatar: me.avatar,
-        // WEB_ADMIN_IDS is the only bootstrap Administrator. Everyone else
-        // starts as Free (`DEFAULT_ROLE`); admins/mods promote from the dashboard.
-        role: env.adminIds.includes(me.id) ? "administrator" : undefined,
-      });
-      const sid = randomUrlSafe(24);
-      await store.putSession(
-        sid,
-        me.id,
-        tok.access_token,
-        Date.now() + tok.expires_in * 1000,
-      );
-      cookie[COOKIE]?.set({ value: sid, ...cookieOpts });
-      return redirect(env.frontendOrigin.replace(/\/$/, "") + "/");
-    })
-    .post("/auth/logout", async ({ cookie, set }) => {
-      const sid = cookieSid(cookie as never);
-      if (sid) await store.deleteSession(sid);
-      cookie[COOKIE]?.remove();
-      set.status = 204;
-    })
-    .get("/api/me", async ({ cookie, set }) => {
-      const s = await requireSession(cookieSid(cookie as never));
-      if (!s) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      return {
-        id: s.discord_id,
-        username: s.username,
-        avatar: s.avatar,
-        role: s.role,
-        can_manage_users: canManageUsers(s.role),
-        can_moderate: canModerate(s.role),
-        can_view_all_guilds: canViewAllGuilds(s.role),
-        can_view_analytics: canViewAnalytics(s.role),
-      };
-    })
-    .get("/api/me/settings", async ({ cookie, set }) => {
-      const s = await requireSession(cookieSid(cookie as never));
-      if (!s) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      return {
-        settings: await store.getUserOverride(s.discord_id),
-        version: await store.version(),
-      };
-    })
-    .patch("/api/me/settings", async ({ cookie, set, body }) => {
-      const s = await requireSession(cookieSid(cookie as never));
-      if (!s) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      const parsed = userOverridePatchSchema.safeParse(body);
-      if (!parsed.success) {
-        set.status = 400;
-        return { error: parsed.error.issues.map((i) => i.message).join("; ") };
-      }
-      const gated = refuseRestrictedPatch(
-        s.role,
-        parsed.data,
-        await loadPremium(store),
-      );
-      if (gated) {
-        set.status = 403;
-        return { error: gated };
-      }
-      const hidden = refuseUnpublishedPatch(
-        await loadUnpublished(store),
-        parsed.data,
-      );
-      if (hidden) {
-        set.status = 403;
-        return { error: hidden };
-      }
-      const next = applyUserOverridePatch(
-        await store.getUserOverride(s.discord_id),
-        parsed.data,
-        store.defaults,
-      );
-      await store.putUserOverride(s.discord_id, next);
-      await publish();
-      return { settings: next, version: await store.version() };
-    })
-    .get("/api/catalog", async ({ cookie }) => {
-      const raw = await store.getMeta("available_presets");
-      let available = SELECTABLE_PRESETS.map((p) => p.id) as string[];
-      if (raw) {
-        try {
-          const parsed = JSON.parse(raw) as unknown;
-          if (Array.isArray(parsed)) available = parsed.map(String);
-        } catch {
-          /* keep catalog default */
-        }
-      }
-      const overrides = parseVisibilityOverrides(
-        await store.getMeta("preset_visibility"),
-      );
-      const premium = parsePremiumOverrides(
-        await store.getMeta("preset_premium"),
-      );
-      const s = await requireSession(cookieSid(cookie as never));
-      // The bot advertises configured providers separately. Master account
-      // availability is owned here and must update immediately after login.
-      available = available.filter(id => !id.startsWith("chatgpt-"));
-      const hasChatgpt = await chatgpt.available();
-      if (hasChatgpt) available.push(...SELECTABLE_PRESETS.filter(p => p.provider === "chatgpt").map(p => p.id));
-      const staff = s ? canManageUsers(s.role) : false;
-      // Staff see unpublished rows so the /models admin page can toggle them.
-      // Everyone else only gets currently public presets — the unreleased
-      // SKUs stay out of the picker JSON until an admin publishes them.
-      // `min_role` is the live floor after the Premium overlay (picker lock).
-      const presets = SELECTABLE_PRESETS.filter(
-        (p) => p.provider === "chatgpt" ? (staff || hasChatgpt) : staff || isPublished(p.id, overrides),
-      ).map((p) => ({
-        ...p,
-        published: isPublished(p.id, overrides),
-        min_role: effectiveMinRole(p.id, premium) ?? undefined,
-      }));
-      return {
-        presets,
-        efforts: REASONING_EFFORTS,
-        exa: EXA_MODES,
-        roles: ROLES,
-        available_presets: available,
-        // Built-in wake words. Guild extras / disabled live on the settings row.
-        triggers: BUILTIN_TRIGGERS,
-      };
-    })
-    .patch(
-      "/api/catalog/presets/:id",
-      async ({ cookie, set, params, body }) => {
-        const s = await requireSession(cookieSid(cookie as never));
-        if (!s) {
-          set.status = 401;
-          return { error: "unauthorized" };
-        }
-        if (!canManageUsers(s.role)) {
-          set.status = 403;
-          return { error: "forbidden" };
-        }
-        if (!isPresetId(params.id)) {
-          set.status = 400;
-          return { error: "unknown preset" };
-        }
-        const patch =
-          body && typeof body === "object"
-            ? (body as { published?: unknown; premium?: unknown })
-            : {};
-        const published = patch.published;
-        const premiumFlag = patch.premium;
+        const msg = error instanceof Error ? error.message : String(error);
         if (
-          typeof published !== "boolean" &&
-          typeof premiumFlag !== "boolean"
+          msg.includes("required") ||
+          msg.includes("unknown") ||
+          msg.includes("invalid")
         ) {
           set.status = 400;
-          return { error: "published or premium boolean required" };
+          return { error: msg };
         }
-        const overrides = parseVisibilityOverrides(
-          await store.getMeta("preset_visibility"),
-        );
-        const premium = parsePremiumOverrides(
-          await store.getMeta("preset_premium"),
-        );
-        // Store only deviations from the catalog default so a later catalog
-        // change (new unpublished SKU / new Premium-floor preset) still applies
-        // without a meta migration.
-        if (typeof published === "boolean") {
-          if (published === catalogPublished(params.id))
-            delete overrides[params.id];
-          else overrides[params.id] = published;
-          await store.setMeta("preset_visibility", JSON.stringify(overrides));
+        set.status = 500;
+        return { error: "internal error" };
+      })
+      .get("/healthz", () => "ok")
+      // Not a secret: the repository is public and the commit is on GitHub.
+      .get("/version", () => ({ commit: env.commit }))
+      .group("/api/chatgpt", (app) =>
+        app
+          .onBeforeHandle(async ({ cookie, request, set }) => {
+            set.headers["cache-control"] = "no-store";
+            const s = await requireSession(cookieSid(cookie as never));
+            if (!s) {
+              set.status = 401;
+              return { error: "unauthorized" };
+            }
+            if (!canManageUsers(s.role)) {
+              set.status = 403;
+              return { error: "forbidden" };
+            }
+            // Cross-site session cookies are needed by the dashboard; CORS alone
+            // does not prevent another website from submitting a mutation.
+            if (
+              request.method !== "GET" &&
+              request.headers.get("origin") !==
+                new URL(env.frontendOrigin).origin
+            ) {
+              set.status = 403;
+              return { error: "forbidden origin" };
+            }
+          })
+          .get("/accounts", async () => ({ accounts: await chatgpt.list() }))
+          .post("/login", async ({ cookie }) =>
+            chatgpt.start(cookieSid(cookie as never)!),
+          )
+          .post("/login/:id", async ({ cookie, params }) => {
+            const result = await chatgpt.poll(
+              cookieSid(cookie as never)!,
+              params.id,
+            );
+            if (result.status === "complete") {
+              await store.bumpVersion();
+              await publish();
+            }
+            return result;
+          })
+          .patch("/accounts/:id", async ({ params, body, set }) => {
+            const enabled = (body as { enabled?: unknown } | null)?.enabled;
+            if (typeof enabled !== "boolean") {
+              set.status = 400;
+              return { error: "enabled boolean required" };
+            }
+            const result = await chatgpt.manage(params.id, enabled);
+            await store.bumpVersion();
+            await publish();
+            return result;
+          })
+          .delete("/accounts/:id", async ({ params }) => {
+            const result = await chatgpt.manage(params.id, null);
+            await store.bumpVersion();
+            await publish();
+            return result;
+          }),
+      )
+      .post("/internal/chatgpt/credential", async ({ headers, set }) => {
+        set.headers["cache-control"] = "no-store";
+        if (!requireInternal(headers.authorization)) {
+          set.status = 401;
+          return { error: "unauthorized" };
         }
-        if (typeof premiumFlag === "boolean") {
-          if (premiumFlag === catalogPremium(params.id))
-            delete premium[params.id];
-          else premium[params.id] = premiumFlag;
-          await store.setMeta("preset_premium", JSON.stringify(premium));
-        }
-        // Snapshot GET includes unpublished_presets / premium_presets; bump so
-        // If-None-Match / SSE cannot 304 a stale picker list.
-        await store.bumpVersion();
-        await publish();
-        return {
-          id: params.id,
-          published: isPublished(params.id, overrides),
-          min_role: effectiveMinRole(params.id, premium),
-          unpublished_presets: unpublishedPresetIds(overrides),
-          premium_presets: premiumPresetIds(premium),
-          version: await store.version(),
-        };
-      },
-    )
-    .get("/api/users", async ({ cookie, set }) => {
-      const s = await requireSession(cookieSid(cookie as never));
-      if (!s) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      if (!canManageUsers(s.role)) {
-        set.status = 403;
-        return { error: "forbidden" };
-      }
-      const users = await store.listUsers();
-      const blocked = new Set(
-        (await store.listBlocked()).map((b) => b.discord_id),
-      );
-      return {
-        users: users.map((u) => ({
-          ...u,
-          role: effectiveRole(u.discord_id, u.role),
-          blocked: blocked.has(u.discord_id),
-        })),
-        assignable: rolesAssignableBy(s.role),
-      };
-    })
-    .patch("/api/users/:id", async ({ cookie, set, params, body }) => {
-      const s = await requireSession(cookieSid(cookie as never));
-      if (!s) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      if (!canManageUsers(s.role)) {
-        set.status = 403;
-        return { error: "forbidden" };
-      }
-      if (params.id === s.discord_id) {
-        set.status = 403;
-        return { error: "cannot change your own role" };
-      }
-      const nextRaw =
-        body && typeof body === "object"
-          ? (body as { role?: string }).role
-          : undefined;
-      const next = nextRaw ? parseRole(nextRaw) : null;
-      if (!next) {
-        set.status = 400;
-        return { error: "unknown role" };
-      }
-      const target = await store.getUser(params.id);
-      if (!target) {
-        set.status = 404;
-        return { error: "user not found" };
-      }
-      const targetRole = effectiveRole(target.discord_id, target.role);
-      if (!canAssignRole(s.role, targetRole, next)) {
-        set.status = 403;
-        return { error: "cannot assign that role to this user" };
-      }
-      await store.setUserRole(params.id, next);
-      await publish();
-      return { ok: true, discord_id: params.id, role: next };
-    })
-    .get("/api/guilds", async ({ cookie, set }) => {
-      const s = await requireSession(cookieSid(cookie as never));
-      if (!s) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      const mine = hooks.listGuilds
-        ? await hooks.listGuilds(s.access_token)
-        : intersectGuilds(
-            await fetchUserGuilds(s.access_token),
-            await fetchBotGuilds(env),
-          );
-      // Admin / moderator see every server the bot is in — including ones they
-      // were never invited to. `member` tells the UI which are theirs so the
-      // extra rows read as moderation scope, not as "you joined 200 servers".
-      const all = canViewAllGuilds(s.role) ? await botGuilds() : mine;
-      const mineIds = new Set(mine.map((g) => g.id));
-      const guilds = await Promise.all(
-        all.map(async (g) => {
-          const row = await store.getGuild(g.id);
+        return chatgpt.credential();
+      })
+      .get("/auth/discord", async ({ set, redirect }) => {
+        if (!env.discordClientId || !env.discordClientSecret) {
+          set.status = 503;
           return {
-            id: g.id,
-            name: g.name,
-            icon: g.icon,
-            preset: row.selection?.model ?? null,
-            // The model alone no longer names the provider: Anthropic
-            // Workspace offers the models `anthropic` has (#76).
-            provider: row.selection?.provider ?? null,
-            bot_disabled: row.bot_disabled,
-            member: mineIds.has(g.id),
+            error:
+              "Discord OAuth is not configured (DISCORD_CLIENT_ID / DISCORD_CLIENT_SECRET)",
           };
-        }),
-      );
-      return { guilds };
-    })
-    .get("/api/guilds/:id/settings", async ({ cookie, set, params }) => {
-      const s = await requireSession(cookieSid(cookie as never));
-      if (!s) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      if (!(await guildOk(env, hooks, s.access_token, params.id, s.role))) {
-        set.status = 404;
-        return { error: "guild not found" };
-      }
-      return {
-        settings: await store.getGuild(params.id),
-        version: await store.version(),
-      };
-    })
-    .patch(
-      "/api/guilds/:id/settings",
-      async ({ cookie, set, params, body }) => {
+        }
+        const state = randomUrlSafe(16);
+        const verifier = randomUrlSafe(32);
+        await store.putPending(state, verifier);
+        const challenge = await s256Challenge(verifier);
+        // Elysia 1.4: `set.redirect` is deprecated and a no-op through `.handle()`.
+        return redirect(authorizeUrl(env, state, challenge));
+      })
+      .get(
+        "/auth/discord/callback",
+        async ({ query, set, cookie, redirect }) => {
+          const code = String(query.code ?? "");
+          const state = String(query.state ?? "");
+          const verifier = await store.takePending(state);
+          if (!code || !verifier) {
+            set.status = 400;
+            return { error: "invalid oauth callback" };
+          }
+          const tok = await exchangeCode(env, code, verifier);
+          const me = await fetchMe(tok.access_token);
+          await store.upsertUser({
+            discord_id: me.id,
+            username: me.global_name || me.username,
+            avatar: me.avatar,
+            // WEB_ADMIN_IDS is the only bootstrap Administrator. Everyone else
+            // starts as Free (`DEFAULT_ROLE`); admins/mods promote from the dashboard.
+            role: env.adminIds.includes(me.id) ? "administrator" : undefined,
+          });
+          const sid = randomUrlSafe(24);
+          await store.putSession(
+            sid,
+            me.id,
+            tok.access_token,
+            Date.now() + tok.expires_in * 1000,
+          );
+          cookie[COOKIE]?.set({ value: sid, ...cookieOpts });
+          return redirect(env.frontendOrigin.replace(/\/$/, "") + "/");
+        },
+      )
+      .post("/auth/logout", async ({ cookie, set }) => {
+        const sid = cookieSid(cookie as never);
+        if (sid) await store.deleteSession(sid);
+        cookie[COOKIE]?.remove();
+        set.status = 204;
+      })
+      .get("/api/me", async ({ cookie, set }) => {
         const s = await requireSession(cookieSid(cookie as never));
         if (!s) {
           set.status = 401;
           return { error: "unauthorized" };
         }
-        if (!(await guildOk(env, hooks, s.access_token, params.id, s.role))) {
-          set.status = 404;
-          return { error: "guild not found" };
+        return {
+          id: s.discord_id,
+          username: s.username,
+          avatar: s.avatar,
+          role: s.role,
+          can_manage_users: canManageUsers(s.role),
+          can_moderate: canModerate(s.role),
+          can_view_all_guilds: canViewAllGuilds(s.role),
+          can_view_analytics: canViewAnalytics(s.role),
+        };
+      })
+      .get("/api/me/settings", async ({ cookie, set }) => {
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
         }
-        const parsed = guildPatchSchema.safeParse(body);
+        return {
+          settings: await store.getUserOverride(s.discord_id),
+          version: await store.version(),
+        };
+      })
+      .patch("/api/me/settings", async ({ cookie, set, body }) => {
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const parsed = userOverridePatchSchema.safeParse(body);
         if (!parsed.success) {
           set.status = 400;
           return {
@@ -661,728 +450,227 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           set.status = 403;
           return { error: hidden };
         }
-        const next = applyPatch(await store.getGuild(params.id), parsed.data, store.defaults);
-        await store.putGuild(params.id, next);
-        await publish();
-        return { settings: next, version: await store.version() };
-      },
-    )
-    .get("/internal/snapshot", async ({ request, set }) => {
-      if (!requireInternal(request.headers.get("authorization") ?? undefined)) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      const version = await store.version();
-      const inm = parseSnapshotEtag(request.headers.get("if-none-match"));
-      if (inm !== null && inm === version) {
-        return new Response(null, {
-          status: 304,
-          headers: { ETag: snapshotEtag(version) },
-        });
-      }
-      const body = await loadSnapshot(store, hub, version, env.adminIds, chatgpt);
-      return new Response(JSON.stringify(body), {
-        status: 200,
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          ETag: snapshotEtag(body.version),
-        },
-      });
-    })
-    .get("/internal/events", ({ request, set }) => {
-      if (!requireInternal(request.headers.get("authorization") ?? undefined)) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      const encoder = new TextEncoder();
-      let unsub: (() => void) | undefined;
-      let ping: ReturnType<typeof setInterval> | undefined;
-      let watch: ReturnType<typeof setInterval> | undefined;
-      let lastEmitted = -1;
-      let closed = false;
-      const stream = new ReadableStream<Uint8Array>({
-        async start(controller) {
-          const send = (event: string, data: unknown) => {
-            if (closed) return;
-            try {
-              controller.enqueue(
-                encoder.encode(
-                  `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`,
-                ),
-              );
-            } catch {
-              closed = true;
-            }
-          };
-          const emit = (nextVersion: number) => {
-            if (nextVersion === lastEmitted) return;
-            const first = lastEmitted < 0;
-            lastEmitted = nextVersion;
-            send(first ? "hello" : "update", { version: nextVersion });
-          };
-          emit(await store.version());
-          unsub = hub.subscribe(emit);
-          ping = setInterval(() => {
-            if (closed) return;
-            try {
-              controller.enqueue(encoder.encode(": ping\n\n"));
-            } catch {
-              closed = true;
-            }
-          }, SSE_PING_MS);
-          watch = setInterval(() => {
-            void store
-              .version()
-              .then(emit)
-              .catch(() => {
-                /* next tick retries; do not tear the stream on a blip */
-              });
-          }, SSE_VERSION_WATCH_MS);
-          const abort = () => {
-            closed = true;
-            unsub?.();
-            if (ping) clearInterval(ping);
-            if (watch) clearInterval(watch);
-            try {
-              controller.close();
-            } catch {
-              /* already closed */
-            }
-          };
-          request.signal.addEventListener("abort", abort);
-        },
-        cancel() {
-          closed = true;
-          unsub?.();
-          if (ping) clearInterval(ping);
-          if (watch) clearInterval(watch);
-        },
-      });
-      return new Response(stream, {
-        headers: {
-          "content-type": "text/event-stream; charset=utf-8",
-          "cache-control": "no-cache, no-transform",
-          connection: "keep-alive",
-          "x-accel-buffering": "no",
-        },
-      });
-    })
-    .put("/internal/snapshot", async ({ request, set, body }) => {
-      if (!requireInternal(request.headers.get("authorization") ?? undefined)) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      const raw =
-        body && typeof body === "object"
-          ? (body as Record<string, unknown>)
-          : {};
-      const guilds = raw.guilds;
-      if (!guilds || typeof guilds !== "object" || Array.isArray(guilds)) {
-        set.status = 400;
-        return { error: "guilds object required" };
-      }
-      const normalized: Record<string, ReturnType<typeof emptyGuild>> = {};
-      for (const [id, settings] of Object.entries(
-        guilds as Record<string, unknown>,
-      )) {
-        if (!id || typeof settings !== "object" || settings === null) continue;
-        normalized[id] = normalizeGuild(settings as object, store.defaults);
-      }
-      const userContexts: Record<
-        string,
-        { text: string; persona_override: boolean }
-      > = {};
-      const rawCtx = raw.user_contexts;
-      if (rawCtx && typeof rawCtx === "object" && !Array.isArray(rawCtx)) {
-        for (const [id, entry] of Object.entries(
-          rawCtx as Record<string, unknown>,
-        )) {
-          if (!id || typeof entry !== "object" || entry === null) continue;
-          const e = entry as { text?: unknown; persona_override?: unknown };
-          const text = typeof e.text === "string" ? e.text : "";
-          const persona_override = Boolean(e.persona_override);
-          if (!text.trim() && !persona_override) continue;
-          userContexts[id] = { text, persona_override };
-        }
-      }
-      await store.replaceSnapshot(normalized, userContexts);
-      await publish();
-      return {
-        version: await store.version(),
-        n_guilds: Object.keys(normalized).length,
-      };
-    })
-    .patch("/internal/guilds/:id", async ({ request, set, params, body }) => {
-      if (!requireInternal(request.headers.get("authorization") ?? undefined)) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      const parsed = guildPatchSchema.safeParse(body);
-      if (!parsed.success) {
-        set.status = 400;
-        return { error: parsed.error.issues.map((i) => i.message).join("; ") };
-      }
-      const next = applyPatch(await store.getGuild(params.id), parsed.data, store.defaults);
-      await store.putGuild(params.id, next);
-      await publish();
-      return { settings: next, version: await store.version() };
-    })
-    .patch(
-      "/internal/users/:id/settings",
-      async ({ request, set, params, body }) => {
-        if (
-          !requireInternal(request.headers.get("authorization") ?? undefined)
-        ) {
-          set.status = 401;
-          return { error: "unauthorized" };
-        }
-        // Same snowflake rule as /api/blocked: a username here would write a row
-        // the bot never looks up.
-        if (!/^\d{5,25}$/.test(params.id)) {
-          set.status = 400;
-          return { error: "discord_id must be a snowflake" };
-        }
-        const parsed = userOverridePatchSchema.safeParse(body);
-        if (!parsed.success) {
-          set.status = 400;
-          return {
-            error: parsed.error.issues.map((i) => i.message).join("; "),
-          };
-        }
         const next = applyUserOverridePatch(
-          await store.getUserOverride(params.id),
+          await store.getUserOverride(s.discord_id),
           parsed.data,
           store.defaults,
         );
-        await store.putUserOverride(params.id, next);
+        await store.putUserOverride(s.discord_id, next);
         await publish();
         return { settings: next, version: await store.version() };
-      },
-    )
-    .get("/api/blocked", async ({ cookie, set }) => {
-      const s = await requireSession(cookieSid(cookie as never));
-      if (!s) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      if (!canModerate(s.role)) {
-        set.status = 403;
-        return { error: "forbidden" };
-      }
-      return { blocked: await store.listBlocked() };
-    })
-    .post("/api/blocked", async ({ cookie, set, body }) => {
-      const s = await requireSession(cookieSid(cookie as never));
-      if (!s) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      if (!canModerate(s.role)) {
-        set.status = 403;
-        return { error: "forbidden" };
-      }
-      const raw = (body ?? {}) as { discord_id?: unknown; reason?: unknown };
-      const id = String(raw.discord_id ?? "").trim();
-      // Snowflakes only: the bot matches on the numeric id, so a username here
-      // would silently block nobody.
-      if (!/^\d{5,25}$/.test(id)) {
-        set.status = 400;
-        return { error: "discord_id must be a snowflake" };
-      }
-      if (id === s.discord_id) {
-        set.status = 403;
-        return { error: "cannot block yourself" };
-      }
-      const target = await store.getUser(id);
-      // Only guards accounts that exist here; an unknown id has no role to outrank.
-      if (
-        target &&
-        rank(effectiveRole(target.discord_id, target.role)) <= rank(s.role)
-      ) {
-        set.status = 403;
-        return { error: "cannot block that user" };
-      }
-      const reason =
-        typeof raw.reason === "string" ? raw.reason.slice(0, 500) : null;
-      await store.setBlocked({
-        discord_id: id,
-        username: target?.username ?? null,
-        reason: reason && reason.trim() ? reason : null,
-        blocked_by: s.discord_id,
-        blocked_at: Date.now(),
-      });
-      await publish();
-      return { ok: true, discord_id: id };
-    })
-    .delete("/api/blocked/:id", async ({ cookie, set, params }) => {
-      const s = await requireSession(cookieSid(cookie as never));
-      if (!s) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      if (!canModerate(s.role)) {
-        set.status = 403;
-        return { error: "forbidden" };
-      }
-      await store.unblock(params.id);
-      await publish();
-      return { ok: true, discord_id: params.id };
-    })
-    .get("/api/logs", async ({ cookie, set, query }) => {
-      const s = await requireSession(cookieSid(cookie as never));
-      if (!s) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      // DM turns are in here, so this is admin/mod only — never guild-scoped.
-      if (!canModerate(s.role)) {
-        set.status = 403;
-        return { error: "forbidden" };
-      }
-      if (!env.logsEnabled) {
-        return {
-          logs: [],
-          next: null,
-          retention_days: Math.round(LOG_RETENTION_MS / 86_400_000),
-          enabled: false,
-        };
-      }
-      const q = parseLogQuery(query as Record<string, string | undefined>);
-      const logs = await store.listLogs(q);
-      // `next` is the keyset cursor for the following page; null = end of log.
-      const next = logs.length === q.limit ? logs[logs.length - 1].id : null;
-      return {
-        logs,
-        next,
-        retention_days: Math.round(LOG_RETENTION_MS / 86_400_000),
-        enabled: true,
-      };
-    })
-    .get("/api/analytics/cost", async ({ cookie, set, query }) => {
-      // Billing figures: never held by a shared cache or the browser's.
-      set.headers["cache-control"] = "no-store";
-      const s = await requireSession(cookieSid(cookie as never));
-      if (!s) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      if (!canViewAnalytics(s.role)) {
-        set.status = 403;
-        return { error: "forbidden" };
-      }
-      // Same shape as /api/logs when it is switched off: the page explains
-      // what to set instead of showing an error.
-      if (!costReport.configured) return { configured: false };
-      const month = parseMonth(
-        (query as Record<string, string | undefined>).month,
-        now(),
-      );
-      if (!month) {
-        set.status = 400;
-        return { error: "month must be YYYY-MM and not in the future" };
-      }
-      return costReport.month(month);
-    })
-    // The running UTC day, estimated from the usage report (#85). Same
-    // permission and caching as the cost report above.
-    .get("/api/analytics/today", async ({ cookie, set }) => {
-      set.headers["cache-control"] = "no-store";
-      const s = await requireSession(cookieSid(cookie as never));
-      if (!s) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      if (!canViewAnalytics(s.role)) {
-        set.status = 403;
-        return { error: "forbidden" };
-      }
-      if (!costReport.configured) return { configured: false };
-      return costReport.today();
-    })
-    // The model Anthropic API turns switch to while the month's budget is
-    // nearly spent, the threshold that switches them, and whether they do now
-    // (#89, #95). Everyone who may read the cost may read this; only an
-    // Administrator changes it.
-    .get("/api/budget-fallback", async ({ cookie, set }) => {
-      set.headers["cache-control"] = "no-store";
-      const s = await requireSession(cookieSid(cookie as never));
-      if (!s) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      if (!canViewAnalytics(s.role)) {
-        set.status = 403;
-        return { error: "forbidden" };
-      }
-      const unpublished = await loadUnpublished(store);
-      const threshold = await loadBudgetThreshold(store);
-      // A failed status still shows the setting: the page says why instead.
-      let status: unknown = { configured: false };
-      if (costReport.configured) {
-        try {
-          status = await costReport.budget(threshold);
-        } catch (e) {
-          if (!(e instanceof CostReportError)) throw e;
-          status = { configured: true, error: e.message };
-        }
-      }
-      return {
-        fallback: parseBudgetFallback(await store.getMeta("budget_fallback")),
-        threshold_usd: threshold,
-        // The range a threshold may be stored in (#95), for the form.
-        threshold_range: { min_usd: 0, max_usd: MONTHLY_BUDGET_USD, default_usd: DEFAULT_BUDGET_FALLBACK_THRESHOLD_USD },
-        // Unpublished presets may not have a live wire id yet, so they are
-        // not offered. One stored before it was hidden is listed so the
-        // page can name it; the bot runs the default instead (runtime.ts).
-        presets: SELECTABLE_PRESETS.filter((p) => isBudgetFallbackPreset(p.id)).map((p) => ({
-          id: p.id,
-          label: p.label,
-          published: !unpublished.includes(p.id),
-        })),
-        efforts: BUDGET_FALLBACK_EFFORTS,
-        can_edit: canManageBudget(s.role),
-        status,
-      };
-    })
-    .put("/api/budget-fallback", async ({ cookie, set, body }) => {
-      const s = await requireSession(cookieSid(cookie as never));
-      if (!s) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      if (!canManageBudget(s.role)) {
-        set.status = 403;
-        return { error: "forbidden" };
-      }
-      const parsed = budgetFallbackPutSchema.safeParse(body);
-      if (!parsed.success) {
-        set.status = 400;
-        return { error: parsed.error.issues.map((i) => i.message).join("; ") };
-      }
-      const { threshold_usd, ...fallback } = parsed.data;
-      if ((await loadUnpublished(store)).includes(fallback.preset)) {
-        set.status = 400;
-        return { error: "unpublished preset" };
-      }
-      if (threshold_usd !== undefined) await store.setMeta("budget_fallback_threshold", JSON.stringify(threshold_usd));
-      await store.setMeta("budget_fallback", JSON.stringify(fallback));
-      // The snapshot carries the model to the bot; bump so it is not answered
-      // 304. The threshold reaches it through `/internal/budget` instead.
-      await store.bumpVersion();
-      await publish();
-      return { fallback, threshold_usd: await loadBudgetThreshold(store) };
-    })
-    // The bot asks this every few minutes (#89). It has no Admin API key: the
-    // decision is made here, from the same figures the page shows and the
-    // threshold stored on it (#95).
-    .get("/internal/budget", async ({ request, set }) => {
-      if (!requireInternal(request.headers.get("authorization") ?? undefined)) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      if (!costReport.configured) return { configured: false };
-      // A CostReportError becomes its status (502/429) in onError; the bot
-      // keeps the last answer it had.
-      return costReport.budget(await loadBudgetThreshold(store));
-    })
-    .post("/internal/logs", async ({ request, set, body }) => {
-      if (!requireInternal(request.headers.get("authorization") ?? undefined)) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      if (!env.logsEnabled) {
-        return { ok: true, n: 0, enabled: false };
-      }
-      const raw = (body ?? {}) as { entries?: unknown };
-      const list = Array.isArray(raw.entries) ? raw.entries : [];
-      const entries = list
-        .map(parseLogEntry)
-        .filter((e): e is LogEntry => e !== null);
-      if (entries.length) await store.appendLogs(entries);
-      const now = Date.now();
-      if (now - lastPrune > 3_600_000) {
-        lastPrune = now;
-        await store.pruneLogs(now - LOG_RETENTION_MS);
-      }
-      return { ok: true, n: entries.length, enabled: true };
-    })
-    .post("/internal/capabilities", async ({ request, set, body }) => {
-      if (!requireInternal(request.headers.get("authorization") ?? undefined)) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      const presets =
-        body && typeof body === "object"
-          ? (body as { available_presets?: string[] }).available_presets
-          : undefined;
-      await store.setMeta(
-        "available_presets",
-        JSON.stringify(Array.isArray(presets) ? presets : []),
-      );
-      return { ok: true };
-    })
-    .post("/internal/skills/chunk", async ({ request, set, body }) => {
-      if (!requireInternal(request.headers.get("authorization") ?? undefined)) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      const raw = body as {
-        id?: unknown;
-        index?: unknown;
-        total?: unknown;
-        data?: unknown;
-      };
-      if (
-        !raw ||
-        typeof raw.id !== "string" ||
-        !/^[a-f0-9]{16}$/.test(raw.id) ||
-        !Number.isInteger(raw.index) ||
-        !Number.isInteger(raw.total) ||
-        Number(raw.total) < 1 ||
-        Number(raw.total) > 128 ||
-        Number(raw.index) < 0 ||
-        Number(raw.index) >= Number(raw.total) ||
-        typeof raw.data !== "string" ||
-        raw.data.length > 256000 ||
-        !/^[A-Za-z0-9+/]*={0,2}$/.test(raw.data)
-      ) {
-        set.status = 400;
-        return { error: "invalid skill chunk" };
-      }
-      // Bounded staging slots survive Vercel isolates; publish only a complete upload.
-      await store.setMeta(
-        `skill_upload_${raw.index}`,
-        JSON.stringify({ id: raw.id, data: raw.data }),
-      );
-      if (Number(raw.index) === Number(raw.total) - 1) {
-        const parts = await Promise.all(
-          Array.from({ length: Number(raw.total) }, (_, i) =>
-            store.getMeta(`skill_upload_${i}`),
-          ),
-        );
-        const buffers: Buffer[] = [];
-        for (const part of parts) {
-          const chunk = JSON.parse(part ?? "null") as {
-            id: string;
-            data: string;
-          } | null;
-          if (!chunk || chunk.id !== raw.id) {
-            set.status = 409;
-            return { error: "incomplete skill upload" };
+      })
+      .get("/api/catalog", async ({ cookie }) => {
+        const raw = await store.getMeta("available_presets");
+        let available = SELECTABLE_PRESETS.map((p) => p.id) as string[];
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw) as unknown;
+            if (Array.isArray(parsed)) available = parsed.map(String);
+          } catch {
+            /* keep catalog default */
           }
-          buffers.push(Buffer.from(chunk.data, "base64"));
         }
-        let catalog: unknown;
-        try {
-          catalog = JSON.parse(Buffer.concat(buffers).toString("utf8"));
-        } catch {
+        const overrides = parseVisibilityOverrides(
+          await store.getMeta("preset_visibility"),
+        );
+        const premium = parsePremiumOverrides(
+          await store.getMeta("preset_premium"),
+        );
+        const s = await requireSession(cookieSid(cookie as never));
+        // The bot advertises configured providers separately. Master account
+        // availability is owned here and must update immediately after login.
+        available = available.filter((id) => !id.startsWith("chatgpt-"));
+        const hasChatgpt = await chatgpt.available();
+        if (hasChatgpt)
+          available.push(
+            ...SELECTABLE_PRESETS.filter((p) => p.provider === "chatgpt").map(
+              (p) => p.id,
+            ),
+          );
+        const staff = s ? canManageUsers(s.role) : false;
+        // Staff see unpublished rows so the /models admin page can toggle them.
+        // Everyone else only gets currently public presets — the unreleased
+        // SKUs stay out of the picker JSON until an admin publishes them.
+        // `min_role` is the live floor after the Premium overlay (picker lock).
+        const presets = SELECTABLE_PRESETS.filter((p) =>
+          p.provider === "chatgpt"
+            ? staff || hasChatgpt
+            : staff || isPublished(p.id, overrides),
+        ).map((p) => ({
+          ...p,
+          published: isPublished(p.id, overrides),
+          min_role: effectiveMinRole(p.id, premium) ?? undefined,
+        }));
+        return {
+          presets,
+          efforts: REASONING_EFFORTS,
+          exa: EXA_MODES,
+          roles: ROLES,
+          available_presets: available,
+          // Built-in wake words. Guild extras / disabled live on the settings row.
+          triggers: BUILTIN_TRIGGERS,
+        };
+      })
+      .patch(
+        "/api/catalog/presets/:id",
+        async ({ cookie, set, params, body }) => {
+          const s = await requireSession(cookieSid(cookie as never));
+          if (!s) {
+            set.status = 401;
+            return { error: "unauthorized" };
+          }
+          if (!canManageUsers(s.role)) {
+            set.status = 403;
+            return { error: "forbidden" };
+          }
+          if (!isPresetId(params.id)) {
+            set.status = 400;
+            return { error: "unknown preset" };
+          }
+          const patch =
+            body && typeof body === "object"
+              ? (body as { published?: unknown; premium?: unknown })
+              : {};
+          const published = patch.published;
+          const premiumFlag = patch.premium;
+          if (
+            typeof published !== "boolean" &&
+            typeof premiumFlag !== "boolean"
+          ) {
+            set.status = 400;
+            return { error: "published or premium boolean required" };
+          }
+          const overrides = parseVisibilityOverrides(
+            await store.getMeta("preset_visibility"),
+          );
+          const premium = parsePremiumOverrides(
+            await store.getMeta("preset_premium"),
+          );
+          // Store only deviations from the catalog default so a later catalog
+          // change (new unpublished SKU / new Premium-floor preset) still applies
+          // without a meta migration.
+          if (typeof published === "boolean") {
+            if (published === catalogPublished(params.id))
+              delete overrides[params.id];
+            else overrides[params.id] = published;
+            await store.setMeta("preset_visibility", JSON.stringify(overrides));
+          }
+          if (typeof premiumFlag === "boolean") {
+            if (premiumFlag === catalogPremium(params.id))
+              delete premium[params.id];
+            else premium[params.id] = premiumFlag;
+            await store.setMeta("preset_premium", JSON.stringify(premium));
+          }
+          // Snapshot GET includes unpublished_presets / premium_presets; bump so
+          // If-None-Match / SSE cannot 304 a stale picker list.
+          await store.bumpVersion();
+          await publish();
+          return {
+            id: params.id,
+            published: isPublished(params.id, overrides),
+            min_role: effectiveMinRole(params.id, premium),
+            unpublished_presets: unpublishedPresetIds(overrides),
+            premium_presets: premiumPresetIds(premium),
+            version: await store.version(),
+          };
+        },
+      )
+      .get("/api/users", async ({ cookie, set }) => {
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        if (!canManageUsers(s.role)) {
+          set.status = 403;
+          return { error: "forbidden" };
+        }
+        const users = await store.listUsers();
+        const blocked = new Set(
+          (await store.listBlocked()).map((b) => b.discord_id),
+        );
+        return {
+          users: users.map((u) => ({
+            ...u,
+            role: effectiveRole(u.discord_id, u.role),
+            blocked: blocked.has(u.discord_id),
+          })),
+          assignable: rolesAssignableBy(s.role),
+        };
+      })
+      .patch("/api/users/:id", async ({ cookie, set, params, body }) => {
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        if (!canManageUsers(s.role)) {
+          set.status = 403;
+          return { error: "forbidden" };
+        }
+        if (params.id === s.discord_id) {
+          set.status = 403;
+          return { error: "cannot change your own role" };
+        }
+        const nextRaw =
+          body && typeof body === "object"
+            ? (body as { role?: string }).role
+            : undefined;
+        const next = nextRaw ? parseRole(nextRaw) : null;
+        if (!next) {
           set.status = 400;
-          return { error: "invalid skill JSON" };
+          return { error: "unknown role" };
         }
-        const parsed = skillRow.array().max(10000).safeParse(catalog);
-        if (!parsed.success) {
-          set.status = 400;
-          return { error: "invalid skill catalog" };
-        }
-        await store.replaceSkills(parsed.data);
-      }
-      return { ok: true };
-    })
-    .post("/internal/skills", async ({ request, set, body }) => {
-      if (!requireInternal(request.headers.get("authorization") ?? undefined)) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      const parsed = skillRow
-        .array()
-        .max(10000)
-        .safeParse((body as { skills?: unknown })?.skills);
-      if (!parsed.success) {
-        set.status = 400;
-        return { error: "invalid skill catalog" };
-      }
-      await store.replaceSkills(parsed.data);
-      return { ok: true };
-    })
-    .get("/internal/skills/commands", async ({ request, set }) => {
-      if (!requireInternal(request.headers.get("authorization") ?? undefined)) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      return (await store.listSkillCommands()).filter((c) => c.result === null);
-    })
-    .post("/internal/skills/ack", async ({ request, set, body }) => {
-      if (!requireInternal(request.headers.get("authorization") ?? undefined)) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      const raw = body as { id?: unknown; result?: unknown };
-      if (
-        !Number.isSafeInteger(raw?.id) ||
-        Number(raw.id) < 1 ||
-        !raw.result ||
-        typeof raw.result !== "object" ||
-        Array.isArray(raw.result)
-      ) {
-        set.status = 400;
-        return { error: "invalid acknowledgement" };
-      }
-      await store.ackSkillCommand(
-        Number(raw.id),
-        raw.result as Record<string, unknown>,
-      );
-      await publish();
-      return { ok: true };
-    })
-    .get("/api/guilds/:id/skills", async ({ cookie, set, params }) => {
-      const s = await requireSession(cookieSid(cookie as never));
-      if (!s) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      if (
-        !guildId.safeParse(params.id).success ||
-        !(await guildOk(env, hooks, s.access_token, params.id, s.role))
-      ) {
-        set.status = 404;
-        return { error: "guild not found" };
-      }
-      return {
-        skills: guildSkills(await store.listSkills(), params.id),
-        commands: (await store.listSkillCommands()).filter(
-          (c) => c.guild_id === params.id,
-        ),
-      };
-    })
-    .post("/api/guilds/:id/skills", async ({ cookie, set, params, body }) => {
-      const s = await requireSession(cookieSid(cookie as never));
-      if (!s) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      if (
-        !guildId.safeParse(params.id).success ||
-        !(await guildOk(env, hooks, s.access_token, params.id, s.role))
-      ) {
-        set.status = 404;
-        return { error: "guild not found" };
-      }
-      const parsed = skillAction.safeParse(body);
-      if (!parsed.success) {
-        set.status = 400;
-        return { error: "invalid skill action" };
-      }
-      const { action, ...args } = parsed.data;
-      const rows = await store.listSkills();
-      const existing = guildSkills(rows, params.id).find(
-        (r) => r.name === args.name,
-      );
-      if (action === "import") {
-        const source = (parsed.data as { source_guild_id: string })
-          .source_guild_id;
-        if (!(await guildOk(env, hooks, s.access_token, source, s.role))) {
+        const target = await store.getUser(params.id);
+        if (!target) {
           set.status = 404;
-          return { error: "source guild not found" };
+          return { error: "user not found" };
         }
-        if (
-          !rows.some(
-            (r) => r.guild_id === source && r.name === args.name && !r.builtin,
-          )
-        ) {
-          set.status = 404;
-          return { error: "source skill not found" };
+        const targetRole = effectiveRole(target.discord_id, target.role);
+        if (!canAssignRole(s.role, targetRole, next)) {
+          set.status = 403;
+          return { error: "cannot assign that role to this user" };
         }
-      }
-      if ((action === "create" || action === "import") && existing) {
-        set.status = 409;
-        return { error: "skill already exists" };
-      }
-      if ((action === "enabled" || action === "delete") && !existing) {
-        set.status = 404;
-        return { error: "skill not found" };
-      }
-      if (action === "delete" && existing?.builtin) {
-        set.status = 400;
-        return { error: "builtin skills cannot be deleted" };
-      }
-      const command = await store.enqueueSkillCommand(params.id, action, args);
-      await publish();
-      return { ok: true, command };
-    })
-    .post("/internal/artifacts", async ({ request, set, body }) => {
-      if (!requireInternal(request.headers.get("authorization") ?? undefined)) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      const raw =
-        body && typeof body === "object"
-          ? (body as { sites?: unknown }).sites
-          : null;
-      const list = Array.isArray(raw) ? raw : [];
-      const sites = list
-        .map(parseArtifactSite)
-        .filter((s): s is ArtifactRow => s !== null);
-      await store.replaceArtifacts(sites);
-      return { ok: true, n: sites.length };
-    })
-    .post("/internal/artifacts/ack", async ({ request, set, body }) => {
-      if (!requireInternal(request.headers.get("authorization") ?? undefined)) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      const raw =
-        body && typeof body === "object"
-          ? (body as { ids?: unknown }).ids
-          : null;
-      const ids = Array.isArray(raw)
-        ? raw.map((x) => Number(x)).filter((n) => Number.isInteger(n) && n > 0)
-        : [];
-      const n = await store.ackArtifactCommands(ids);
-      if (n) await publish();
-      return { ok: true, n };
-    })
-    .get("/api/artifacts", async ({ cookie, set }) => {
-      const s = await requireSession(cookieSid(cookie as never));
-      if (!s) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      const allowed = await accessibleGuildIds(
-        env,
-        hooks,
-        s.access_token,
-        s.role,
-      );
-      const [sites, commands] = await Promise.all([
-        store.listArtifacts(),
-        store.listArtifactCommands(),
-      ]);
-      return {
-        sites: decorateArtifacts(
-          sites.filter((row) => row.guild_id && allowed.has(row.guild_id)),
-          commands,
-        ),
-      };
-    })
-    .get("/api/guilds/:id/artifacts", async ({ cookie, set, params }) => {
-      const s = await requireSession(cookieSid(cookie as never));
-      if (!s) {
-        set.status = 401;
-        return { error: "unauthorized" };
-      }
-      if (!(await guildOk(env, hooks, s.access_token, params.id, s.role))) {
-        set.status = 404;
-        return { error: "guild not found" };
-      }
-      const [sites, commands] = await Promise.all([
-        store.listArtifacts(params.id),
-        store.listArtifactCommands(),
-      ]);
-      return { sites: decorateArtifacts(sites, commands) };
-    })
-    .patch(
-      "/api/guilds/:id/artifacts/:token",
-      async ({ cookie, set, params, body }) => {
+        await store.setUserRole(params.id, next);
+        await publish();
+        return { ok: true, discord_id: params.id, role: next };
+      })
+      .get("/api/guilds", async ({ cookie, set }) => {
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const mine = hooks.listGuilds
+          ? await hooks.listGuilds(s.access_token)
+          : intersectGuilds(
+              await fetchUserGuilds(s.access_token),
+              await fetchBotGuilds(env),
+            );
+        // Admin / moderator see every server the bot is in — including ones they
+        // were never invited to. `member` tells the UI which are theirs so the
+        // extra rows read as moderation scope, not as "you joined 200 servers".
+        const all = canViewAllGuilds(s.role) ? await botGuilds() : mine;
+        const mineIds = new Set(mine.map((g) => g.id));
+        const guilds = await Promise.all(
+          all.map(async (g) => {
+            const row = await store.getGuild(g.id);
+            return {
+              id: g.id,
+              name: g.name,
+              icon: g.icon,
+              preset: row.selection?.model ?? null,
+              // The model alone no longer names the provider: Anthropic
+              // Workspace offers the models `anthropic` has (#76).
+              provider: row.selection?.provider ?? null,
+              bot_disabled: row.bot_disabled,
+              member: mineIds.has(g.id),
+            };
+          }),
+        );
+        return { guilds };
+      })
+      .get("/api/guilds/:id/settings", async ({ cookie, set, params }) => {
         const s = await requireSession(cookieSid(cookie as never));
         if (!s) {
           set.status = 401;
@@ -1392,36 +680,873 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           set.status = 404;
           return { error: "guild not found" };
         }
-        const action = parseArtifactAction(body);
-        if (!action) {
+        return {
+          settings: await store.getGuild(params.id),
+          version: await store.version(),
+        };
+      })
+      .patch(
+        "/api/guilds/:id/settings",
+        async ({ cookie, set, params, body }) => {
+          const s = await requireSession(cookieSid(cookie as never));
+          if (!s) {
+            set.status = 401;
+            return { error: "unauthorized" };
+          }
+          if (!(await guildOk(env, hooks, s.access_token, params.id, s.role))) {
+            set.status = 404;
+            return { error: "guild not found" };
+          }
+          const parsed = guildPatchSchema.safeParse(body);
+          if (!parsed.success) {
+            set.status = 400;
+            return {
+              error: parsed.error.issues.map((i) => i.message).join("; "),
+            };
+          }
+          const gated = refuseRestrictedPatch(
+            s.role,
+            parsed.data,
+            await loadPremium(store),
+          );
+          if (gated) {
+            set.status = 403;
+            return { error: gated };
+          }
+          const hidden = refuseUnpublishedPatch(
+            await loadUnpublished(store),
+            parsed.data,
+          );
+          if (hidden) {
+            set.status = 403;
+            return { error: hidden };
+          }
+          const next = applyPatch(
+            await store.getGuild(params.id),
+            parsed.data,
+            store.defaults,
+          );
+          await store.putGuild(params.id, next);
+          await publish();
+          return { settings: next, version: await store.version() };
+        },
+      )
+      .get("/internal/snapshot", async ({ request, set }) => {
+        if (
+          !requireInternal(request.headers.get("authorization") ?? undefined)
+        ) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const version = await store.version();
+        const inm = parseSnapshotEtag(request.headers.get("if-none-match"));
+        if (inm !== null && inm === version) {
+          return new Response(null, {
+            status: 304,
+            headers: { ETag: snapshotEtag(version) },
+          });
+        }
+        const body = await loadSnapshot(
+          store,
+          hub,
+          version,
+          env.adminIds,
+          chatgpt,
+        );
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+            ETag: snapshotEtag(body.version),
+          },
+        });
+      })
+      .get("/internal/events", ({ request, set }) => {
+        if (
+          !requireInternal(request.headers.get("authorization") ?? undefined)
+        ) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const encoder = new TextEncoder();
+        let unsub: (() => void) | undefined;
+        let ping: ReturnType<typeof setInterval> | undefined;
+        let watch: ReturnType<typeof setInterval> | undefined;
+        let lastEmitted = -1;
+        let closed = false;
+        const stream = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            const send = (event: string, data: unknown) => {
+              if (closed) return;
+              try {
+                controller.enqueue(
+                  encoder.encode(
+                    `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`,
+                  ),
+                );
+              } catch {
+                closed = true;
+              }
+            };
+            const emit = (nextVersion: number) => {
+              if (nextVersion === lastEmitted) return;
+              const first = lastEmitted < 0;
+              lastEmitted = nextVersion;
+              send(first ? "hello" : "update", { version: nextVersion });
+            };
+            emit(await store.version());
+            unsub = hub.subscribe(emit);
+            ping = setInterval(() => {
+              if (closed) return;
+              try {
+                controller.enqueue(encoder.encode(": ping\n\n"));
+              } catch {
+                closed = true;
+              }
+            }, SSE_PING_MS);
+            watch = setInterval(() => {
+              void store
+                .version()
+                .then(emit)
+                .catch(() => {
+                  /* next tick retries; do not tear the stream on a blip */
+                });
+            }, SSE_VERSION_WATCH_MS);
+            const abort = () => {
+              closed = true;
+              unsub?.();
+              if (ping) clearInterval(ping);
+              if (watch) clearInterval(watch);
+              try {
+                controller.close();
+              } catch {
+                /* already closed */
+              }
+            };
+            request.signal.addEventListener("abort", abort);
+          },
+          cancel() {
+            closed = true;
+            unsub?.();
+            if (ping) clearInterval(ping);
+            if (watch) clearInterval(watch);
+          },
+        });
+        return new Response(stream, {
+          headers: {
+            "content-type": "text/event-stream; charset=utf-8",
+            "cache-control": "no-cache, no-transform",
+            connection: "keep-alive",
+            "x-accel-buffering": "no",
+          },
+        });
+      })
+      .put("/internal/snapshot", async ({ request, set, body }) => {
+        if (
+          !requireInternal(request.headers.get("authorization") ?? undefined)
+        ) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const raw =
+          body && typeof body === "object"
+            ? (body as Record<string, unknown>)
+            : {};
+        const guilds = raw.guilds;
+        if (!guilds || typeof guilds !== "object" || Array.isArray(guilds)) {
           set.status = 400;
-          return { error: "action must be month, permanent, or unpermanent" };
+          return { error: "guilds object required" };
         }
-        const token = String(params.token ?? "").trim();
-        if (!isArtifactToken(token)) {
+        const normalized: Record<string, ReturnType<typeof emptyGuild>> = {};
+        for (const [id, settings] of Object.entries(
+          guilds as Record<string, unknown>,
+        )) {
+          if (!id || typeof settings !== "object" || settings === null)
+            continue;
+          normalized[id] = normalizeGuild(settings as object, store.defaults);
+        }
+        const userContexts: Record<
+          string,
+          { text: string; persona_override: boolean }
+        > = {};
+        const rawCtx = raw.user_contexts;
+        if (rawCtx && typeof rawCtx === "object" && !Array.isArray(rawCtx)) {
+          for (const [id, entry] of Object.entries(
+            rawCtx as Record<string, unknown>,
+          )) {
+            if (!id || typeof entry !== "object" || entry === null) continue;
+            const e = entry as { text?: unknown; persona_override?: unknown };
+            const text = typeof e.text === "string" ? e.text : "";
+            const persona_override = Boolean(e.persona_override);
+            if (!text.trim() && !persona_override) continue;
+            userContexts[id] = { text, persona_override };
+          }
+        }
+        await store.replaceSnapshot(normalized, userContexts);
+        await publish();
+        return {
+          version: await store.version(),
+          n_guilds: Object.keys(normalized).length,
+        };
+      })
+      .patch("/internal/guilds/:id", async ({ request, set, params, body }) => {
+        if (
+          !requireInternal(request.headers.get("authorization") ?? undefined)
+        ) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const parsed = guildPatchSchema.safeParse(body);
+        if (!parsed.success) {
           set.status = 400;
-          return { error: "invalid site token" };
+          return {
+            error: parsed.error.issues.map((i) => i.message).join("; "),
+          };
         }
-        const site = await store.getArtifact(token);
-        if (!site || site.guild_id !== params.id) {
-          set.status = 404;
-          return { error: "artifact not found" };
+        const next = applyPatch(
+          await store.getGuild(params.id),
+          parsed.data,
+          store.defaults,
+        );
+        await store.putGuild(params.id, next);
+        await publish();
+        return { settings: next, version: await store.version() };
+      })
+      .patch(
+        "/internal/users/:id/settings",
+        async ({ request, set, params, body }) => {
+          if (
+            !requireInternal(request.headers.get("authorization") ?? undefined)
+          ) {
+            set.status = 401;
+            return { error: "unauthorized" };
+          }
+          // Same snowflake rule as /api/blocked: a username here would write a row
+          // the bot never looks up.
+          if (!/^\d{5,25}$/.test(params.id)) {
+            set.status = 400;
+            return { error: "discord_id must be a snowflake" };
+          }
+          const parsed = userOverridePatchSchema.safeParse(body);
+          if (!parsed.success) {
+            set.status = 400;
+            return {
+              error: parsed.error.issues.map((i) => i.message).join("; "),
+            };
+          }
+          const next = applyUserOverridePatch(
+            await store.getUserOverride(params.id),
+            parsed.data,
+            store.defaults,
+          );
+          await store.putUserOverride(params.id, next);
+          await publish();
+          return { settings: next, version: await store.version() };
+        },
+      )
+      .get("/api/blocked", async ({ cookie, set }) => {
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
         }
-        const cmd = await store.enqueueArtifactCommand(
-          token,
-          params.id,
-          action,
+        if (!canModerate(s.role)) {
+          set.status = 403;
+          return { error: "forbidden" };
+        }
+        return { blocked: await store.listBlocked() };
+      })
+      .post("/api/blocked", async ({ cookie, set, body }) => {
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        if (!canModerate(s.role)) {
+          set.status = 403;
+          return { error: "forbidden" };
+        }
+        const raw = (body ?? {}) as { discord_id?: unknown; reason?: unknown };
+        const id = String(raw.discord_id ?? "").trim();
+        // Snowflakes only: the bot matches on the numeric id, so a username here
+        // would silently block nobody.
+        if (!/^\d{5,25}$/.test(id)) {
+          set.status = 400;
+          return { error: "discord_id must be a snowflake" };
+        }
+        if (id === s.discord_id) {
+          set.status = 403;
+          return { error: "cannot block yourself" };
+        }
+        const target = await store.getUser(id);
+        // Only guards accounts that exist here; an unknown id has no role to outrank.
+        if (
+          target &&
+          rank(effectiveRole(target.discord_id, target.role)) <= rank(s.role)
+        ) {
+          set.status = 403;
+          return { error: "cannot block that user" };
+        }
+        const reason =
+          typeof raw.reason === "string" ? raw.reason.slice(0, 500) : null;
+        await store.setBlocked({
+          discord_id: id,
+          username: target?.username ?? null,
+          reason: reason && reason.trim() ? reason : null,
+          blocked_by: s.discord_id,
+          blocked_at: Date.now(),
+        });
+        await publish();
+        return { ok: true, discord_id: id };
+      })
+      .delete("/api/blocked/:id", async ({ cookie, set, params }) => {
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        if (!canModerate(s.role)) {
+          set.status = 403;
+          return { error: "forbidden" };
+        }
+        await store.unblock(params.id);
+        await publish();
+        return { ok: true, discord_id: params.id };
+      })
+      .get("/api/logs", async ({ cookie, set, query }) => {
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        // DM turns are in here, so this is admin/mod only — never guild-scoped.
+        if (!canModerate(s.role)) {
+          set.status = 403;
+          return { error: "forbidden" };
+        }
+        if (!env.logsEnabled) {
+          return {
+            logs: [],
+            next: null,
+            retention_days: Math.round(LOG_RETENTION_MS / 86_400_000),
+            enabled: false,
+          };
+        }
+        const q = parseLogQuery(query as Record<string, string | undefined>);
+        const logs = await store.listLogs(q);
+        // `next` is the keyset cursor for the following page; null = end of log.
+        const next = logs.length === q.limit ? logs[logs.length - 1].id : null;
+        return {
+          logs,
+          next,
+          retention_days: Math.round(LOG_RETENTION_MS / 86_400_000),
+          enabled: true,
+        };
+      })
+      .get("/api/analytics/cost", async ({ cookie, set, query }) => {
+        // Billing figures: never held by a shared cache or the browser's.
+        set.headers["cache-control"] = "no-store";
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        if (!canViewAnalytics(s.role)) {
+          set.status = 403;
+          return { error: "forbidden" };
+        }
+        // Same shape as /api/logs when it is switched off: the page explains
+        // what to set instead of showing an error.
+        if (!costReport.configured) return { configured: false };
+        const month = parseMonth(
+          (query as Record<string, string | undefined>).month,
+          now(),
+        );
+        if (!month) {
+          set.status = 400;
+          return { error: "month must be YYYY-MM and not in the future" };
+        }
+        return costReport.month(month);
+      })
+      // The running UTC day, estimated from the usage report (#85). Same
+      // permission and caching as the cost report above.
+      .get("/api/analytics/today", async ({ cookie, set }) => {
+        set.headers["cache-control"] = "no-store";
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        if (!canViewAnalytics(s.role)) {
+          set.status = 403;
+          return { error: "forbidden" };
+        }
+        if (!costReport.configured) return { configured: false };
+        return costReport.today();
+      })
+      // The model Anthropic API turns switch to while the month's budget is
+      // nearly spent, the threshold that switches them, and whether they do now
+      // (#89, #95). Everyone who may read the cost may read this; only an
+      // Administrator changes it.
+      .get("/api/budget-fallback", async ({ cookie, set }) => {
+        set.headers["cache-control"] = "no-store";
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        if (!canViewAnalytics(s.role)) {
+          set.status = 403;
+          return { error: "forbidden" };
+        }
+        const unpublished = await loadUnpublished(store);
+        const threshold = await loadBudgetThreshold(store);
+        // A failed status still shows the setting: the page says why instead.
+        let status: unknown = { configured: false };
+        if (costReport.configured) {
+          try {
+            status = await costReport.budget(threshold);
+          } catch (e) {
+            if (!(e instanceof CostReportError)) throw e;
+            status = { configured: true, error: e.message };
+          }
+        }
+        return {
+          fallback: parseBudgetFallback(await store.getMeta("budget_fallback")),
+          threshold_usd: threshold,
+          // The range a threshold may be stored in (#95), for the form.
+          threshold_range: {
+            min_usd: 0,
+            max_usd: MONTHLY_BUDGET_USD,
+            default_usd: DEFAULT_BUDGET_FALLBACK_THRESHOLD_USD,
+          },
+          // Unpublished presets may not have a live wire id yet, so they are
+          // not offered. One stored before it was hidden is listed so the
+          // page can name it; the bot runs the default instead (runtime.ts).
+          presets: SELECTABLE_PRESETS.filter((p) =>
+            isBudgetFallbackPreset(p.id),
+          ).map((p) => ({
+            id: p.id,
+            label: p.label,
+            published: !unpublished.includes(p.id),
+          })),
+          efforts: BUDGET_FALLBACK_EFFORTS,
+          can_edit: canManageBudget(s.role),
+          status,
+        };
+      })
+      .put("/api/budget-fallback", async ({ cookie, set, body }) => {
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        if (!canManageBudget(s.role)) {
+          set.status = 403;
+          return { error: "forbidden" };
+        }
+        const parsed = budgetFallbackPutSchema.safeParse(body);
+        if (!parsed.success) {
+          set.status = 400;
+          return {
+            error: parsed.error.issues.map((i) => i.message).join("; "),
+          };
+        }
+        const { threshold_usd, ...fallback } = parsed.data;
+        if ((await loadUnpublished(store)).includes(fallback.preset)) {
+          set.status = 400;
+          return { error: "unpublished preset" };
+        }
+        if (threshold_usd !== undefined)
+          await store.setMeta(
+            "budget_fallback_threshold",
+            JSON.stringify(threshold_usd),
+          );
+        await store.setMeta("budget_fallback", JSON.stringify(fallback));
+        // The snapshot carries the model to the bot; bump so it is not answered
+        // 304. The threshold reaches it through `/internal/budget` instead.
+        await store.bumpVersion();
+        await publish();
+        return { fallback, threshold_usd: await loadBudgetThreshold(store) };
+      })
+      // The bot asks this every few minutes (#89). It has no Admin API key: the
+      // decision is made here, from the same figures the page shows and the
+      // threshold stored on it (#95).
+      .get("/internal/budget", async ({ request, set }) => {
+        if (
+          !requireInternal(request.headers.get("authorization") ?? undefined)
+        ) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        if (!costReport.configured) return { configured: false };
+        // A CostReportError becomes its status (502/429) in onError; the bot
+        // keeps the last answer it had.
+        return costReport.budget(await loadBudgetThreshold(store));
+      })
+      .post("/internal/logs", async ({ request, set, body }) => {
+        if (
+          !requireInternal(request.headers.get("authorization") ?? undefined)
+        ) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        if (!env.logsEnabled) {
+          return { ok: true, n: 0, enabled: false };
+        }
+        const raw = (body ?? {}) as { entries?: unknown };
+        const list = Array.isArray(raw.entries) ? raw.entries : [];
+        const entries = list
+          .map(parseLogEntry)
+          .filter((e): e is LogEntry => e !== null);
+        if (entries.length) await store.appendLogs(entries);
+        const now = Date.now();
+        if (now - lastPrune > 3_600_000) {
+          lastPrune = now;
+          await store.pruneLogs(now - LOG_RETENTION_MS);
+        }
+        return { ok: true, n: entries.length, enabled: true };
+      })
+      .post("/internal/capabilities", async ({ request, set, body }) => {
+        if (
+          !requireInternal(request.headers.get("authorization") ?? undefined)
+        ) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const presets =
+          body && typeof body === "object"
+            ? (body as { available_presets?: string[] }).available_presets
+            : undefined;
+        await store.setMeta(
+          "available_presets",
+          JSON.stringify(Array.isArray(presets) ? presets : []),
+        );
+        return { ok: true };
+      })
+      .post("/internal/skills/chunk", async ({ request, set, body }) => {
+        if (
+          !requireInternal(request.headers.get("authorization") ?? undefined)
+        ) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const raw = body as {
+          id?: unknown;
+          index?: unknown;
+          total?: unknown;
+          data?: unknown;
+        };
+        if (
+          !raw ||
+          typeof raw.id !== "string" ||
+          !/^[a-f0-9]{16}$/.test(raw.id) ||
+          !Number.isInteger(raw.index) ||
+          !Number.isInteger(raw.total) ||
+          Number(raw.total) < 1 ||
+          Number(raw.total) > 128 ||
+          Number(raw.index) < 0 ||
+          Number(raw.index) >= Number(raw.total) ||
+          typeof raw.data !== "string" ||
+          raw.data.length > 256000 ||
+          !/^[A-Za-z0-9+/]*={0,2}$/.test(raw.data)
+        ) {
+          set.status = 400;
+          return { error: "invalid skill chunk" };
+        }
+        // Bounded staging slots survive Vercel isolates; publish only a complete upload.
+        await store.setMeta(
+          `skill_upload_${raw.index}`,
+          JSON.stringify({ id: raw.id, data: raw.data }),
+        );
+        if (Number(raw.index) === Number(raw.total) - 1) {
+          const parts = await Promise.all(
+            Array.from({ length: Number(raw.total) }, (_, i) =>
+              store.getMeta(`skill_upload_${i}`),
+            ),
+          );
+          const buffers: Buffer[] = [];
+          for (const part of parts) {
+            const chunk = JSON.parse(part ?? "null") as {
+              id: string;
+              data: string;
+            } | null;
+            if (!chunk || chunk.id !== raw.id) {
+              set.status = 409;
+              return { error: "incomplete skill upload" };
+            }
+            buffers.push(Buffer.from(chunk.data, "base64"));
+          }
+          let catalog: unknown;
+          try {
+            catalog = JSON.parse(Buffer.concat(buffers).toString("utf8"));
+          } catch {
+            set.status = 400;
+            return { error: "invalid skill JSON" };
+          }
+          const parsed = skillRow.array().max(10000).safeParse(catalog);
+          if (!parsed.success) {
+            set.status = 400;
+            return { error: "invalid skill catalog" };
+          }
+          await store.replaceSkills(parsed.data);
+        }
+        return { ok: true };
+      })
+      .post("/internal/skills", async ({ request, set, body }) => {
+        if (
+          !requireInternal(request.headers.get("authorization") ?? undefined)
+        ) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const parsed = skillRow
+          .array()
+          .max(10000)
+          .safeParse((body as { skills?: unknown })?.skills);
+        if (!parsed.success) {
+          set.status = 400;
+          return { error: "invalid skill catalog" };
+        }
+        await store.replaceSkills(parsed.data);
+        return { ok: true };
+      })
+      .get("/internal/skills/commands", async ({ request, set }) => {
+        if (
+          !requireInternal(request.headers.get("authorization") ?? undefined)
+        ) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        return (await store.listSkillCommands()).filter(
+          (c) => c.result === null,
+        );
+      })
+      .post("/internal/skills/ack", async ({ request, set, body }) => {
+        if (
+          !requireInternal(request.headers.get("authorization") ?? undefined)
+        ) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const raw = body as { id?: unknown; result?: unknown };
+        if (
+          !Number.isSafeInteger(raw?.id) ||
+          Number(raw.id) < 1 ||
+          !raw.result ||
+          typeof raw.result !== "object" ||
+          Array.isArray(raw.result)
+        ) {
+          set.status = 400;
+          return { error: "invalid acknowledgement" };
+        }
+        await store.ackSkillCommand(
+          Number(raw.id),
+          raw.result as Record<string, unknown>,
         );
         await publish();
-        return { ok: true, pending: cmd.action, token };
-      },
-    )
-    .post("/api/guilds/:id/clear", unavailable)
-    .post("/api/guilds/:id/retry", unavailable)
-    .get("/api/guilds/:id/context", unavailable)
-    .get("/api/guilds/:id/channels", unavailable)
-    .get("/api/vpn/status", unavailable)
-    .get("/api/github/status", unavailable);
+        return { ok: true };
+      })
+      .get("/api/guilds/:id/skills", async ({ cookie, set, params }) => {
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        if (
+          !guildId.safeParse(params.id).success ||
+          !(await guildOk(env, hooks, s.access_token, params.id, s.role))
+        ) {
+          set.status = 404;
+          return { error: "guild not found" };
+        }
+        return {
+          skills: guildSkills(await store.listSkills(), params.id),
+          commands: (await store.listSkillCommands()).filter(
+            (c) => c.guild_id === params.id,
+          ),
+        };
+      })
+      .post("/api/guilds/:id/skills", async ({ cookie, set, params, body }) => {
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        if (
+          !guildId.safeParse(params.id).success ||
+          !(await guildOk(env, hooks, s.access_token, params.id, s.role))
+        ) {
+          set.status = 404;
+          return { error: "guild not found" };
+        }
+        const parsed = skillAction.safeParse(body);
+        if (!parsed.success) {
+          set.status = 400;
+          return { error: "invalid skill action" };
+        }
+        const { action, ...args } = parsed.data;
+        const rows = await store.listSkills();
+        const existing = guildSkills(rows, params.id).find(
+          (r) => r.name === args.name,
+        );
+        if (action === "import") {
+          const source = (parsed.data as { source_guild_id: string })
+            .source_guild_id;
+          if (!(await guildOk(env, hooks, s.access_token, source, s.role))) {
+            set.status = 404;
+            return { error: "source guild not found" };
+          }
+          if (
+            !rows.some(
+              (r) =>
+                r.guild_id === source && r.name === args.name && !r.builtin,
+            )
+          ) {
+            set.status = 404;
+            return { error: "source skill not found" };
+          }
+        }
+        if ((action === "create" || action === "import") && existing) {
+          set.status = 409;
+          return { error: "skill already exists" };
+        }
+        if ((action === "enabled" || action === "delete") && !existing) {
+          set.status = 404;
+          return { error: "skill not found" };
+        }
+        if (action === "delete" && existing?.builtin) {
+          set.status = 400;
+          return { error: "builtin skills cannot be deleted" };
+        }
+        const command = await store.enqueueSkillCommand(
+          params.id,
+          action,
+          args,
+        );
+        await publish();
+        return { ok: true, command };
+      })
+      .post("/internal/artifacts", async ({ request, set, body }) => {
+        if (
+          !requireInternal(request.headers.get("authorization") ?? undefined)
+        ) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const raw =
+          body && typeof body === "object"
+            ? (body as { sites?: unknown }).sites
+            : null;
+        const list = Array.isArray(raw) ? raw : [];
+        const sites = list
+          .map(parseArtifactSite)
+          .filter((s): s is ArtifactRow => s !== null);
+        await store.replaceArtifacts(sites);
+        return { ok: true, n: sites.length };
+      })
+      .post("/internal/artifacts/ack", async ({ request, set, body }) => {
+        if (
+          !requireInternal(request.headers.get("authorization") ?? undefined)
+        ) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const raw =
+          body && typeof body === "object"
+            ? (body as { ids?: unknown }).ids
+            : null;
+        const ids = Array.isArray(raw)
+          ? raw
+              .map((x) => Number(x))
+              .filter((n) => Number.isInteger(n) && n > 0)
+          : [];
+        const n = await store.ackArtifactCommands(ids);
+        if (n) await publish();
+        return { ok: true, n };
+      })
+      .get("/api/artifacts", async ({ cookie, set }) => {
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const allowed = await accessibleGuildIds(
+          env,
+          hooks,
+          s.access_token,
+          s.role,
+        );
+        const [sites, commands] = await Promise.all([
+          store.listArtifacts(),
+          store.listArtifactCommands(),
+        ]);
+        return {
+          sites: decorateArtifacts(
+            sites.filter((row) => row.guild_id && allowed.has(row.guild_id)),
+            commands,
+          ),
+        };
+      })
+      .get("/api/guilds/:id/artifacts", async ({ cookie, set, params }) => {
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        if (!(await guildOk(env, hooks, s.access_token, params.id, s.role))) {
+          set.status = 404;
+          return { error: "guild not found" };
+        }
+        const [sites, commands] = await Promise.all([
+          store.listArtifacts(params.id),
+          store.listArtifactCommands(),
+        ]);
+        return { sites: decorateArtifacts(sites, commands) };
+      })
+      .patch(
+        "/api/guilds/:id/artifacts/:token",
+        async ({ cookie, set, params, body }) => {
+          const s = await requireSession(cookieSid(cookie as never));
+          if (!s) {
+            set.status = 401;
+            return { error: "unauthorized" };
+          }
+          if (!(await guildOk(env, hooks, s.access_token, params.id, s.role))) {
+            set.status = 404;
+            return { error: "guild not found" };
+          }
+          const action = parseArtifactAction(body);
+          if (!action) {
+            set.status = 400;
+            return { error: "action must be month, permanent, or unpermanent" };
+          }
+          const token = String(params.token ?? "").trim();
+          if (!isArtifactToken(token)) {
+            set.status = 400;
+            return { error: "invalid site token" };
+          }
+          const site = await store.getArtifact(token);
+          if (!site || site.guild_id !== params.id) {
+            set.status = 404;
+            return { error: "artifact not found" };
+          }
+          const cmd = await store.enqueueArtifactCommand(
+            token,
+            params.id,
+            action,
+          );
+          await publish();
+          return { ok: true, pending: cmd.action, token };
+        },
+      )
+      .post("/api/guilds/:id/clear", unavailable)
+      .post("/api/guilds/:id/retry", unavailable)
+      .get("/api/guilds/:id/context", unavailable)
+      .get("/api/guilds/:id/channels", unavailable)
+      .get("/api/vpn/status", unavailable)
+      .get("/api/github/status", unavailable)
+  );
 }
 
 async function loadUnpublished(store: Store): Promise<string[]> {

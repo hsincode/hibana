@@ -6,13 +6,13 @@
 
 ## 動作
 
-| エンドポイント | 必要なスコープ | 内容 |
-| --- | --- | --- |
-| `GET /healthz` | なし | 死活確認 |
-| `GET /status` | 任意の有効なキー | 稼働中のコミットと直近のデプロイ |
-| `POST /deploy` `{"sha": "<40桁>"}` | `deploy` | デプロイを開始し、202とIDを返す |
-| `GET /deploys`、`GET /deploys/:id` | 任意の有効なキー | 各ステップの結果と出力 |
-| `GET /logs?lines=200&since=<epoch秒 or ISO 8601>` | `logs` | `hibana.service` のjournal（最大2000行） |
+| エンドポイント                                    | 必要なスコープ   | 内容                                     |
+| ------------------------------------------------- | ---------------- | ---------------------------------------- |
+| `GET /healthz`                                    | なし             | 死活確認                                 |
+| `GET /status`                                     | 任意の有効なキー | 稼働中のコミットと直近のデプロイ         |
+| `POST /deploy` `{"sha": "<40桁>"}`                | `deploy`         | デプロイを開始し、202とIDを返す          |
+| `GET /deploys`、`GET /deploys/:id`                | 任意の有効なキー | 各ステップの結果と出力                   |
+| `GET /logs?lines=200&since=<epoch秒 or ISO 8601>` | `logs`           | `hibana.service` のjournal（最大2000行） |
 
 認証は `Authorization: Bearer hbr_...` で行います。
 

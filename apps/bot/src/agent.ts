@@ -57,14 +57,17 @@ export class Agent {
     o.observeMessages?.(messages);
     // Names one request chain in the usage log. A child gets a random id per
     // run: its path carries a model-chosen task name, which must not be logged.
-    const lineage = o.context.depth === 0 ? "root"
-      : `${o.context.workflowAgent ? "workflow" : "child"}-${crypto.randomUUID().slice(0, 8)}`;
+    const lineage =
+      o.context.depth === 0
+        ? "root"
+        : `${o.context.workflowAgent ? "workflow" : "child"}-${crypto.randomUUID().slice(0, 8)}`;
     // The note stays in history, so a turn repeats it only when the mode
     // changed. Re-sending it every turn would split each turn from the last.
     let lastTaskMode = jevTaskModeIn(messages);
     let nudges = 0;
     // The soft budget is refilled once, matching the original loop's completion guarantee.
-    const hardLimit = o.context.team || o.context.depth === 0 ? 512 : o.maxRounds;
+    const hardLimit =
+      o.context.team || o.context.depth === 0 ? 512 : o.maxRounds;
     for (let round = 0; round < hardLimit; round++) {
       o.context.signal?.throwIfAborted();
       const steer = o.takeSteering?.() ?? [];
@@ -88,12 +91,19 @@ export class Agent {
           temperature: o.temperature,
           nativeSearch: !taskMode && o.nativeSearch,
           signal: o.requestSignal?.() ?? o.context.signal,
-          trace: { channel: o.context.channelId, agent: lineage, round, child: o.context.depth > 0 },
+          trace: {
+            channel: o.context.channelId,
+            agent: lineage,
+            round,
+            child: o.context.depth > 0,
+          },
           onRetry: async ({ attempt, maxRetries, status, diagnostics }) => {
             const detail = failureDetail(diagnostics, status);
-            await o.context.progress?.(
-              `応答を再接続しています（${attempt}/${maxRetries}${detail ? `・${detail}` : ""}）。進捗は保持しています。`,
-            ).catch(() => {});
+            await o.context
+              .progress?.(
+                `応答を再接続しています（${attempt}/${maxRetries}${detail ? `・${detail}` : ""}）。進捗は保持しています。`,
+              )
+              .catch(() => {});
           },
         });
       } catch (error) {
@@ -134,28 +144,40 @@ export class Agent {
             seen.set(key, count);
             // Mailbox waits and listings are observations; repeating them is
             // normal while another agent works, unlike repeated side effects.
-            if (count >= 3 && !/^(agents__)?(wait_agent|list_agents)$/.test(call.function.name))
+            if (
+              count >= 3 &&
+              !/^(agents__)?(wait_agent|list_agents)$/.test(call.function.name)
+            )
               throw new Error(
                 "Repeated identical tool call blocked. Use existing results or change the approach.",
               );
-            const jev = /^(?:mcp__agent__)?run_jev(?:_task)?$/.test(call.function.name);
+            const jev = /^(?:mcp__agent__)?run_jev(?:_task)?$/.test(
+              call.function.name,
+            );
             // A bounded Jev loop can outlive a parent completion. Forward user
             // steering cancellation so it cannot keep executing the old plan.
-            const ctx = jev ? scopedContext(o.context, {
-              // Nested Jev actions must attach images to the parent conversation.
-              pendingImages: o.context.pendingImages ??= [],
-              jevExecutions: o.context.jevExecutions ??= { count: 0 },
-              signal: AbortSignal.any([
-                ...(o.context.signal ? [o.context.signal] : []),
-                ...(o.requestSignal ? [o.requestSignal()].filter((s): s is AbortSignal => !!s) : []),
-              ]),
-              recordToolUsage: (u: Usage) => {
-                addUsage(usage, u);
-                o.recordUsage?.(u);
-              },
-            }) : o.context;
-            try { result = await o.execute(call.function.name, args, ctx); }
-            finally { o.context.delivered ||= ctx.delivered; }
+            const ctx = jev
+              ? scopedContext(o.context, {
+                  // Nested Jev actions must attach images to the parent conversation.
+                  pendingImages: (o.context.pendingImages ??= []),
+                  jevExecutions: (o.context.jevExecutions ??= { count: 0 }),
+                  signal: AbortSignal.any([
+                    ...(o.context.signal ? [o.context.signal] : []),
+                    ...(o.requestSignal
+                      ? [o.requestSignal()].filter((s): s is AbortSignal => !!s)
+                      : []),
+                  ]),
+                  recordToolUsage: (u: Usage) => {
+                    addUsage(usage, u);
+                    o.recordUsage?.(u);
+                  },
+                })
+              : o.context;
+            try {
+              result = await o.execute(call.function.name, args, ctx);
+            } finally {
+              o.context.delivered ||= ctx.delivered;
+            }
           } catch (error) {
             result = {
               ok: false,
@@ -173,22 +195,39 @@ export class Agent {
             await o.checkpoint?.(messages, usage);
           });
         };
-        await runToolBatch(calls, (call) => {
-          try {
-            return supportsParallelTool(call.function.name, JSON.parse(call.function.arguments || "{}"));
-          } catch { return false; }
-        }, execute);
+        await runToolBatch(
+          calls,
+          (call) => {
+            try {
+              return supportsParallelTool(
+                call.function.name,
+                JSON.parse(call.function.arguments || "{}"),
+              );
+            } catch {
+              return false;
+            }
+          },
+          execute,
+        );
         if (o.context.pendingImages?.length)
           messages.push({
-            role: "user", internal: true,
+            role: "user",
+            internal: true,
             content: "Images loaded by the preceding tools:",
             images: o.context.pendingImages.splice(0),
           });
         await o.checkpoint?.(messages, usage);
-        if (o.shouldStop?.()) return { text: msg.content?.trim() ?? "", messages, usage, rounds: round + 1 };
+        if (o.shouldStop?.())
+          return {
+            text: msg.content?.trim() ?? "",
+            messages,
+            usage,
+            rounds: round + 1,
+          };
         if (round === o.maxRounds - 2)
           messages.push({
-            role: "user", internal: true,
+            role: "user",
+            internal: true,
             content:
               "Finish the remaining work efficiently. Persist and deliver the result before your final reply.",
           });
@@ -199,7 +238,8 @@ export class Agent {
         messages.push(...fresh);
         continue;
       }
-      const collaboration = await o.beforeFinal?.(msg.content?.trim() ?? "") ?? [];
+      const collaboration =
+        (await o.beforeFinal?.(msg.content?.trim() ?? "")) ?? [];
       const lateSteering = o.takeSteering?.() ?? [];
       if (collaboration.length || lateSteering.length) {
         messages.push(...collaboration, ...lateSteering);
@@ -211,8 +251,12 @@ export class Agent {
       // Nothing judges semantic completion: no regexes over Japanese/English
       // delivery claims, no unconditional extra turns (#50).
       if ((!text || completion.incomplete) && nudges++ < 3) {
-        messages.push({ role: "user", internal: true,
-          content: "Continue the authorized task. Produce a complete user-facing answer; ask a concrete question only if blocked." });
+        messages.push({
+          role: "user",
+          internal: true,
+          content:
+            "Continue the authorized task. Produce a complete user-facing answer; ask a concrete question only if blocked.",
+        });
         continue;
       }
       if (!text) throw new Error("Provider returned no user-facing answer");

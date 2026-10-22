@@ -57,7 +57,8 @@ export class Vpn {
     };
     if (!connected) return base;
     const saved = await readJson<VpnState>(this.statePath(), {});
-    if (saved.provider && saved.provider !== this.config.vpnProvider) return base;
+    if (saved.provider && saved.provider !== this.config.vpnProvider)
+      return base;
     return { ...base, ...saved };
   }
   async execute(name: string, a: Json, ctx: Context) {
@@ -75,7 +76,9 @@ export class Vpn {
     await mkdir(root, { recursive: true, mode: 0o700 });
     if (name === "vpn_login_code") {
       if (this.config.vpnProvider === "vpngate")
-        throw new Error("VPN Gate does not use Surfshark login; use vpn_connect");
+        throw new Error(
+          "VPN Gate does not use Surfshark login; use vpn_connect",
+        );
       return this.surfsharkLogin(root, ctx);
     }
     const server = String(a.server ?? this.config.vpnServer).toLowerCase();
@@ -107,14 +110,15 @@ export class Vpn {
     if (this.config.vpnProvider === "vpngate") {
       const country = vpnGateCountry(server);
       const csv = await fetchVpnGateCsv(ctx.signal);
-      const excludeIp =
-        a.reconnect && current.ip ? current.ip : undefined;
+      const excludeIp = a.reconnect && current.ip ? current.ip : undefined;
       const relay = selectVpnGateRelay(parseVpnGateCsv(csv), {
         country,
         excludeIp,
       });
       const ovpn = join(root, "client.ovpn");
-      await writeFile(ovpn, sanitizeOpenVpnConfig(relay.config), { mode: 0o600 });
+      await writeFile(ovpn, sanitizeOpenVpnConfig(relay.config), {
+        mode: 0o600,
+      });
       // VPN Gate's documented OpenVPN credentials; not a secret.
       await writeFile(auth, "vpn\nvpn\n", { mode: 0o600 });
       dockerArgs.push(
@@ -224,7 +228,6 @@ export class Vpn {
       const deadline =
         Date.now() + Math.min(600, challenge.expiresAfter || 300) * 1000;
       Date.now() < deadline;
-
     ) {
       await sleep(5000, ctx.signal);
       const poll = await request("/auth/login-code", {

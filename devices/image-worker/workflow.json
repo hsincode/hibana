@@ -22,10 +22,7 @@
   "4": {
     "class_type": "TextEncodeQwenImage21",
     "inputs": {
-      "clip": [
-        "2",
-        0
-      ],
+      "clip": ["2", 0],
       "prompt": "A small red panda sitting beside a ceramic teapot in a peaceful Japanese garden, soft morning light, detailed watercolor illustration.",
       "negative_prompt": "",
       "resolution": 1024
@@ -42,22 +39,10 @@
   "6": {
     "class_type": "KSampler",
     "inputs": {
-      "model": [
-        "1",
-        0
-      ],
-      "positive": [
-        "4",
-        0
-      ],
-      "negative": [
-        "4",
-        1
-      ],
-      "latent_image": [
-        "5",
-        0
-      ],
+      "model": ["1", 0],
+      "positive": ["4", 0],
+      "negative": ["4", 1],
+      "latent_image": ["5", 0],
       "seed": 42,
       "steps": 25,
       "cfg": 1,
@@ -69,23 +54,14 @@
   "7": {
     "class_type": "VAEDecode",
     "inputs": {
-      "samples": [
-        "6",
-        0
-      ],
-      "vae": [
-        "3",
-        0
-      ]
+      "samples": ["6", 0],
+      "vae": ["3", 0]
     }
   },
   "8": {
     "class_type": "SaveImage",
     "inputs": {
-      "images": [
-        "7",
-        0
-      ],
+      "images": ["7", 0],
       "filename_prefix": "Qwen-Image-2.1"
     }
   }

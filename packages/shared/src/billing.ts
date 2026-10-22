@@ -15,12 +15,17 @@ export function billingMonth(date: string): string {
   // Same-width digits, so the strings order like the dates.
   if (date.slice(8, 10) >= startDay) return month;
   const [year, mon] = month.split("-").map(Number);
-  return mon === 1 ? `${pad(year - 1, 4)}-12` : `${pad(year, 4)}-${pad(mon - 1, 2)}`;
+  return mon === 1
+    ? `${pad(year - 1, 4)}-12`
+    : `${pad(year, 4)}-${pad(mon - 1, 2)}`;
 }
 
 /** First day of a `YYYY-MM` billing month and the day after its last, as `YYYY-MM-DD`. */
 export function billingBounds(month: string): { start: string; end: string } {
   const [year, mon] = month.split("-").map(Number);
-  const next = mon === 12 ? `${pad(year + 1, 4)}-01` : `${pad(year, 4)}-${pad(mon + 1, 2)}`;
+  const next =
+    mon === 12
+      ? `${pad(year + 1, 4)}-01`
+      : `${pad(year, 4)}-${pad(mon + 1, 2)}`;
   return { start: `${month}-${startDay}`, end: `${next}-${startDay}` };
 }

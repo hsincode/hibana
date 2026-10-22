@@ -21,51 +21,112 @@ const context: Context = {
 };
 test("Jev start notice survives progress edits and the parent delivers the final reply", async () => {
   const dir = await mkdtemp(join(tmpdir(), "hibana-jev-e2e-"));
-  const bot = new Hibana(loadConfig({
-    HIBANA_DATA_DIR: dir, JEV_API_KEY: "jev-fixture", SANDBOX_ENABLED: "false",
-    SKILLS_ENABLED: "false", LOG_DIR: "",
-  }), pino({ enabled: false }));
+  const bot = new Hibana(
+    loadConfig({
+      HIBANA_DATA_DIR: dir,
+      JEV_API_KEY: "jev-fixture",
+      SANDBOX_ENABLED: "false",
+      SKILLS_ENABLED: "false",
+      LOG_DIR: "",
+    }),
+    pino({ enabled: false }),
+  );
   const sent: { content: string; allowedMentions: unknown }[] = [];
-  const questions = { relevant: { type: "noul", instructions: "Is this about a refund?" } };
+  const questions = {
+    relevant: { type: "noul", instructions: "Is this about a refund?" },
+  };
   let round = 0;
   bot.llm.complete = async (_selection, messages, tools) => {
-    expect(tools.some((t) => t.function.name === "mcp__agent__run_jev")).toBe(true);
+    expect(tools.some((t) => t.function.name === "mcp__agent__run_jev")).toBe(
+      true,
+    );
     round++;
-    const call = round === 1
-      ? { name: "mcp__agent__run_jev", arguments: JSON.stringify({ state: "Please refund my order", questions }) }
-      : { name: "mcp__settings__get_bot_settings", arguments: "{}" };
+    const call =
+      round === 1
+        ? {
+            name: "mcp__agent__run_jev",
+            arguments: JSON.stringify({
+              state: "Please refund my order",
+              questions,
+            }),
+          }
+        : { name: "mcp__settings__get_bot_settings", arguments: "{}" };
     if (round === 2) {
       const tool = messages.find((m) => m.tool_call_id === "call-1");
       expect(JSON.parse(tool!.content!).answers.relevant.noul).toBe(0.98);
     }
     return {
       message: {
-        role: "assistant", content: round === 1 ? "内容を確認します。" : round === 2 ? "結果をまとめています。" : "返金に関する問い合わせです。",
-        tool_calls: round < 3 ? [{ id: `call-${round}`, type: "function", function: call }] : [],
+        role: "assistant",
+        content:
+          round === 1
+            ? "内容を確認します。"
+            : round === 2
+              ? "結果をまとめています。"
+              : "返金に関する問い合わせです。",
+        tool_calls:
+          round < 3
+            ? [{ id: `call-${round}`, type: "function", function: call }]
+            : [],
       },
-      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2, cached_tokens: 0 },
+      usage: {
+        prompt_tokens: 1,
+        completion_tokens: 1,
+        total_tokens: 2,
+        cached_tokens: 0,
+      },
       incomplete: false,
     };
   };
-  bot.tools.jev.decide = async (input): Promise<Awaited<ReturnType<JevClient["decide"]>>> => {
-    if ("completion" in input.questions) return { model: "~typesafe/jev-latest", answers: { completion: { type: "choice", choice: "complete" } }, usage: { prompt_tokens: 1, completion_tokens: 0, total_tokens: 1, cached_tokens: 0 }, cost: 0 };
+  bot.tools.jev.decide = async (
+    input,
+  ): Promise<Awaited<ReturnType<JevClient["decide"]>>> => {
+    if ("completion" in input.questions)
+      return {
+        model: "~typesafe/jev-latest",
+        answers: { completion: { type: "choice", choice: "complete" } },
+        usage: {
+          prompt_tokens: 1,
+          completion_tokens: 0,
+          total_tokens: 1,
+          cached_tokens: 0,
+        },
+        cost: 0,
+      };
     expect(sent.at(-1)?.content).toStartWith("サブ: Jev を呼び出します");
-    return { model: "~typesafe/jev-latest", answers: { relevant: { type: "noul", noul: 0.98 } },
-      usage: { prompt_tokens: 1, completion_tokens: 0, total_tokens: 1, cached_tokens: 0 }, cost: 0 };
+    return {
+      model: "~typesafe/jev-latest",
+      answers: { relevant: { type: "noul", noul: 0.98 } },
+      usage: {
+        prompt_tokens: 1,
+        completion_tokens: 0,
+        total_tokens: 1,
+        cached_tokens: 0,
+      },
+      cost: 0,
+    };
   };
   bot.client.channels.fetch = (async () => ({
-    id: context.channelId, isSendable: () => true,
+    id: context.channelId,
+    isSendable: () => true,
     send: async (value: { content: string; allowedMentions: unknown }) => {
       const message = { ...value };
       sent.push(message);
-      return { id: String(sent.length), edit: async (next: { content: string }) => { message.content = next.content; } };
+      return {
+        id: String(sent.length),
+        edit: async (next: { content: string }) => {
+          message.content = next.content;
+        },
+      };
     },
     sendTyping: async () => {},
   })) as never;
   try {
     const reply = await bot.respond("この問い合わせを分類して", { ...context });
     expect(sent.map((m) => m.content)).toEqual([
-      "結果をまとめています。", "サブ: Jev を呼び出します(1回目)", reply,
+      "結果をまとめています。",
+      "サブ: Jev を呼び出します(1回目)",
+      reply,
     ]);
     expect(reply).toBe("返金に関する問い合わせです。");
     expect(sent[1]?.allowedMentions).toEqual({ parse: [] });
@@ -76,56 +137,102 @@ test("Jev start notice survives progress edits and the parent delivers the final
 });
 test("Jev task status edits one Discord message across plans", async () => {
   const dir = await mkdtemp(join(tmpdir(), "hibana-jev-task-e2e-"));
-  const bot = new Hibana(loadConfig({
-    HIBANA_DATA_DIR: dir, JEV_API_KEY: "jev-fixture", JEV_TASK_ENABLED: "true",
-    JEV_ENABLED: "false", SANDBOX_ENABLED: "false", SKILLS_ENABLED: "false", LOG_DIR: "",
-  }), pino({ enabled: false }));
+  const bot = new Hibana(
+    loadConfig({
+      HIBANA_DATA_DIR: dir,
+      JEV_API_KEY: "jev-fixture",
+      JEV_TASK_ENABLED: "true",
+      JEV_ENABLED: "false",
+      SANDBOX_ENABLED: "false",
+      SKILLS_ENABLED: "false",
+      LOG_DIR: "",
+    }),
+    pino({ enabled: false }),
+  );
   bot.tools.sandbox.available = true;
   const sent: { content: string }[] = [];
   let round = 0;
   const plan = {
     objective: "List workspace files",
     state: "workspace",
-    actions: [{ id: "list", description: "List files", tool: "list_files", arguments: {} }],
+    actions: [
+      {
+        id: "list",
+        description: "List files",
+        tool: "list_files",
+        arguments: {},
+      },
+    ],
   };
   bot.llm.complete = async (_selection, _messages, tools) => {
-    expect(tools.some((t) => t.function.name === "mcp__agent__run_jev_task")).toBe(true);
+    expect(
+      tools.some((t) => t.function.name === "mcp__agent__run_jev_task"),
+    ).toBe(true);
     round++;
     return {
-      message: round < 3
-        ? {
-            role: "assistant" as const,
-            content: round === 1 ? "計画します。" : "続きを進めます。",
-            tool_calls: [{
-              id: `plan${round}`, type: "function" as const,
-              function: { name: "mcp__agent__run_jev_task", arguments: JSON.stringify(plan) },
-            }],
-          }
-        : { role: "assistant" as const, content: "一覧を確認しました。" },
-      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2, cached_tokens: 0 },
+      message:
+        round < 3
+          ? {
+              role: "assistant" as const,
+              content: round === 1 ? "計画します。" : "続きを進めます。",
+              tool_calls: [
+                {
+                  id: `plan${round}`,
+                  type: "function" as const,
+                  function: {
+                    name: "mcp__agent__run_jev_task",
+                    arguments: JSON.stringify(plan),
+                  },
+                },
+              ],
+            }
+          : { role: "assistant" as const, content: "一覧を確認しました。" },
+      usage: {
+        prompt_tokens: 1,
+        completion_tokens: 1,
+        total_tokens: 2,
+        cached_tokens: 0,
+      },
       incomplete: false,
     };
   };
   bot.tools.jev.decide = async () => ({
     model: "~typesafe/jev-latest",
-    answers: { action: { type: "choice" as const, choice: "a0", confidence: 0.9 } },
-    usage: { prompt_tokens: 1, completion_tokens: 0, total_tokens: 1, cached_tokens: 0 },
+    answers: {
+      action: { type: "choice" as const, choice: "a0", confidence: 0.9 },
+    },
+    usage: {
+      prompt_tokens: 1,
+      completion_tokens: 0,
+      total_tokens: 1,
+      cached_tokens: 0,
+    },
     cost: 0,
   });
   bot.client.channels.fetch = (async () => ({
-    id: context.channelId, isSendable: () => true,
+    id: context.channelId,
+    isSendable: () => true,
     send: async (value: { content: string }) => {
       const message = { ...value };
       sent.push(message);
-      return { id: String(sent.length), edit: async (next: { content: string }) => { message.content = next.content; } };
+      return {
+        id: String(sent.length),
+        edit: async (next: { content: string }) => {
+          message.content = next.content;
+        },
+      };
     },
     sendTyping: async () => {},
   })) as never;
   try {
     const reply = await bot.respond("ファイルを確認して", { ...context });
-    const jev = sent.filter((m) => m.content.startsWith("サブ: Jev でタスクを進めます。"));
+    const jev = sent.filter((m) =>
+      m.content.startsWith("サブ: Jev でタスクを進めます。"),
+    );
     expect(jev).toHaveLength(1);
-    expect(jev[0]!.content.split("\n")[0]).toBe("サブ: Jev でタスクを進めます。(6回目)");
+    expect(jev[0]!.content.split("\n")[0]).toBe(
+      "サブ: Jev でタスクを進めます。(6回目)",
+    );
     expect(jev[0]!.content.split("\n").length).toBeLessThanOrEqual(3);
     expect(jev[0]!.content).toContain("候補の実行が終わりました。");
     expect(sent.some((m) => m.content === "続きを進めます。")).toBe(true);
@@ -133,8 +240,11 @@ test("Jev task status edits one Discord message across plans", async () => {
     round = 0;
     sent.length = 0;
     await bot.respond("もう一度確認して", { ...context });
-    expect(sent.find((m) => m.content.startsWith("サブ: Jev"))?.content.split("\n")[0])
-      .toBe("サブ: Jev でタスクを進めます。(6回目)");
+    expect(
+      sent
+        .find((m) => m.content.startsWith("サブ: Jev"))
+        ?.content.split("\n")[0],
+    ).toBe("サブ: Jev でタスクを進めます。(6回目)");
   } finally {
     await bot.close();
     await rm(dir, { recursive: true, force: true });

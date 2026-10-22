@@ -11,7 +11,12 @@ import { sleep, withAbort } from "../io";
 import { apiFailure, ProviderError } from "../llm-errors";
 import { retryDelay } from "../llm-request";
 import { scopedContext, type Context } from "../types";
-import { apiErrorInfo, SessionGone, toProviderError, type ApiErrorInfo } from "./client";
+import {
+  apiErrorInfo,
+  SessionGone,
+  toProviderError,
+  type ApiErrorInfo,
+} from "./client";
 import { budgetLimit, cents } from "./resources";
 import type { RawEvent, WorkspaceCall, WorkspaceResult } from "./types";
 import { sessionTotals, totalsMax, type WorkspaceTotals } from "./usage";
@@ -48,7 +53,11 @@ export type TurnInput = {
   /** Workflow runs the session row still lists as open. */
   knownRuns?: { id: string; name: string }[];
   limits: {
-    idleMs: number; reconnects: number; graceMs?: number; interruptWaitMs?: number; settleMs?: number;
+    idleMs: number;
+    reconnects: number;
+    graceMs?: number;
+    interruptWaitMs?: number;
+    settleMs?: number;
     /** How long a tool result that could not be delivered waits to be sent again. */
     resendMs?: number;
     /** The configured length of a turn, for the wording of the timeout notice. */
@@ -83,19 +92,28 @@ export const openRunsNotice = (count: number) =>
   `バックグラウンドの作業（workflow run）が ${count} 件、止まったまま残っています。続けるには「続けて」と送ってください。`;
 
 class TurnTimeout extends Error {
-  constructor() { super("Turn timeout"); }
+  constructor() {
+    super("Turn timeout");
+  }
 }
 class TurnStopped extends Error {
-  constructor() { super("Turn stopped"); }
+  constructor() {
+    super("Turn stopped");
+  }
 }
 /** Why a turn's signal fired, read from the reasons bot.ts aborts with. */
-export function abortKind(reason: unknown): "steering" | "shutdown" | "cleared" | "timeout" | "other" {
+export function abortKind(
+  reason: unknown,
+): "steering" | "shutdown" | "cleared" | "timeout" | "other" {
   if (reason instanceof TurnTimeout) return "timeout";
   const message = reason instanceof Error ? reason.message : "";
-  return message === "User steering" ? "steering"
-    : message === "Shutdown" ? "shutdown"
-    : message === "Conversation cleared" ? "cleared"
-    : "other";
+  return message === "User steering"
+    ? "steering"
+    : message === "Shutdown"
+      ? "shutdown"
+      : message === "Conversation cleared"
+        ? "cleared"
+        : "other";
 }
 
 const GRACE_MS = 15_000;
@@ -124,39 +142,68 @@ const LIST_MAX_PAGES = 20;
 // How far before the turn's message a call the session waits on is looked for.
 const LIST_PAST_EVENTS = 2_000;
 
-const STILL_RUNNING = "This call was still running when the turn was stopped and may have taken effect. Check before repeating it.";
-const LEFTOVER_CALL = "This call belongs to an earlier turn that was stopped, so it was not run.";
+const STILL_RUNNING =
+  "This call was still running when the turn was stopped and may have taken effect. Check before repeating it.";
+const LEFTOVER_CALL =
+  "This call belongs to an earlier turn that was stopped, so it was not run.";
 // For a call from before this turn began. The turn it was made in may have
 // run it and then failed to deliver the result, or been shut down over it.
-const OPEN_CALL = "This call was left open by an earlier turn. Whether it was carried out is not known here, so check before repeating it.";
-const REFUSED_RESULT = "This call was carried out, but the session did not accept its result. It may have taken effect. Check before repeating it.";
-const STOPPED_CALL = "The turn was stopped before this call started, so it was not run.";
+const OPEN_CALL =
+  "This call was left open by an earlier turn. Whether it was carried out is not known here, so check before repeating it.";
+const REFUSED_RESULT =
+  "This call was carried out, but the session did not accept its result. It may have taken effect. Check before repeating it.";
+const STOPPED_CALL =
+  "The turn was stopped before this call started, so it was not run.";
 const DENIED = "Permission requests are not answered in this session.";
-const failed = (text: string): WorkspaceResult => ({ content: [{ type: "text", text }], is_error: true });
+const failed = (text: string): WorkspaceResult => ({
+  content: [{ type: "text", text }],
+  is_error: true,
+});
 
 type Reading = { totals: WorkspaceTotals; cost: boolean };
-const text = (value: unknown) => (typeof value === "string" ? value : undefined);
-const stopType = (event: RawEvent) => text((event.stop_reason as { type?: unknown } | undefined)?.type);
+const text = (value: unknown) =>
+  typeof value === "string" ? value : undefined;
+const stopType = (event: RawEvent) =>
+  text((event.stop_reason as { type?: unknown } | undefined)?.type);
 const asksPermission = (event: RawEvent) =>
-  (event.type === "agent.tool_use" || event.type === "agent.mcp_tool_use") && event.evaluated_permission === "ask";
+  (event.type === "agent.tool_use" || event.type === "agent.mcp_tool_use") &&
+  event.evaluated_permission === "ask";
 /** A message's text and how many blocks it has: enough to recognize the
  *  turn's own message in the list without comparing image data. */
 const contentShape = (content: unknown) => {
-  const blocks = Array.isArray(content) ? (content as { type?: unknown; text?: unknown }[]) : [];
-  return JSON.stringify([blocks.filter((b) => b?.type === "text").map((b) => b.text), blocks.length]);
+  const blocks = Array.isArray(content)
+    ? (content as { type?: unknown; text?: unknown }[])
+    : [];
+  return JSON.stringify([
+    blocks.filter((b) => b?.type === "text").map((b) => b.text),
+    blocks.length,
+  ]);
 };
 // The update's rejection for a budget at or below what the session has used.
 // The type definitions name the reason; the API sent the sentence alone, with
 // no code (smoke, 2026-10-12). Both are looked for.
 export const budgetNotRaised = (info: ApiErrorInfo) =>
-  info.code === "budget_not_raised" || /budget_not_raised|greater than the session's consumed/i.test(info.message);
+  info.code === "budget_not_raised" ||
+  /budget_not_raised|greater than the session's consumed/i.test(info.message);
 
-async function interrupt(client: Anthropic, sessionId: string, signal?: AbortSignal, log?: Logger): Promise<boolean> {
+async function interrupt(
+  client: Anthropic,
+  sessionId: string,
+  signal?: AbortSignal,
+  log?: Logger,
+): Promise<boolean> {
   try {
-    await client.beta.sessions.events.send(sessionId, { events: [{ type: "user.interrupt" }] }, { signal });
+    await client.beta.sessions.events.send(
+      sessionId,
+      { events: [{ type: "user.interrupt" }] },
+      { signal },
+    );
     return true;
   } catch (error) {
-    log?.warn({ session: sessionId, status: apiErrorInfo(error).status }, "workspace interrupt was not accepted");
+    log?.warn(
+      { session: sessionId, status: apiErrorInfo(error).status },
+      "workspace interrupt was not accepted",
+    );
     return false;
   }
 }
@@ -171,7 +218,10 @@ async function lower(
 ): Promise<boolean> {
   const max = cents(session.budget?.max_list_cost);
   if (max === undefined) {
-    options.log?.warn({ session: session.id }, "workspace session has no budget to lower");
+    options.log?.warn(
+      { session: session.id },
+      "workspace session has no budget to lower",
+    );
     return false;
   }
   const consumed = sessionTotals(session.usage).totals.list_cost_cents;
@@ -180,48 +230,82 @@ async function lower(
   if (max <= consumed + 1) return true;
   // The reported cost is rounded and may be behind what is enforced, so a
   // rejected value is widened: +1, +2, +4, … and never back up to the budget.
-  for (let attempt = 0, width = 1; attempt < LOWER_ATTEMPTS; attempt++, width *= 2) {
+  for (
+    let attempt = 0, width = 1;
+    attempt < LOWER_ATTEMPTS;
+    attempt++, width *= 2
+  ) {
     if (consumed + width >= max) break;
     try {
-      await client.beta.sessions.update(session.id, { budget: budgetLimit(consumed + width) }, { signal: options.signal });
+      await client.beta.sessions.update(
+        session.id,
+        { budget: budgetLimit(consumed + width) },
+        { signal: options.signal },
+      );
       return true;
     } catch (error) {
       const status = apiErrorInfo(error).status;
       if (status === 404) return true;
       if (status !== 400) {
-        options.log?.warn({ session: session.id, status }, "workspace budget could not be lowered");
+        options.log?.warn(
+          { session: session.id, status },
+          "workspace budget could not be lowered",
+        );
         return false;
       }
     }
   }
-  options.log?.warn({ session: session.id }, "workspace budget was not lowered: every value was rejected");
+  options.log?.warn(
+    { session: session.id },
+    "workspace budget was not lowered: every value was rejected",
+  );
   return false;
 }
 
-type Rest = { status: string; lowered: boolean; totals?: WorkspaceTotals; costReported?: boolean };
+type Rest = {
+  status: string;
+  lowered: boolean;
+  totals?: WorkspaceTotals;
+  costReported?: boolean;
+};
 /** `interrupt`: `always`, only when the session reads as `running`, or
  *  `never` for a session that has just reported the end of its turn (its
  *  status can lag the stream by a moment). */
 async function settleSession(
   client: Anthropic,
   sessionId: string,
-  options: { signal?: AbortSignal; interrupt: "always" | "running" | "never"; log?: Logger },
+  options: {
+    signal?: AbortSignal;
+    interrupt: "always" | "running" | "never";
+    log?: Logger;
+  },
 ): Promise<Rest> {
   let session: BetaManagedAgentsSession;
   try {
-    session = await client.beta.sessions.retrieve(sessionId, {}, { signal: options.signal });
+    session = await client.beta.sessions.retrieve(
+      sessionId,
+      {},
+      { signal: options.signal },
+    );
   } catch (error) {
     const status = apiErrorInfo(error).status;
     // A session that no longer exists cannot spend.
     if (status === 404) return { status: "deleted", lowered: true };
-    options.log?.warn({ session: sessionId, status }, "workspace session could not be read");
+    options.log?.warn(
+      { session: sessionId, status },
+      "workspace session could not be read",
+    );
     return { status: "unknown", lowered: false };
   }
   const { totals, cost } = sessionTotals(session.usage);
   const report = { status: session.status, totals, costReported: cost };
   if (session.status === "terminated") return { ...report, lowered: true };
-  const working = session.status === "running" || session.status === "rescheduling";
-  if (options.interrupt === "always" || (options.interrupt === "running" && working))
+  const working =
+    session.status === "running" || session.status === "rescheduling";
+  if (
+    options.interrupt === "always" ||
+    (options.interrupt === "running" && working)
+  )
     await interrupt(client, sessionId, options.signal, options.log);
   return { ...report, lowered: await lower(client, session, options) };
 }
@@ -238,12 +322,19 @@ export function quiesce(
   sessionId: string,
   options: { signal?: AbortSignal; interrupt?: boolean; log?: Logger } = {},
 ): Promise<Rest> {
-  return settleSession(client, sessionId, { ...options, interrupt: options.interrupt ? "always" : "running" });
+  return settleSession(client, sessionId, {
+    ...options,
+    interrupt: options.interrupt ? "always" : "running",
+  });
 }
 
 /** A fetch body that reports every chunk, comment lines and pings included,
  *  and fails the read when the connection is given up. */
-function watched(body: ReadableStream<Uint8Array>, signal: AbortSignal, onChunk: () => void): ReadableStream<Uint8Array> {
+function watched(
+  body: ReadableStream<Uint8Array>,
+  signal: AbortSignal,
+  onChunk: () => void,
+): ReadableStream<Uint8Array> {
   const reader = body.getReader();
   let over = false;
   let abort = () => {};
@@ -252,7 +343,9 @@ function watched(body: ReadableStream<Uint8Array>, signal: AbortSignal, onChunk:
       abort = () => {
         if (!over) {
           over = true;
-          try { controller.error(signal.reason ?? new Error("Stream closed")); } catch {}
+          try {
+            controller.error(signal.reason ?? new Error("Stream closed"));
+          } catch {}
         }
         void reader.cancel().catch(() => {});
       };
@@ -275,7 +368,9 @@ function watched(body: ReadableStream<Uint8Array>, signal: AbortSignal, onChunk:
         if (over) return;
         over = true;
         signal.removeEventListener("abort", abort);
-        try { controller.error(error); } catch {}
+        try {
+          controller.error(error);
+        } catch {}
       }
     },
     cancel(reason) {
@@ -392,9 +487,15 @@ class Turn {
     this.now = input.hooks?.now ?? Date.now;
     this.startedAt = this.now();
     this.toolCtx = scopedContext(input.ctx, { signal: this.work.signal });
-    this.decision = new Promise((resolve) => { this.settle = resolve; });
-    this.rested = new Promise((resolve) => { this.rest = resolve; });
-    this.rushed = new Promise((resolve) => { this.hurry = resolve; });
+    this.decision = new Promise((resolve) => {
+      this.settle = resolve;
+    });
+    this.rested = new Promise((resolve) => {
+      this.rest = resolve;
+    });
+    this.rushed = new Promise((resolve) => {
+      this.hurry = resolve;
+    });
   }
 
   async run(): Promise<TurnResult> {
@@ -421,10 +522,17 @@ class Turn {
     const max = cents(session.budget?.max_list_cost);
     if (max === undefined) throw this.protocol("budget_unreadable");
     const consumed = reading.totals.list_cost_cents;
-    this.ceiling = "allowCents" in input.budget ? consumed + input.budget.allowCents : input.budget.ceilingCents;
-    this.allowance = "allowCents" in input.budget
-      ? input.budget.allowCents
-      : Math.max(1, this.ceiling - (input.baseline?.list_cost_cents ?? consumed));
+    this.ceiling =
+      "allowCents" in input.budget
+        ? consumed + input.budget.allowCents
+        : input.budget.ceilingCents;
+    this.allowance =
+      "allowCents" in input.budget
+        ? input.budget.allowCents
+        : Math.max(
+            1,
+            this.ceiling - (input.baseline?.list_cost_cents ?? consumed),
+          );
     if (consumed >= this.ceiling) return this.unstarted("budget");
     if (this.now() >= input.deadlineAt) return this.unstarted("timeout");
     // A session that is not at rest is still working on something older.
@@ -441,10 +549,15 @@ class Turn {
     // session that reports a cost is not asked. Treating it like work under
     // way is a choice the owner has not confirmed yet (#76).
     const capped = max <= consumed;
-    const dirty = session.status !== "idle" || capped || this.openRuns.size > 0 || ahead;
+    const dirty =
+      session.status !== "idle" || capped || this.openRuns.size > 0 || ahead;
     if (dirty) {
       try {
-        await this.client.beta.sessions.events.send(this.sid, { events: [{ type: "user.interrupt" }] }, { signal: input.signal });
+        await this.client.beta.sessions.events.send(
+          this.sid,
+          { events: [{ type: "user.interrupt" }] },
+          { signal: input.signal },
+        );
       } catch (error) {
         throw this.requestError(error);
       }
@@ -465,12 +578,17 @@ class Turn {
   private async retrieve(): Promise<BetaManagedAgentsSession> {
     let session: BetaManagedAgentsSession;
     try {
-      session = await this.client.beta.sessions.retrieve(this.sid, {}, { signal: this.input.signal });
+      session = await this.client.beta.sessions.retrieve(
+        this.sid,
+        {},
+        { signal: this.input.signal },
+      );
     } catch (error) {
       throw this.requestError(error);
     }
     if (session.archived_at) throw new SessionGone(false, "archived");
-    if (session.status === "terminated") throw new SessionGone(false, "terminated");
+    if (session.status === "terminated")
+      throw new SessionGone(false, "terminated");
     // A session without a budget is uncapped and a budget cannot be added.
     if (!session.budget) throw new SessionGone(false, "no_budget");
     return session;
@@ -487,9 +605,13 @@ class Turn {
    *  ahead of this turn's. */
   private async requireCost(reading: Reading): Promise<boolean> {
     if (reading.cost) return false;
-    const some = (totals?: WorkspaceTotals) => !!totals && Object.values(totals).some((value) => value > 0);
-    if (some(reading.totals) || some(this.input.baseline)) throw this.protocol("list_cost_missing");
-    let read = 0, pages = 0, used = false;
+    const some = (totals?: WorkspaceTotals) =>
+      !!totals && Object.values(totals).some((value) => value > 0);
+    if (some(reading.totals) || some(this.input.baseline))
+      throw this.protocol("list_cost_missing");
+    let read = 0,
+      pages = 0,
+      used = false;
     try {
       // Read until a message that was taken up is found or the list ends,
       // not just its first page. The API reference orders the list by
@@ -500,10 +622,16 @@ class Turn {
       // message costs one request either way. A list too long to read
       // through, in events or in pages, counts as used: what was not read
       // may hold such a message.
-      const first = await this.client.beta.sessions.events.list(this.sid, { types: ["user.message"] }, { signal: this.input.signal });
+      const first = await this.client.beta.sessions.events.list(
+        this.sid,
+        { types: ["user.message"] },
+        { signal: this.input.signal },
+      );
       for await (const page of first.iterPages()) {
         for (const item of page.data) {
-          used = !!(item as unknown as RawEvent).processed_at || ++read >= LIST_MAX_EVENTS;
+          used =
+            !!(item as unknown as RawEvent).processed_at ||
+            ++read >= LIST_MAX_EVENTS;
           if (used) break;
         }
         if (used || !page.hasNextPage()) break;
@@ -528,21 +656,36 @@ class Turn {
    *  where the oldest run the row lists was started, so the threads of every
    *  run the session ever had are not read again on each turn. */
   private async rebuildRuns() {
-    for (const run of this.input.knownRuns ?? []) this.openRuns.set(run.id, run.name);
+    for (const run of this.input.knownRuns ?? [])
+      this.openRuns.set(run.id, run.name);
     if (!this.openRuns.size) return;
     try {
-      const pending = new Set(this.openRuns.keys()), ended = new Set<string>();
+      const pending = new Set(this.openRuns.keys()),
+        ended = new Set<string>();
       const open: [string, string][] = [];
       let read = 0;
       const events = this.client.beta.sessions.events.list(
-        this.sid, { types: ["workflow_run.created", "workflow_run.status_ended", "session.thread_created"], order: "desc" },
-        { signal: this.input.signal });
+        this.sid,
+        {
+          types: [
+            "workflow_run.created",
+            "workflow_run.status_ended",
+            "session.thread_created",
+          ],
+          order: "desc",
+        },
+        { signal: this.input.signal },
+      );
       for await (const item of events) {
         const event = item as unknown as RawEvent;
         const id = text(event.workflow_run_id);
-        const thread = event.type === "session.thread_created" ? text(event.session_thread_id) : undefined;
+        const thread =
+          event.type === "session.thread_created"
+            ? text(event.session_thread_id)
+            : undefined;
         if (id && thread) this.threadRuns.set(thread, id);
-        else if (id && event.type === "workflow_run.status_ended") ended.add(id);
+        else if (id && event.type === "workflow_run.status_ended")
+          ended.add(id);
         else if (id && event.type === "workflow_run.created") {
           if (!ended.has(id)) open.unshift([id, text(event.name) ?? id]);
           pending.delete(id);
@@ -553,13 +696,18 @@ class Turn {
       this.openRuns = new Map(open);
     } catch (error) {
       if (this.input.signal.aborted) throw this.input.signal.reason;
-      this.log?.warn({ session: this.sid, status: apiErrorInfo(error).status }, "workspace runs could not be listed; keeping the stored ones");
+      this.log?.warn(
+        { session: this.sid, status: apiErrorInfo(error).status },
+        "workspace runs could not be listed; keeping the stored ones",
+      );
     }
   }
 
   /** Raises the budget to the turn's ceiling. The budget is only ever
    *  replaced by another limit, never removed. */
-  private async raise(session: BetaManagedAgentsSession): Promise<TurnResult | undefined> {
+  private async raise(
+    session: BetaManagedAgentsSession,
+  ): Promise<TurnResult | undefined> {
     const { input } = this;
     for (let attempt = 1; ; attempt++) {
       input.onLease?.(this.ceiling);
@@ -569,7 +717,11 @@ class Turn {
       try {
         // The budget alone: with other fields the whole update is refused
         // while a workflow run is open.
-        await this.client.beta.sessions.update(this.sid, { budget: budgetLimit(this.ceiling) }, { signal: input.signal });
+        await this.client.beta.sessions.update(
+          this.sid,
+          { budget: budgetLimit(this.ceiling) },
+          { signal: input.signal },
+        );
         return;
       } catch (error) {
         if (input.signal.aborted) throw input.signal.reason;
@@ -577,14 +729,16 @@ class Turn {
         if (info.status !== 400) throw this.requestError(error);
         // Any other rejection will not go away by trying again, and the
         // budget is never taken off to get past it.
-        if (!budgetNotRaised(info) || attempt >= RAISE_ATTEMPTS) throw this.protocol("budget_rejected", 400);
+        if (!budgetNotRaised(info) || attempt >= RAISE_ATTEMPTS)
+          throw this.protocol("budget_rejected", 400);
       }
       // The session spent more between the read and the update.
       session = await this.retrieve();
       const reading = sessionTotals(session.usage);
       const consumed = reading.totals.list_cost_cents;
       this.before = reading;
-      if ("allowCents" in input.budget) this.ceiling = consumed + input.budget.allowCents;
+      if ("allowCents" in input.budget)
+        this.ceiling = consumed + input.budget.allowCents;
       if (consumed >= this.ceiling) return this.unstarted("budget");
     }
   }
@@ -596,7 +750,11 @@ class Turn {
     // lists, and `session.usage` is not among them. The timeout covers the
     // wait for the headers; a stream that goes quiet is watched in `read`.
     this.response = await this.client.beta.sessions.events
-      .stream(this.sid, {}, { signal: conn.signal, maxRetries: 0, timeout: STREAM_OPEN_TIMEOUT_MS })
+      .stream(
+        this.sid,
+        {},
+        { signal: conn.signal, maxRetries: 0, timeout: STREAM_OPEN_TIMEOUT_MS },
+      )
       .asResponse();
     if (this.streamOpenedAt === undefined) {
       const date = Date.parse(this.response.headers.get("date") ?? "");
@@ -614,7 +772,10 @@ class Turn {
   private async post(dirty: boolean, resumed: boolean) {
     const { input } = this;
     if (input.signal.aborted) throw input.signal.reason;
-    const message: BetaManagedAgentsEventParams = { type: "user.message", content: input.content };
+    const message: BetaManagedAgentsEventParams = {
+      type: "user.message",
+      content: input.content,
+    };
     let blocked = false;
     for (;;) {
       try {
@@ -622,14 +783,27 @@ class Turn {
         // the request is on its way, whether it arrived has to be known.
         // After a refusal the interrupt has gone out on its own already.
         const reply = await this.client.beta.sessions.events.send(
-          this.sid, { events: resumed && !blocked ? [{ type: "user.interrupt" }, message] : [message] },
-          { maxRetries: 0, timeout: SEND_TIMEOUT_MS });
+          this.sid,
+          {
+            events:
+              resumed && !blocked
+                ? [{ type: "user.interrupt" }, message]
+                : [message],
+          },
+          { maxRetries: 0, timeout: SEND_TIMEOUT_MS },
+        );
         this.sent = true;
-        this.anchorId = reply.data?.find((event) => event.type === "user.message")?.id ?? await this.findMessage() ?? "";
+        this.anchorId =
+          reply.data?.find((event) => event.type === "user.message")?.id ??
+          (await this.findMessage()) ??
+          "";
         break;
       } catch (error) {
         const info = apiErrorInfo(error);
-        const unknown = error instanceof APIConnectionError || info.status === 408 || (info.status ?? 0) >= 500;
+        const unknown =
+          error instanceof APIConnectionError ||
+          info.status === 408 ||
+          (info.status ?? 0) >= 500;
         if (unknown) {
           // It may have arrived. Look instead of sending a second copy; when
           // it is not there the turn fails and the user decides to retry.
@@ -654,7 +828,10 @@ class Turn {
     // the turn starts where its own message shows up as processed.
     this.anchored = !dirty && !blocked;
     this.echoDue = !this.anchored;
-    await input.onSent?.({ eventId: this.anchorId, ceilingCents: this.ceiling });
+    await input.onSent?.({
+      eventId: this.anchorId,
+      ceilingCents: this.ceiling,
+    });
   }
 
   /** The id of the turn's message in the session's list, when it is there.
@@ -663,18 +840,34 @@ class Turn {
   private async findMessage(): Promise<string | undefined> {
     try {
       const page = await this.client.beta.sessions.events.list(
-        this.sid, { types: ["user.message"], order: "desc" }, { signal: this.input.signal });
+        this.sid,
+        { types: ["user.message"], order: "desc" },
+        { signal: this.input.signal },
+      );
       const wanted = contentShape(this.input.content);
       for (const item of page.data) {
         const event = item as unknown as RawEvent;
-        if (event.type !== "user.message" || contentShape(event.content) !== wanted) continue;
-        const processed = event.processed_at ? Date.parse(event.processed_at) : undefined;
-        if (processed === undefined || (this.streamOpenedAt !== undefined && processed >= this.streamOpenedAt))
+        if (
+          event.type !== "user.message" ||
+          contentShape(event.content) !== wanted
+        )
+          continue;
+        const processed = event.processed_at
+          ? Date.parse(event.processed_at)
+          : undefined;
+        if (
+          processed === undefined ||
+          (this.streamOpenedAt !== undefined &&
+            processed >= this.streamOpenedAt)
+        )
           return text(event.id);
       }
     } catch (error) {
       if (this.input.signal.aborted) throw this.input.signal.reason;
-      this.log?.warn({ session: this.sid, status: apiErrorInfo(error).status }, "workspace message could not be looked up");
+      this.log?.warn(
+        { session: this.sid, status: apiErrorInfo(error).status },
+        "workspace message could not be looked up",
+      );
     }
   }
 
@@ -690,12 +883,19 @@ class Turn {
       }
       this.decide({ kind: "abort", reason });
     });
-    if (input.steering) this.listen(input.steering, (reason) => this.decide({ kind: "abort", reason, steering: true }));
+    if (input.steering)
+      this.listen(input.steering, (reason) =>
+        this.decide({ kind: "abort", reason, steering: true }),
+      );
     const deadline = setTimeout(
       () => this.decide({ kind: "abort", reason: new TurnTimeout() }),
-      Math.max(0, input.deadlineAt - this.now()));
+      Math.max(0, input.deadlineAt - this.now()),
+    );
     const check = setInterval(() => this.checkStop(), STOP_CHECK_MS);
-    this.cleanups.push(() => clearTimeout(deadline), () => clearInterval(check));
+    this.cleanups.push(
+      () => clearTimeout(deadline),
+      () => clearInterval(check),
+    );
     this.pumping = this.pump();
     return this.decision;
   }
@@ -710,7 +910,9 @@ class Turn {
   private checkStop() {
     if (this.outcome) return;
     let stop = false;
-    try { stop = !!this.input.shouldStop?.(); } catch {}
+    try {
+      stop = !!this.input.shouldStop?.();
+    } catch {}
     if (stop) this.decide({ kind: "abort", reason: new TurnStopped() });
   }
 
@@ -747,7 +949,9 @@ class Turn {
           // before that: it is the one that will show the message taken up.
           this.echoDue = !this.anchored;
         }
-        await this.read(() => { failures = 0; });
+        await this.read(() => {
+          failures = 0;
+        });
         // A stream that just ends (a proxy's time limit) is a disconnect too.
         failure = new ProviderError("transient", true);
         failure.diagnostics = { reason: "provider_error" };
@@ -768,7 +972,10 @@ class Turn {
       if (this.closed || this.outcome) return;
       if (++failures > this.input.limits.reconnects) {
         failure.diagnostics = {
-          ...failure.diagnostics, phase: "stream", provider: WORKSPACE_PROVIDER, model: this.input.model,
+          ...failure.diagnostics,
+          phase: "stream",
+          provider: WORKSPACE_PROVIDER,
+          model: this.input.model,
           retries: failures - 1,
         };
         return this.decide({ kind: "error", error: failure });
@@ -785,7 +992,8 @@ class Turn {
    *  the turn. */
   private streamError(error: unknown): ProviderError | undefined {
     let failure: ProviderError;
-    if (apiErrorInfo(error).status === 404) failure = new SessionGone(this.sent, "not_found");
+    if (apiErrorInfo(error).status === 404)
+      failure = new SessionGone(this.sent, "not_found");
     else {
       try {
         failure = toProviderError(error, "stream", this.input.model);
@@ -795,8 +1003,10 @@ class Turn {
         failure.diagnostics = { reason: "transport_error" };
       }
     }
-    const final = failure instanceof SessionGone || failure.kind === "authentication"
-      || (failure.status !== undefined && !failure.retryable);
+    const final =
+      failure instanceof SessionGone ||
+      failure.kind === "authentication" ||
+      (failure.status !== undefined && !failure.retryable);
     if (!final) return failure;
     this.decide({ kind: "error", error: failure });
   }
@@ -810,17 +1020,23 @@ class Turn {
   }
 
   private async read(onEvent: () => void): Promise<void> {
-    const conn = this.conn!, response = this.response;
+    const conn = this.conn!,
+      response = this.response;
     this.response = undefined;
     if (!response?.body) throw new ProviderError("transient", true);
     this.touch();
     try {
-      const body = watched(response.body as ReadableStream<Uint8Array>, conn.signal, () => this.touch());
+      const body = watched(
+        response.body as ReadableStream<Uint8Array>,
+        conn.signal,
+        () => this.touch(),
+      );
       for await (const sse of Stream.rawEvents(new Response(body), conn)) {
         if (this.closed) return;
         if (sse.event === "ping") continue;
         const event = this.parse(sse.data);
-        if (sse.event === "error" || event?.type === "error") throw this.streamFailure(event);
+        if (sse.event === "error" || event?.type === "error")
+          throw this.streamFailure(event);
         if (!event) continue;
         onEvent();
         try {
@@ -842,23 +1058,36 @@ class Turn {
   private parse(data: string): RawEvent | undefined {
     try {
       const value = JSON.parse(data) as RawEvent | null;
-      if (value && typeof value === "object" && typeof value.type === "string") return value;
+      if (value && typeof value === "object" && typeof value.type === "string")
+        return value;
     } catch {}
     this.ignore("unreadable");
   }
 
   private streamFailure(event: RawEvent | undefined): ProviderError {
     const failure = apiFailure(event?.error ?? event, "error");
-    failure.diagnostics = { ...failure.diagnostics, phase: "stream", provider: WORKSPACE_PROVIDER, model: this.input.model };
+    failure.diagnostics = {
+      ...failure.diagnostics,
+      phase: "stream",
+      provider: WORKSPACE_PROVIDER,
+      model: this.input.model,
+    };
     // An error event ends the connection, not the turn, unless it says the
     // key is wrong. The reconnect limit bounds it.
-    return failure.kind === "authentication" ? failure : Object.assign(new ProviderError("transient", true), { diagnostics: failure.diagnostics });
+    return failure.kind === "authentication"
+      ? failure
+      : Object.assign(new ProviderError("transient", true), {
+          diagnostics: failure.diagnostics,
+        });
   }
 
   private ignore(type: string) {
     if (this.ignored.has(type)) return;
     this.ignored.add(type);
-    this.log?.debug({ session: this.sid, type: type.slice(0, 64) }, "workspace event ignored");
+    this.log?.debug(
+      { session: this.sid, type: type.slice(0, 64) },
+      "workspace event ignored",
+    );
   }
 
   // ── Events ────────────────────────────────────────────────────────────
@@ -867,7 +1096,9 @@ class Turn {
    *  send, it is recognized by its content. */
   private own(event: RawEvent): boolean {
     if (!this.sent || event.type !== "user.message") return false;
-    return this.anchorId ? event.id === this.anchorId : contentShape(event.content) === contentShape(this.input.content);
+    return this.anchorId
+      ? event.id === this.anchorId
+      : contentShape(event.content) === contentShape(this.input.content);
   }
 
   /** The turn's message, processed. `listed`: read from the list, not from
@@ -877,8 +1108,12 @@ class Turn {
     // The list goes back to earlier turns, and the same words may have been
     // sent before. Recognized by content alone, only a message processed
     // since this turn opened its stream counts there, as in `findMessage`.
-    return !!this.anchorId || !listed
-      || (this.streamOpenedAt !== undefined && Date.parse(event.processed_at) >= this.streamOpenedAt);
+    return (
+      !!this.anchorId ||
+      !listed ||
+      (this.streamOpenedAt !== undefined &&
+        Date.parse(event.processed_at) >= this.streamOpenedAt)
+    );
   }
 
   private anchor(event: RawEvent, listed = false) {
@@ -886,7 +1121,8 @@ class Turn {
       // Whatever was being waited out before the message is void.
       this.disarm();
       this.lastError = undefined;
-      const at = listed && event.processed_at ? Date.parse(event.processed_at) : NaN;
+      const at =
+        listed && event.processed_at ? Date.parse(event.processed_at) : NaN;
       this.anchorAt = Number.isFinite(at) ? at : undefined;
     } else if (!listed) {
       this.anchorAt = undefined;
@@ -926,7 +1162,9 @@ class Turn {
       // shows the message: only if the list has it after the message is it
       // the turn's, and then it was handled from there, with all that came
       // before it.
-      const rests = event.type === "session.status_idle" && stopType(event) !== "requires_action";
+      const rests =
+        event.type === "session.status_idle" &&
+        stopType(event) !== "requires_action";
       if (event.type === "agent.custom_tool_use" || rests) {
         await this.reconcile();
         if (final && this.seen.has(id)) {
@@ -947,13 +1185,16 @@ class Turn {
     if (!mine) {
       // Left over from before the turn: never run, only kept from blocking.
       // It is not remembered as seen, so the list can still place it.
-      if (event.type === "agent.custom_tool_use") await this.refuse(id, LEFTOVER_CALL);
+      if (event.type === "agent.custom_tool_use")
+        await this.refuse(id, LEFTOVER_CALL);
       else if (asksPermission(event)) await this.deny(id);
       else if (!this.anchored) this.queued(event);
       return;
     }
     if (final) this.seen.add(id);
-    try { this.input.observe?.(event); } catch {}
+    try {
+      this.input.observe?.(event);
+    } catch {}
     if (this.outcome) return this.wind(event);
     await this.act(event);
   }
@@ -969,11 +1210,17 @@ class Turn {
         return this.disarm();
       case "session.status_idle":
         // At its budget the session takes up nothing until the budget changes.
-        if (stopType(event) === "budget_reached") return this.decide({ kind: "budget" });
+        if (stopType(event) === "budget_reached")
+          return this.decide({ kind: "budget" });
         // The session drops what was queued when its retries run out. As
         // after the message, it may yet start again by itself.
         if (stopType(event) === "retries_exhausted")
-          return this.arm(() => this.decide({ kind: "error", error: this.exhausted("retries_exhausted") }));
+          return this.arm(() =>
+            this.decide({
+              kind: "error",
+              error: this.exhausted("retries_exhausted"),
+            }),
+          );
     }
   }
 
@@ -985,9 +1232,14 @@ class Turn {
         if (!id) return;
         const run = { id, name: text(event.name) ?? id };
         this.openRuns.set(run.id, run.name);
-        if (mine && !this.runsStarted.some((r) => r.id === id)) this.runsStarted.push(run);
+        if (mine && !this.runsStarted.some((r) => r.id === id))
+          this.runsStarted.push(run);
         // One run at a time is what the prompt asks for.
-        if (this.openRuns.size > 1) this.log?.warn({ session: this.sid, open: this.openRuns.size }, "workspace session has more than one workflow run open");
+        if (this.openRuns.size > 1)
+          this.log?.warn(
+            { session: this.sid, open: this.openRuns.size },
+            "workspace session has more than one workflow run open",
+          );
         return;
       }
       case "workflow_run.status_ended": {
@@ -996,19 +1248,28 @@ class Turn {
         return;
       }
       case "session.thread_created": {
-        const thread = text(event.session_thread_id), run = text(event.workflow_run_id);
+        const thread = text(event.session_thread_id),
+          run = text(event.workflow_run_id);
         if (thread && run) this.threadRuns.set(thread, run);
         return;
       }
       case "session.usage": {
-        const reading = sessionTotals(event.usage as Parameters<typeof sessionTotals>[0]);
+        const reading = sessionTotals(
+          event.usage as Parameters<typeof sessionTotals>[0],
+        );
         // A reading from the list can be older than one already taken.
-        this.usage = { totals: totalsMax(reading.totals, this.usage?.totals), cost: reading.cost || !!this.usage?.cost };
+        this.usage = {
+          totals: totalsMax(reading.totals, this.usage?.totals),
+          cost: reading.cost || !!this.usage?.cost,
+        };
         return;
       }
       case "session.error": {
-        const type = text((event.error as { type?: unknown } | undefined)?.type);
-        this.lastError = type && /^[a-z][a-z_]{0,63}$/.test(type) ? type : undefined;
+        const type = text(
+          (event.error as { type?: unknown } | undefined)?.type,
+        );
+        this.lastError =
+          type && /^[a-z][a-z_]{0,63}$/.test(type) ? type : undefined;
         return;
       }
       case "session.status_running":
@@ -1024,7 +1285,10 @@ class Turn {
         this.rest();
         return this.decide({
           kind: "error",
-          error: new SessionGone(this.sent, event.type === "session.deleted" ? "deleted" : "terminated"),
+          error: new SessionGone(
+            this.sent,
+            event.type === "session.deleted" ? "deleted" : "terminated",
+          ),
         });
     }
   }
@@ -1032,8 +1296,12 @@ class Turn {
   private async act(event: RawEvent): Promise<void> {
     switch (event.type) {
       case "agent.message": {
-        const blocks = Array.isArray(event.content) ? (event.content as { type?: unknown; text?: unknown }[]) : [];
-        const said = blocks.map((b) => (b?.type === "text" ? text(b.text) ?? "" : "")).join("");
+        const blocks = Array.isArray(event.content)
+          ? (event.content as { type?: unknown; text?: unknown }[])
+          : [];
+        const said = blocks
+          .map((b) => (b?.type === "text" ? (text(b.text) ?? "") : ""))
+          .join("");
         if (said) this.tail.push(said);
         return;
       }
@@ -1054,10 +1322,14 @@ class Turn {
         return;
       case "span.model_request_end": {
         const usage = (event.model_usage ?? {}) as Record<string, unknown>;
-        const count = (value: unknown) => (typeof value === "number" && value > 0 ? value : 0);
+        const count = (value: unknown) =>
+          typeof value === "number" && value > 0 ? value : 0;
         this.rounds++;
-        this.context = count(usage.input_tokens) + count(usage.cache_read_input_tokens)
-          + count(usage.cache_creation_input_tokens) + count(usage.output_tokens);
+        this.context =
+          count(usage.input_tokens) +
+          count(usage.cache_read_input_tokens) +
+          count(usage.cache_creation_input_tokens) +
+          count(usage.output_tokens);
         if (!event.session_thread_id) this.show();
         return;
       }
@@ -1071,10 +1343,18 @@ class Turn {
         return;
       case "session.status_idle":
         return this.idle(event);
-      case "agent.thinking": case "agent.tool_result": case "agent.mcp_tool_result": case "session.error":
-      case "session.status_rescheduled": case "session.thread_created": case "session.usage":
-      case "workflow_run.created": case "workflow_run.status_idle": case "workflow_run.error":
-      case "workflow_run.phase_started": case "workflow_run.phase_ended":
+      case "agent.thinking":
+      case "agent.tool_result":
+      case "agent.mcp_tool_result":
+      case "session.error":
+      case "session.status_rescheduled":
+      case "session.thread_created":
+      case "session.usage":
+      case "workflow_run.created":
+      case "workflow_run.status_idle":
+      case "workflow_run.error":
+      case "workflow_run.phase_started":
+      case "workflow_run.phase_ended":
         return;
       default:
         this.ignore(event.type);
@@ -1082,13 +1362,20 @@ class Turn {
   }
 
   private async idle(event: RawEvent): Promise<void> {
-    const reason = (event.stop_reason ?? {}) as { type?: unknown; event_ids?: unknown };
+    const reason = (event.stop_reason ?? {}) as {
+      type?: unknown;
+      event_ids?: unknown;
+    };
     switch (reason.type) {
       case "requires_action": {
         // Calls are answered as they arrive. One named here that never
         // arrived was missed, and the list has it.
-        const ids = Array.isArray(reason.event_ids) ? reason.event_ids.filter((v): v is string => typeof v === "string") : [];
-        const unknown = ids.filter((id) => !this.calls.has(id) && !this.confirmed.has(id));
+        const ids = Array.isArray(reason.event_ids)
+          ? reason.event_ids.filter((v): v is string => typeof v === "string")
+          : [];
+        const unknown = ids.filter(
+          (id) => !this.calls.has(id) && !this.confirmed.has(id),
+        );
         if (unknown.length && !this.reconciling) await this.reconcile(unknown);
         // One whose result is still here: the session has just said that it
         // waits for it. Not awaited, so the stream goes on being read.
@@ -1101,40 +1388,76 @@ class Turn {
         // running within moments; if it is paused, nothing will, and the turn
         // ends with a note that work is left.
         this.show();
-        return this.arm(() => this.decide({
-          kind: "end",
-          ...(this.openRuns.size > 0 && { notice: openRunsNotice(this.openRuns.size) }),
-        }));
+        return this.arm(() =>
+          this.decide({
+            kind: "end",
+            ...(this.openRuns.size > 0 && {
+              notice: openRunsNotice(this.openRuns.size),
+            }),
+          }),
+        );
       case "budget_reached":
         return this.decide({ kind: "budget" });
       case "refusal": {
-        const category = text((event.stop_details as { category?: unknown } | null | undefined)?.category);
-        this.log?.warn({ session: this.sid, category }, "workspace turn was refused");
+        const category = text(
+          (event.stop_details as { category?: unknown } | null | undefined)
+            ?.category,
+        );
+        this.log?.warn(
+          { session: this.sid, category },
+          "workspace turn was refused",
+        );
         const failure = new ProviderError("refusal", false);
-        failure.diagnostics = { phase: "stream", provider: WORKSPACE_PROVIDER, model: this.input.model };
+        failure.diagnostics = {
+          phase: "stream",
+          provider: WORKSPACE_PROVIDER,
+          model: this.input.model,
+        };
         return this.decide({ kind: "error", error: failure });
       }
       default:
         // `retries_exhausted`, or a reason this code does not know. The
         // server may still start a turn by itself to read a run's result.
-        return this.arm(() => this.decide({ kind: "error", error: this.exhausted(text(reason.type)) }));
+        return this.arm(() =>
+          this.decide({
+            kind: "error",
+            error: this.exhausted(text(reason.type)),
+          }),
+        );
     }
   }
 
   private exhausted(stop: string | undefined): ProviderError {
     const type = this.lastError;
-    const temporary = ["model_overloaded_error", "model_rate_limited_error", "model_request_failed_error", "unknown_error"];
-    const failure = stop !== "retries_exhausted" ? new ProviderError("protocol", false)
-      : type === "billing_error" ? new ProviderError("quota", false)
-      : !type || temporary.includes(type) ? new ProviderError("transient", true)
-      : new ProviderError("protocol", false);
-    failure.diagnostics = { phase: "stream", provider: WORKSPACE_PROVIDER, model: this.input.model, ...(type && { type }) };
+    const temporary = [
+      "model_overloaded_error",
+      "model_rate_limited_error",
+      "model_request_failed_error",
+      "unknown_error",
+    ];
+    const failure =
+      stop !== "retries_exhausted"
+        ? new ProviderError("protocol", false)
+        : type === "billing_error"
+          ? new ProviderError("quota", false)
+          : !type || temporary.includes(type)
+            ? new ProviderError("transient", true)
+            : new ProviderError("protocol", false);
+    failure.diagnostics = {
+      phase: "stream",
+      provider: WORKSPACE_PROVIDER,
+      model: this.input.model,
+      ...(type && { type }),
+    };
     return failure;
   }
 
   private arm(run: () => void) {
     this.disarm();
-    this.grace = { run, timer: setTimeout(run, this.input.limits.graceMs ?? GRACE_MS) };
+    this.grace = {
+      run,
+      timer: setTimeout(run, this.input.limits.graceMs ?? GRACE_MS),
+    };
   }
   private disarm() {
     if (this.grace) clearTimeout(this.grace.timer);
@@ -1148,7 +1471,9 @@ class Turn {
     const shown = said === this.shown;
     this.shown = undefined;
     if (shown) return;
-    try { this.input.say?.(said); } catch {}
+    try {
+      this.input.say?.(said);
+    } catch {}
   }
 
   /** With a run open, the turn does not end where the model stops, and what
@@ -1161,13 +1486,16 @@ class Turn {
     const said = this.tail.join("\n\n");
     if (said === this.shown) return;
     this.shown = said;
-    try { this.input.say?.(said); } catch {}
+    try {
+      this.input.say?.(said);
+    } catch {}
   }
 
   /** After the turn was decided: only what keeps the session from waiting on
    *  the bot. */
   private async wind(event: RawEvent): Promise<void> {
-    if (event.type === "agent.custom_tool_use") await this.refuse(text(event.id), STOPPED_CALL);
+    if (event.type === "agent.custom_tool_use")
+      await this.refuse(text(event.id), STOPPED_CALL);
     else if (asksPermission(event)) await this.deny(text(event.id));
   }
 
@@ -1180,8 +1508,11 @@ class Turn {
     if (!id || this.calls.has(id)) return;
     const threadId = text(event.session_thread_id) ?? null;
     const call: WorkspaceCall = {
-      id, name: text(event.name) ?? "", input: event.input, threadId,
-      runId: threadId ? this.threadRuns.get(threadId) ?? null : null,
+      id,
+      name: text(event.name) ?? "",
+      input: event.input,
+      threadId,
+      runId: threadId ? (this.threadRuns.get(threadId) ?? null) : null,
     };
     const state: CallState = { status: "running" };
     this.calls.set(id, state);
@@ -1202,23 +1533,42 @@ class Turn {
       // tells them apart by the thread's status. Here a plain result is tried
       // once instead: if the call still takes one, the session stops waiting
       // for it and the model is told; if that is refused too, it was too late.
-      if (await this.answer(id, result, state) === "refused") await this.answer(id, failed(REFUSED_RESULT), state);
+      if ((await this.answer(id, result, state)) === "refused")
+        await this.answer(id, failed(REFUSED_RESULT), state);
     })();
   }
 
   /** One result per request: the server refuses a whole request when it
    *  refuses one of its events. What could not be delivered is kept on the
    *  call and sent again; what was refused is not. */
-  private async answer(id: string, result: WorkspaceResult, state?: CallState): Promise<Delivery> {
+  private async answer(
+    id: string,
+    result: WorkspaceResult,
+    state?: CallState,
+  ): Promise<Delivery> {
     try {
-      await this.client.beta.sessions.events.send(this.sid, {
-        events: [{ type: "user.custom_tool_result", custom_tool_use_id: id, content: result.content, is_error: result.is_error }],
-      }, { signal: this.life.signal });
+      await this.client.beta.sessions.events.send(
+        this.sid,
+        {
+          events: [
+            {
+              type: "user.custom_tool_result",
+              custom_tool_use_id: id,
+              content: result.content,
+              is_error: result.is_error,
+            },
+          ],
+        },
+        { signal: this.life.signal },
+      );
       if (state) delete state.unsent;
       return "sent";
     } catch (error) {
       const status = apiErrorInfo(error).status;
-      this.log?.warn({ session: this.sid, status }, "workspace tool result was not accepted");
+      this.log?.warn(
+        { session: this.sid, status },
+        "workspace tool result was not accepted",
+      );
       if (status === 400 || status === 404) {
         if (state) delete state.unsent;
         return status === 400 ? "refused" : "gone";
@@ -1237,7 +1587,8 @@ class Turn {
   private resend(): Promise<void> {
     return (this.resending ??= (async () => {
       try {
-        for (const [id, state] of this.calls) if (state.unsent) await this.answer(id, state.unsent, state);
+        for (const [id, state] of this.calls)
+          if (state.unsent) await this.answer(id, state.unsent, state);
       } finally {
         this.resending = undefined;
       }
@@ -1263,7 +1614,9 @@ class Turn {
    *  older one was made while an earlier turn was listening. */
   private leftover(event: RawEvent): string {
     const at = event.processed_at ? Date.parse(event.processed_at) : NaN;
-    return this.streamOpenedAt !== undefined && at >= this.streamOpenedAt ? LEFTOVER_CALL : OPEN_CALL;
+    return this.streamOpenedAt !== undefined && at >= this.streamOpenedAt
+      ? LEFTOVER_CALL
+      : OPEN_CALL;
   }
 
   /** The toolset is created with `always_allow`, so nothing should ask. If
@@ -1272,11 +1625,25 @@ class Turn {
     if (!id || this.confirmed.has(id)) return;
     this.confirmed.add(id);
     try {
-      await this.client.beta.sessions.events.send(this.sid, {
-        events: [{ type: "user.tool_confirmation", tool_use_id: id, result: "deny", deny_message: DENIED }],
-      }, { signal: this.life.signal });
+      await this.client.beta.sessions.events.send(
+        this.sid,
+        {
+          events: [
+            {
+              type: "user.tool_confirmation",
+              tool_use_id: id,
+              result: "deny",
+              deny_message: DENIED,
+            },
+          ],
+        },
+        { signal: this.life.signal },
+      );
     } catch (error) {
-      this.log?.warn({ session: this.sid, status: apiErrorInfo(error).status }, "workspace tool confirmation was not accepted");
+      this.log?.warn(
+        { session: this.sid, status: apiErrorInfo(error).status },
+        "workspace tool confirmation was not accepted",
+      );
     }
   }
 
@@ -1290,11 +1657,17 @@ class Turn {
     if (this.reconciling) return;
     this.reconciling = true;
     try {
-      const newer: RawEvent[] = [], older: RawEvent[] = [];
+      const newer: RawEvent[] = [],
+        older: RawEvent[] = [];
       const missing = new Set(waiting);
-      let found = false, past = 0;
+      let found = false,
+        past = 0;
       try {
-        const events = this.client.beta.sessions.events.list(this.sid, { order: "desc" }, { signal: this.life.signal });
+        const events = this.client.beta.sessions.events.list(
+          this.sid,
+          { order: "desc" },
+          { signal: this.life.signal },
+        );
         for await (const item of events) {
           const event = item as unknown as RawEvent;
           const id = text(event.id);
@@ -1319,18 +1692,28 @@ class Turn {
           if (newer.length >= LIST_MAX_EVENTS) break;
         }
       } catch (error) {
-        this.log?.warn({ session: this.sid, status: apiErrorInfo(error).status }, "workspace events could not be listed");
+        this.log?.warn(
+          { session: this.sid, status: apiErrorInfo(error).status },
+          "workspace events could not be listed",
+        );
         return;
       }
       newer.reverse();
       const answered = new Set<string>();
       for (const event of newer) {
-        const call = event.type === "user.custom_tool_result" ? text(event.custom_tool_use_id) : undefined;
+        const call =
+          event.type === "user.custom_tool_result"
+            ? text(event.custom_tool_use_id)
+            : undefined;
         if (call) answered.add(call);
-        const confirmation = event.type === "user.tool_confirmation" ? text(event.tool_use_id) : undefined;
+        const confirmation =
+          event.type === "user.tool_confirmation"
+            ? text(event.tool_use_id)
+            : undefined;
         if (confirmation) this.confirmed.add(confirmation);
       }
-      for (const id of answered) if (!this.calls.has(id)) this.calls.set(id, { status: "done" });
+      for (const id of answered)
+        if (!this.calls.has(id)) this.calls.set(id, { status: "done" });
       if (found && this.anchorId) this.seen.add(this.anchorId);
       // Without the message, nothing in the list can be told to be the turn's:
       // what was read belongs to earlier turns, and handling it would repeat
@@ -1340,7 +1723,8 @@ class Turn {
       if (!found && !(this.taken && newer.length >= LIST_MAX_EVENTS)) {
         if (this.anchored) return;
         for (const event of newer) {
-          if (event.type === "agent.custom_tool_use") await this.refuse(text(event.id), this.leftover(event));
+          if (event.type === "agent.custom_tool_use")
+            await this.refuse(text(event.id), this.leftover(event));
           else if (asksPermission(event)) await this.deny(text(event.id));
         }
         return;
@@ -1356,7 +1740,8 @@ class Turn {
         }
       }
       for (const event of older) {
-        if (event.type === "agent.custom_tool_use") await this.refuse(text(event.id), this.leftover(event));
+        if (event.type === "agent.custom_tool_use")
+          await this.refuse(text(event.id), this.leftover(event));
         else if (asksPermission(event)) await this.deny(text(event.id));
       }
       await this.resend();
@@ -1376,21 +1761,31 @@ class Turn {
       case "budget":
         return this.conclude("budget", budgetNotice(this.allowance));
       case "abort": {
-        const kind = outcome.steering ? "steering"
-          : outcome.reason instanceof TurnStopped ? "stopped"
-          : abortKind(outcome.reason);
+        const kind = outcome.steering
+          ? "steering"
+          : outcome.reason instanceof TurnStopped
+            ? "stopped"
+            : abortKind(outcome.reason);
         // Shutdown, or a reason this code does not know: handled in `fail`.
         if (kind === "shutdown" || kind === "other") throw outcome.reason;
         await this.halt(outcome.reason);
         return this.conclude(
-          kind === "steering" ? "interrupted" : kind === "timeout" ? "timeout" : "stopped",
-          kind === "timeout" ? timeoutNotice(this.limitMs()) : undefined);
+          kind === "steering"
+            ? "interrupted"
+            : kind === "timeout"
+              ? "timeout"
+              : "stopped",
+          kind === "timeout" ? timeoutNotice(this.limitMs()) : undefined,
+        );
       }
     }
   }
 
   private limitMs() {
-    return this.input.limits.timeoutMs ?? Math.max(0, this.input.deadlineAt - this.startedAt);
+    return (
+      this.input.limits.timeoutMs ??
+      Math.max(0, this.input.deadlineAt - this.startedAt)
+    );
   }
 
   /** Stops a turn that is under way: interrupt, give running tools a moment
@@ -1404,9 +1799,14 @@ class Turn {
     // A tool that changes something is not cut off: its real result is
     // returned if it comes in time. Otherwise the model is told that the
     // call may have taken effect, so it checks before repeating it.
-    const running = [...this.calls].filter(([, state]) => state.status === "running");
+    const running = [...this.calls].filter(
+      ([, state]) => state.status === "running",
+    );
     if (running.length) {
-      await this.within(Promise.allSettled(running.map(([, state]) => state.settled)), this.input.limits.settleMs ?? SETTLE_MS);
+      await this.within(
+        Promise.allSettled(running.map(([, state]) => state.settled)),
+        this.input.limits.settleMs ?? SETTLE_MS,
+      );
       for (const [id, state] of running) {
         if (state.status !== "running") continue;
         state.status = "abandoned";
@@ -1416,12 +1816,21 @@ class Turn {
     await this.within(resent, this.input.limits.settleMs ?? SETTLE_MS);
     // With a run still working the session may not go idle at all.
     if (!this.idleNow)
-      await this.within(Promise.race([this.rested, this.pumping]), this.input.limits.interruptWaitMs ?? INTERRUPT_WAIT_MS);
+      await this.within(
+        Promise.race([this.rested, this.pumping]),
+        this.input.limits.interruptWaitMs ?? INTERRUPT_WAIT_MS,
+      );
   }
 
   private async within(work: Promise<unknown>, ms: number) {
     let timer: ReturnType<typeof setTimeout>;
-    await Promise.race([work, this.rushed, new Promise<void>((resolve) => { timer = setTimeout(resolve, ms); })]);
+    await Promise.race([
+      work,
+      this.rushed,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, ms);
+      }),
+    ]);
     clearTimeout(timer!);
   }
   /** The time the requests that end a turn may take together. */
@@ -1429,7 +1838,10 @@ class Turn {
     return AbortSignal.any([AbortSignal.timeout(CLEANUP_MS), this.rush.signal]);
   }
 
-  private async conclude(stop: TurnResult["stop"], notice?: string): Promise<TurnResult> {
+  private async conclude(
+    stop: TurnResult["stop"],
+    notice?: string,
+  ): Promise<TurnResult> {
     this.close();
     // The reader stops on its own. It is waited for so that nothing changes
     // under the result, but not for long: a request it was in the middle of
@@ -1441,32 +1853,68 @@ class Turn {
       // it, and every paused thread would run one more request.
       let reading: Reading | undefined;
       try {
-        reading = sessionTotals((await this.client.beta.sessions.retrieve(this.sid, {}, { signal: cleanup })).usage);
+        reading = sessionTotals(
+          (
+            await this.client.beta.sessions.retrieve(
+              this.sid,
+              {},
+              { signal: cleanup },
+            )
+          ).usage,
+        );
       } catch (error) {
-        this.log?.warn({ session: this.sid, status: apiErrorInfo(error).status }, "workspace session could not be read");
+        this.log?.warn(
+          { session: this.sid, status: apiErrorInfo(error).status },
+          "workspace session could not be read",
+        );
       }
       return this.result(stop, true, reading, notice);
     }
     const settled = await settleSession(this.client, this.sid, {
-      signal: cleanup, log: this.log,
-      interrupt: stop === "end_turn" && this.idleNow && !this.openRuns.size ? "never" : "running",
+      signal: cleanup,
+      log: this.log,
+      interrupt:
+        stop === "end_turn" && this.idleNow && !this.openRuns.size
+          ? "never"
+          : "running",
     });
-    return this.result(stop, settled.lowered,
-      settled.totals && { totals: settled.totals, cost: !!settled.costReported }, notice);
+    return this.result(
+      stop,
+      settled.lowered,
+      settled.totals && {
+        totals: settled.totals,
+        cost: !!settled.costReported,
+      },
+      notice,
+    );
   }
 
   /** The turn ended before its message was sent. */
   private async unstarted(stop: "budget" | "timeout"): Promise<TurnResult> {
     const settled = await quiesce(this.client, this.sid, {
-      signal: AbortSignal.any([this.input.signal, AbortSignal.timeout(CLEANUP_MS)]),
+      signal: AbortSignal.any([
+        this.input.signal,
+        AbortSignal.timeout(CLEANUP_MS),
+      ]),
       log: this.log,
     });
     if (this.input.signal.aborted) throw this.input.signal.reason;
-    return this.result(stop, settled.lowered, this.before,
-      stop === "budget" ? budgetNotice(this.allowance) : timeoutNotice(this.limitMs()));
+    return this.result(
+      stop,
+      settled.lowered,
+      this.before,
+      stop === "budget"
+        ? budgetNotice(this.allowance)
+        : timeoutNotice(this.limitMs()),
+    );
   }
 
-  private result(stop: TurnResult["stop"], released: boolean, final?: Reading, notice?: string): TurnResult {
+  private result(
+    stop: TurnResult["stop"],
+    released: boolean,
+    final?: Reading,
+    notice?: string,
+  ): TurnResult {
     // The session's own figure after the turn and the last one the stream
     // carried, whichever is further along.
     const readings = [final, this.usage].filter((r): r is Reading => !!r);
@@ -1502,9 +1950,14 @@ class Turn {
         // No waiting: both are tried at once and given a few seconds.
         const soon = AbortSignal.timeout(SHUTDOWN_MS);
         await Promise.allSettled([
-          this.sent ? interrupt(this.client, this.sid, soon, this.log) : undefined,
-          this.client.beta.sessions.retrieve(this.sid, {}, { signal: soon })
-            .then((session) => lower(this.client, session, { signal: soon, log: this.log })),
+          this.sent
+            ? interrupt(this.client, this.sid, soon, this.log)
+            : undefined,
+          this.client.beta.sessions
+            .retrieve(this.sid, {}, { signal: soon })
+            .then((session) =>
+              lower(this.client, session, { signal: soon, log: this.log }),
+            ),
         ]);
       } else {
         const cleanup = this.cleanup();
@@ -1514,15 +1967,22 @@ class Turn {
           state.status = "abandoned";
           notes.push(this.answer(id, failed(STILL_RUNNING), state));
         }
-        released = (await quiesce(this.client, this.sid, {
-          signal: cleanup, interrupt: this.sent && !(this.idleNow && !this.openRuns.size), log: this.log,
-        })).lowered;
+        released = (
+          await quiesce(this.client, this.sid, {
+            signal: cleanup,
+            interrupt: this.sent && !(this.idleNow && !this.openRuns.size),
+            log: this.log,
+          })
+        ).lowered;
         await this.within(Promise.allSettled(notes), NOTE_WAIT_MS);
       }
     }
     // Cleared before the message went out: nothing to say, nothing failed.
-    if (kind === "cleared") return this.result("stopped", released, this.before);
-    throw cause instanceof ProviderError || signal.aborted ? cause : this.unexpected(cause);
+    if (kind === "cleared")
+      return this.result("stopped", released, this.before);
+    throw cause instanceof ProviderError || signal.aborted
+      ? cause
+      : this.unexpected(cause);
   }
 
   private dispose() {
@@ -1531,7 +1991,8 @@ class Turn {
     clearTimeout(this.resendTimer);
     for (const cleanup of this.cleanups) cleanup();
     // What a tool returns from here on has nowhere to go.
-    for (const state of this.calls.values()) if (state.status === "running") state.status = "abandoned";
+    for (const state of this.calls.values())
+      if (state.status === "running") state.status = "abandoned";
     this.work.abort();
     this.life.abort();
   }
@@ -1541,19 +2002,29 @@ class Turn {
   /** An error from a request made before the message was sent. */
   private requestError(error: unknown): unknown {
     if (this.input.signal.aborted) return this.input.signal.reason;
-    if (apiErrorInfo(error).status === 404) return new SessionGone(this.sent, "not_found");
+    if (apiErrorInfo(error).status === 404)
+      return new SessionGone(this.sent, "not_found");
     return this.unexpected(error);
   }
   private unexpected(error: unknown): unknown {
     try {
-      return toProviderError(error, this.sent ? "stream" : "request", this.input.model);
+      return toProviderError(
+        error,
+        this.sent ? "stream" : "request",
+        this.input.model,
+      );
     } catch {
       return error;
     }
   }
   private protocol(code: string, status?: number): ProviderError {
     const failure = new ProviderError("protocol", false, status);
-    failure.diagnostics = { phase: "request", provider: WORKSPACE_PROVIDER, model: this.input.model, code };
+    failure.diagnostics = {
+      phase: "request",
+      provider: WORKSPACE_PROVIDER,
+      model: this.input.model,
+      code,
+    };
     return failure;
   }
 }

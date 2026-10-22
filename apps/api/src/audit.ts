@@ -136,14 +136,24 @@ export function parseLogEntry(raw: unknown): LogEntry | null {
     error: r.error == null ? null : clamp(String(r.error), 500),
     failure_phase: phase,
     failure_code: code,
-    http_status: Number.isInteger(status) && status >= 100 && status <= 599
-      ? status
-      : null,
+    http_status:
+      Number.isInteger(status) && status >= 100 && status <= 599
+        ? status
+        : null,
     has_checkpoint: hasCheckpoint,
-    failure_stage: r.failure_stage === "request" || r.failure_stage === "stream" ? r.failure_stage : null,
-    failure_reason: word(r.failure_reason, /^(idle_timeout|transport_error|invalid_json|provider_error)$/),
+    failure_stage:
+      r.failure_stage === "request" || r.failure_stage === "stream"
+        ? r.failure_stage
+        : null,
+    failure_reason: word(
+      r.failure_reason,
+      /^(idle_timeout|transport_error|invalid_json|provider_error)$/,
+    ),
     error_type: word(r.error_type, /^[a-z][a-z_]{0,63}$/),
-    retries: Number.isInteger(retries) && retries >= 0 && retries <= 100 ? retries : null,
+    retries:
+      Number.isInteger(retries) && retries >= 0 && retries <= 100
+        ? retries
+        : null,
     effort: word(r.effort, /^[a-z]{1,16}$/),
     latency_ms: Number.isFinite(Number(r.latency_ms))
       ? Number(r.latency_ms)

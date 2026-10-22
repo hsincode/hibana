@@ -6,7 +6,8 @@ import { retryDelay, WebSync } from "../sync";
 import type { ToolRegistry } from "../tools";
 
 test("withAbort stops waiting on work that has not settled", async () => {
-  const abort = new AbortController(), pending = Promise.withResolvers<void>();
+  const abort = new AbortController(),
+    pending = Promise.withResolvers<void>();
   const waiting = withAbort(pending.promise, abort.signal);
   abort.abort(new Error("cancelled"));
   await expect(waiting).rejects.toThrow("cancelled");
@@ -21,13 +22,18 @@ describe("closed fetch-body errors", () => {
     error.code = "ERR_INVALID_STATE";
     expect(isClosedControllerError(error)).toBe(true);
     expect(isClosedControllerError(new TypeError("other"))).toBe(false);
-    expect(isClosedControllerError(new Error("Controller is already closed"))).toBe(
-      false,
-    );
+    expect(
+      isClosedControllerError(new Error("Controller is already closed")),
+    ).toBe(false);
   });
 });
 
-type Seen = { method: string; path: string; etag: string | null; status: number };
+type Seen = {
+  method: string;
+  path: string;
+  etag: string | null;
+  status: number;
+};
 
 /** A stand-in for the settings API: counts what the bot asks for. */
 function settingsApi() {
@@ -44,7 +50,10 @@ function settingsApi() {
     budget: { configured: false } as unknown,
     count: (method: string, path: string, status?: number) =>
       api.seen.filter(
-        (s) => s.method === method && s.path === path && (status === undefined || s.status === status),
+        (s) =>
+          s.method === method &&
+          s.path === path &&
+          (status === undefined || s.status === status),
       ).length,
     url: "",
     stop: () => server.stop(true),
@@ -73,7 +82,9 @@ function settingsApi() {
       );
     }
     if (request.method === "GET" && path === "/internal/budget")
-      return typeof api.budget === "number" ? new Response("{}", { status: api.budget }) : Response.json(api.budget);
+      return typeof api.budget === "number"
+        ? new Response("{}", { status: api.budget })
+        : Response.json(api.budget);
     if (path === "/internal/events")
       return new Response('event: hello\ndata: {"version":1}\n\n', {
         headers: { "content-type": "text/event-stream" },
@@ -105,7 +116,12 @@ afterEach(() => {
   for (const fn of cleanup.splice(0)) fn();
 });
 
-function fixture(timing: { pollMs: number; maxMs: number; budgetMs?: number } = { pollMs: 10, maxMs: 40 }) {
+function fixture(
+  timing: { pollMs: number; maxMs: number; budgetMs?: number } = {
+    pollMs: 10,
+    maxMs: 40,
+  },
+) {
   const api = settingsApi();
   const runtime = new Runtime(
     loadConfig({
@@ -114,10 +130,16 @@ function fixture(timing: { pollMs: number; maxMs: number; budgetMs?: number } = 
       RUNTIME_STATE_PATH: "",
     }),
   );
-  const assets = { skills: [{ name: "one" }] as unknown[], sites: [{ token: "a1" }] as unknown[] };
+  const assets = {
+    skills: [{ name: "one" }] as unknown[],
+    sites: [{ token: "a1" }] as unknown[],
+  };
   const tools = {
     sites: { list: () => assets.sites, applyCommand: async () => {} },
-    skills: { export: async () => assets.skills, execute: async () => ({ ok: true }) },
+    skills: {
+      export: async () => assets.skills,
+      execute: async () => ({ ok: true }),
+    },
   } as unknown as ToolRegistry;
   const errors: string[] = [];
   const sync = new WebSync(
@@ -136,7 +158,8 @@ function fixture(timing: { pollMs: number; maxMs: number; budgetMs?: number } = 
 async function until(check: () => boolean, ms = 3000) {
   const deadline = Date.now() + ms;
   while (!check()) {
-    if (Date.now() > deadline) throw new Error("Timed out waiting for the condition");
+    if (Date.now() > deadline)
+      throw new Error("Timed out waiting for the condition");
     await Bun.sleep(5);
   }
 }
@@ -161,7 +184,13 @@ describe("settings sync", () => {
     const changed: (string | undefined)[] = [];
     runtime.onChange = (id) => changed.push(id);
     // What runtime.load() restores: settings as they were when the bot stopped.
-    runtime.replace({ version: 7, guilds: { "100": { effort: "high" }, "200": { effort: "high" } } } as never, false);
+    runtime.replace(
+      {
+        version: 7,
+        guilds: { "100": { effort: "high" }, "200": { effort: "high" } },
+      } as never,
+      false,
+    );
     expect(changed).toEqual([]);
     // Guild 100 was changed in the dashboard while the bot was down.
     api.guilds = { "100": { effort: "low" }, "200": { effort: "high" } };
@@ -178,7 +207,10 @@ describe("settings sync", () => {
     await sync.start();
     // The budget status (#89) is asked separately and fails the same way;
     // the last decision restored from the file stays.
-    expect(errors).toEqual(["Settings snapshot HTTP 402", "Settings API GET /internal/budget: HTTP 402"]);
+    expect(errors).toEqual([
+      "Settings snapshot HTTP 402",
+      "Settings API GET /internal/budget: HTTP 402",
+    ]);
     expect(runtime.snapshot.blocked_users).toEqual(["9"]);
   });
 
@@ -194,7 +226,9 @@ describe("settings sync", () => {
     await until(() => api.count("GET", "/internal/snapshot", 304) >= 3);
     expect(api.count("GET", "/internal/events")).toBe(0);
     expect(api.count("GET", "/internal/snapshot", 200)).toBe(1);
-    expect(api.seen.filter((s) => s.status === 304).every((s) => s.etag === '"1"')).toBe(true);
+    expect(
+      api.seen.filter((s) => s.status === 304).every((s) => s.etag === '"1"'),
+    ).toBe(true);
 
     api.blocked = ["42"];
     api.version = 2;
@@ -301,7 +335,11 @@ describe("budget status (#89)", () => {
   const low = { configured: true, low: true, remaining_after_today_usd: 9.5 };
 
   test("asks the API, and keeps the last answer while asking fails", async () => {
-    const { api, runtime, errors, sync } = fixture({ pollMs: 10, maxMs: 40, budgetMs: 0 });
+    const { api, runtime, errors, sync } = fixture({
+      pollMs: 10,
+      maxMs: 40,
+      budgetMs: 0,
+    });
     api.budget = low;
     await sync.start();
     await until(() => runtime.budgetLow());
@@ -318,13 +356,21 @@ describe("budget status (#89)", () => {
     await until(() => api.count("GET", "/internal/budget") >= again + 2);
     expect(runtime.budgetLow()).toBe(true);
     // The budget is back above the threshold.
-    api.budget = { configured: true, low: false, remaining_after_today_usd: 40 };
+    api.budget = {
+      configured: true,
+      low: false,
+      remaining_after_today_usd: 40,
+    };
     await until(() => !runtime.budgetLow());
     expect(api.count("GET", "/internal/snapshot", 200)).toBeGreaterThan(0);
   });
 
   test("an API without an Admin API key cannot tell, which turns the fallback off", async () => {
-    const { api, runtime, sync } = fixture({ pollMs: 10, maxMs: 40, budgetMs: 0 });
+    const { api, runtime, sync } = fixture({
+      pollMs: 10,
+      maxMs: 40,
+      budgetMs: 0,
+    });
     api.budget = low;
     await sync.start();
     await until(() => runtime.budgetLow());
@@ -334,7 +380,11 @@ describe("budget status (#89)", () => {
   });
 
   test("keeps the threshold the API decided with, for the notice (#95)", async () => {
-    const { api, runtime, sync } = fixture({ pollMs: 10, maxMs: 40, budgetMs: 0 });
+    const { api, runtime, sync } = fixture({
+      pollMs: 10,
+      maxMs: 40,
+      budgetMs: 0,
+    });
     // An API from before #95 sends no threshold: the notice says $10.
     api.budget = low;
     await sync.start();

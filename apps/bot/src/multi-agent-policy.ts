@@ -7,7 +7,12 @@ import {
 } from "@hibana/shared/catalog";
 import { routeFallback } from "./auto-route";
 import { effortSchema, subagentMode } from "@hibana/shared/settings";
-import { AGENT_ROLE_IDS, roleCatalogText, roleEffort, type AgentRole } from "./agent-roles";
+import {
+  AGENT_ROLE_IDS,
+  roleCatalogText,
+  roleEffort,
+  type AgentRole,
+} from "./agent-roles";
 import type { Runtime } from "./runtime";
 import { recommendedEffort, type Selection } from "./config";
 import type { Context, Json, Message, ToolDef } from "./types";
@@ -116,7 +121,8 @@ export function collaborationValidationSchema(tool: ToolDef): Json {
  *  `claude-haiku-5-5` by name would stop resolving to one preset, and the
  *  spawn_agent description and the workflow reference would change once the
  *  Workspace presets are published. */
-export const childPresets = () => MODEL_PRESETS.filter((p) => p.provider !== WORKSPACE_PROVIDER);
+export const childPresets = () =>
+  MODEL_PRESETS.filter((p) => p.provider !== WORKSPACE_PROVIDER);
 
 export function selectChild(
   runtime: Runtime,
@@ -130,9 +136,13 @@ export function selectChild(
   // "default" keeps the common one (which may still be the agent's choice).
   const rolePolicy = role ? settings.multi_agent_roles[role] : undefined;
   const modelPolicy =
-    rolePolicy && rolePolicy.model.mode !== "default" ? rolePolicy.model : settings.subagent_model;
+    rolePolicy && rolePolicy.model.mode !== "default"
+      ? rolePolicy.model
+      : settings.subagent_model;
   const effortPolicy =
-    rolePolicy && rolePolicy.effort.mode !== "default" ? rolePolicy.effort : settings.subagent_effort;
+    rolePolicy && rolePolicy.effort.mode !== "default"
+      ? rolePolicy.effort
+      : settings.subagent_effort;
   const requested =
     modelPolicy.mode === "fixed"
       ? modelPolicy.preset
@@ -156,7 +166,8 @@ export function selectChild(
     selection = { provider: preset.provider, model: preset.model };
     // The auto preset is not a model: a child keeps its parent's route, and
     // under any other parent it runs the fallback without asking Jev again.
-    if (isAutoRoute(selection)) selection = parent.routed ? { ...parent } : routeFallback();
+    if (isAutoRoute(selection))
+      selection = parent.routed ? { ...parent } : routeFallback();
   }
   assertChildSelection(runtime, ctx, selection);
   const changed =
@@ -210,7 +221,8 @@ export function teamTools(runtime: Runtime, ctx: Context): ToolDef[] {
     if (multi) {
       properties.role = roleProperty();
       (copy.function.parameters.required as string[]).push("role");
-      copy.function.description += " Multi-Agent mode: role is required and only the orchestrator (root) can spawn.";
+      copy.function.description +=
+        " Multi-Agent mode: role is required and only the orchestrator (root) can spawn.";
     }
     if (settings.subagent_model.mode !== "auto") delete properties.model;
     if (settings.subagent_effort.mode !== "auto")
@@ -218,12 +230,15 @@ export function teamTools(runtime: Runtime, ctx: Context): ToolDef[] {
     // Role overrides win over the common policy and over model/reasoning_effort
     // arguments for that role; stating them avoids futile model requests.
     const roleOverrides = multi
-      ? Object.fromEntries(Object.entries(settings.multi_agent_roles).filter(
-        ([, p]) => p.model.mode !== "default" || p.effort.mode !== "default"))
+      ? Object.fromEntries(
+          Object.entries(settings.multi_agent_roles).filter(
+            ([, p]) =>
+              p.model.mode !== "default" || p.effort.mode !== "default",
+          ),
+        )
       : {};
-    copy.function.description += ` Model policy: ${JSON.stringify(settings.subagent_model)}. Effort policy: ${JSON.stringify(settings.subagent_effort)}.${Object.keys(roleOverrides).length ? ` Per-role overrides (take precedence for that role): ${JSON.stringify(roleOverrides)}.` : ""} Available model presets: ${childPresets().filter(
-      (p) => runtime.canSelect(p.id, ctx.userId),
-    )
+    copy.function.description += ` Model policy: ${JSON.stringify(settings.subagent_model)}. Effort policy: ${JSON.stringify(settings.subagent_effort)}.${Object.keys(roleOverrides).length ? ` Per-role overrides (take precedence for that role): ${JSON.stringify(roleOverrides)}.` : ""} Available model presets: ${childPresets()
+      .filter((p) => runtime.canSelect(p.id, ctx.userId))
       .map((p) => p.id)
       .join(
         ", ",

@@ -48,7 +48,10 @@ export class WebSync {
     private runtime: Runtime,
     private tools: ToolRegistry,
     private onError: (e: unknown) => void,
-    private timing: { pollMs: number; maxMs: number; budgetMs?: number } = { pollMs: SNAPSHOT_POLL_MS, maxMs: SNAPSHOT_RETRY_MAX_MS },
+    private timing: { pollMs: number; maxMs: number; budgetMs?: number } = {
+      pollMs: SNAPSHOT_POLL_MS,
+      maxMs: SNAPSHOT_RETRY_MAX_MS,
+    },
     private now: () => number = Date.now,
   ) {}
   /**
@@ -61,26 +64,42 @@ export class WebSync {
   async checkBudget() {
     if (!this.runtime.config.webApiUrl) return;
     const now = this.now();
-    if (now - this.budgetAsked < (this.timing.budgetMs ?? BUDGET_POLL_MS)) return;
+    if (now - this.budgetAsked < (this.timing.budgetMs ?? BUDGET_POLL_MS))
+      return;
     this.budgetAsked = now;
     try {
-      const body = (await this.runtime.remote("/internal/budget", "GET", undefined, this.abort.signal)) as {
+      const body = (await this.runtime.remote(
+        "/internal/budget",
+        "GET",
+        undefined,
+        this.abort.signal,
+      )) as {
         configured?: unknown;
         low?: unknown;
         remaining_after_today_usd?: unknown;
         threshold_usd?: unknown;
       };
       if (body.configured === false) {
-        await this.runtime.setBudget({ low: false, remaining_after_today_usd: null, checked_at: now });
+        await this.runtime.setBudget({
+          low: false,
+          remaining_after_today_usd: null,
+          checked_at: now,
+        });
         return;
       }
-      if (typeof body.low !== "boolean" || typeof body.remaining_after_today_usd !== "number")
+      if (
+        typeof body.low !== "boolean" ||
+        typeof body.remaining_after_today_usd !== "number"
+      )
         throw new Error("Budget status: unexpected response");
       await this.runtime.setBudget({
         low: body.low,
         remaining_after_today_usd: body.remaining_after_today_usd,
         // Only for the Discord notice: `low` already is the decision (#95).
-        ...(typeof body.threshold_usd === "number" && Number.isFinite(body.threshold_usd) ? { threshold_usd: body.threshold_usd } : {}),
+        ...(typeof body.threshold_usd === "number" &&
+        Number.isFinite(body.threshold_usd)
+          ? { threshold_usd: body.threshold_usd }
+          : {}),
         checked_at: now,
       });
     } catch (e) {
@@ -107,7 +126,10 @@ export class WebSync {
       const snapshot = (await r.json()) as Snapshot;
       // The first snapshot this bot ever holds (none was restored from disk)
       // has nothing to differ from, so it is the baseline, not a change.
-      this.runtime.replace(snapshot, this.runtime.snapshot.version !== undefined);
+      this.runtime.replace(
+        snapshot,
+        this.runtime.snapshot.version !== undefined,
+      );
       this.etag = r.headers.get("etag") ?? undefined;
       await this.runtime.persist();
       for (const command of snapshot.artifact_commands ?? []) {

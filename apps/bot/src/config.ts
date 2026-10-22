@@ -1,7 +1,13 @@
 import { readFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { resolve } from "node:path";
-import { AUTO_ROUTE_MODEL, MODEL_PRESETS, EFFORTS, WORKSPACE_PROVIDER, canonicalModel } from "@hibana/shared/catalog";
+import {
+  AUTO_ROUTE_MODEL,
+  MODEL_PRESETS,
+  EFFORTS,
+  WORKSPACE_PROVIDER,
+  canonicalModel,
+} from "@hibana/shared/catalog";
 import { SIZE_GUIDELINES, type SizeGuideline } from "./workflow/prompts";
 
 export type Selection = {
@@ -83,9 +89,14 @@ function vpnProvider(env: NodeJS.ProcessEnv): "surfshark" | "vpngate" {
 function availableCpus(): number {
   let cpus = availableParallelism();
   try {
-    const [quota, period] = readFileSync("/sys/fs/cgroup/cpu.max", "utf8").trim().split(/\s+/);
+    const [quota, period] = readFileSync("/sys/fs/cgroup/cpu.max", "utf8")
+      .trim()
+      .split(/\s+/);
     if (quota && quota !== "max" && Number(period) > 0)
-      cpus = Math.min(cpus, Math.max(1, Math.ceil(Number(quota) / Number(period))));
+      cpus = Math.min(
+        cpus,
+        Math.max(1, Math.ceil(Number(quota) / Number(period))),
+      );
   } catch {}
   return cpus;
 }
@@ -96,31 +107,51 @@ export const WORKSPACE_MIN_TURN_CENTS = 5;
 /** A USD amount as whole cents, at least `minCents` (one unless given). The
  *  Managed Agents API takes money in minor units, so the limits are kept
  *  that way from the start. */
-function centsEnv(env: NodeJS.ProcessEnv, key: string, fallback: number, max: number, minCents = 1): number {
+function centsEnv(
+  env: NodeJS.ProcessEnv,
+  key: string,
+  fallback: number,
+  max: number,
+  minCents = 1,
+): number {
   return Math.round(numberEnv(env, key, fallback, minCents / 100, max) * 100);
 }
 /** Network policy of the Workspace container. A host list only means
  *  something under `limited`, so one given without it stops the start rather
  *  than look like a restriction that is not applied. */
-function workspaceNetworking(env: NodeJS.ProcessEnv): { networking: "unrestricted" | "limited"; allowedHosts: string[] } {
-  const networking = (env.ANTHROPIC_WORKSPACE_NETWORKING || "unrestricted").trim().toLowerCase();
+function workspaceNetworking(env: NodeJS.ProcessEnv): {
+  networking: "unrestricted" | "limited";
+  allowedHosts: string[];
+} {
+  const networking = (env.ANTHROPIC_WORKSPACE_NETWORKING || "unrestricted")
+    .trim()
+    .toLowerCase();
   if (networking !== "unrestricted" && networking !== "limited")
-    throw new Error("ANTHROPIC_WORKSPACE_NETWORKING must be unrestricted or limited");
+    throw new Error(
+      "ANTHROPIC_WORKSPACE_NETWORKING must be unrestricted or limited",
+    );
   const allowedHosts = (env.ANTHROPIC_WORKSPACE_ALLOWED_HOSTS || "")
     .split(",")
     .map((x) => x.trim())
     .filter(Boolean);
   if (allowedHosts.length && networking !== "limited")
-    throw new Error("ANTHROPIC_WORKSPACE_ALLOWED_HOSTS requires ANTHROPIC_WORKSPACE_NETWORKING=limited");
+    throw new Error(
+      "ANTHROPIC_WORKSPACE_ALLOWED_HOSTS requires ANTHROPIC_WORKSPACE_NETWORKING=limited",
+    );
   // Host names only: no scheme, port or path.
   if (allowedHosts.some((host) => /[\s\/:]/.test(host)))
-    throw new Error("ANTHROPIC_WORKSPACE_ALLOWED_HOSTS must be a comma-separated list of host names");
+    throw new Error(
+      "ANTHROPIC_WORKSPACE_ALLOWED_HOSTS must be a comma-separated list of host names",
+    );
   return { networking, allowedHosts };
 }
 function sizeGuideline(env: NodeJS.ProcessEnv): SizeGuideline {
   const value = (env.WORKFLOW_SIZE_GUIDELINE || "medium").trim().toLowerCase();
-  if ((SIZE_GUIDELINES as readonly string[]).includes(value)) return value as SizeGuideline;
-  throw new Error(`WORKFLOW_SIZE_GUIDELINE must be one of ${SIZE_GUIDELINES.join(", ")}`);
+  if ((SIZE_GUIDELINES as readonly string[]).includes(value))
+    return value as SizeGuideline;
+  throw new Error(
+    `WORKFLOW_SIZE_GUIDELINE must be one of ${SIZE_GUIDELINES.join(", ")}`,
+  );
 }
 
 export function recommendedEffort(
@@ -170,8 +201,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
       endpoints[id] = { baseUrl: baseUrl.replace(/\/$/, ""), apiKey };
     }
   }
-  const model = canonicalModel(provider, env.LLM_MODEL || providers[provider]![1]);
-  if (!model) throw new Error(`LLM_MODEL is required for PROVIDER: ${provider}`);
+  const model = canonicalModel(
+    provider,
+    env.LLM_MODEL || providers[provider]![1],
+  );
+  if (!model)
+    throw new Error(`LLM_MODEL is required for PROVIDER: ${provider}`);
   // "auto" is Jev's routing among the `anthropic` models (#35). Anywhere else
   // it is not a model, and a Workspace session would be created with that id.
   if (provider === WORKSPACE_PROVIDER && model === AUTO_ROUTE_MODEL)
@@ -186,8 +221,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   const browserProxyUrl = env.BROWSER_PROXY_URL || "";
   if (browserProxyUrl) {
     const proxy = new URL(browserProxyUrl);
-    if (proxy.protocol !== "http:" || proxy.username || proxy.password || proxy.search || proxy.hash || proxy.pathname !== "/")
-      throw new Error("BROWSER_PROXY_URL must be an HTTP proxy origin without credentials");
+    if (
+      proxy.protocol !== "http:" ||
+      proxy.username ||
+      proxy.password ||
+      proxy.search ||
+      proxy.hash ||
+      proxy.pathname !== "/"
+    )
+      throw new Error(
+        "BROWSER_PROXY_URL must be an HTTP proxy origin without credentials",
+      );
     if (!env.BROWSER_PROXY_USERNAME)
       throw new Error("Browser proxy username required");
   }
@@ -196,8 +240,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     const url = new URL(imageWorkerUrl);
     // The private image bridge is an explicit deployment capability, not a
     // user-configurable SSRF exception for arbitrary MCP or download URLs.
-    if (url.protocol !== "http:" || url.hostname !== "127.0.0.1" ||
-        url.username || url.password || url.pathname !== "/" || url.search || url.hash)
+    if (
+      url.protocol !== "http:" ||
+      url.hostname !== "127.0.0.1" ||
+      url.username ||
+      url.password ||
+      url.pathname !== "/" ||
+      url.search ||
+      url.hash
+    )
       throw new Error("IMAGE_WORKER_URL must be a loopback HTTP origin");
     if ((env.IMAGE_WORKER_TOKEN || "").length < 32)
       throw new Error("IMAGE_WORKER_TOKEN must contain at least 32 characters");
@@ -206,7 +257,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   return {
     token: env.DISCORD_TOKEN || "",
     commandGuildId: env.DISCORD_COMMAND_GUILD_ID,
-    selection: { provider, model, effort: effort === "ultra" ? "max" : effort } as Selection,
+    selection: {
+      provider,
+      model,
+      effort: effort === "ultra" ? "max" : effort,
+    } as Selection,
     // Legacy LLM_EFFORT=ultra still turns Ultra on. Ultra is Claude Code's
     // Ultracode: the root runs at xhigh while it is on (see ultracode.ts).
     ultraMode: flag(env, "ULTRA_MODE", effort === "ultra"),
@@ -217,9 +272,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     temperature: numberEnv(env, "LLM_TEMPERATURE", 0.7, 0, 2),
     // Match the reference Codex fork's defaults: four HTTP retries, five
     // stream reconnects, and five minutes without incoming bytes (not total time).
-    llmRequestRetries: Math.floor(numberEnv(env, "LLM_REQUEST_MAX_RETRIES", 4, 0, 100)),
-    llmStreamRetries: Math.floor(numberEnv(env, "LLM_STREAM_MAX_RETRIES", 5, 0, 100)),
-    llmStreamIdleMs: numberEnv(env, "LLM_STREAM_IDLE_TIMEOUT_MS", 300000, 1, 3600000),
+    llmRequestRetries: Math.floor(
+      numberEnv(env, "LLM_REQUEST_MAX_RETRIES", 4, 0, 100),
+    ),
+    llmStreamRetries: Math.floor(
+      numberEnv(env, "LLM_STREAM_MAX_RETRIES", 5, 0, 100),
+    ),
+    llmStreamIdleMs: numberEnv(
+      env,
+      "LLM_STREAM_IDLE_TIMEOUT_MS",
+      300000,
+      1,
+      3600000,
+    ),
     maxTokens: numberEnv(env, "LLM_MAX_TOKENS", 8192, 1024, 65536),
     maxRounds: numberEnv(env, "MAX_TOOL_ROUNDS", 128, 1, 512),
     dataDir,
@@ -243,17 +308,61 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
       // turns together may add in one UTC day and month, in cents. A turn's
       // limit below what a turn is started with would refuse every turn, so
       // it stops the start instead; the day and the month go down to a cent.
-      turnBudgetCents: centsEnv(env, "ANTHROPIC_WORKSPACE_TURN_BUDGET_USD", 1, 100, WORKSPACE_MIN_TURN_CENTS),
-      ultraTurnBudgetCents: centsEnv(env, "ANTHROPIC_WORKSPACE_ULTRA_TURN_BUDGET_USD", 3, 100, WORKSPACE_MIN_TURN_CENTS),
-      dailyBudgetCents: centsEnv(env, "ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD", 5, 10000),
-      monthlyBudgetCents: centsEnv(env, "ANTHROPIC_WORKSPACE_MONTHLY_BUDGET_USD", 50, 100000),
+      turnBudgetCents: centsEnv(
+        env,
+        "ANTHROPIC_WORKSPACE_TURN_BUDGET_USD",
+        1,
+        100,
+        WORKSPACE_MIN_TURN_CENTS,
+      ),
+      ultraTurnBudgetCents: centsEnv(
+        env,
+        "ANTHROPIC_WORKSPACE_ULTRA_TURN_BUDGET_USD",
+        3,
+        100,
+        WORKSPACE_MIN_TURN_CENTS,
+      ),
+      dailyBudgetCents: centsEnv(
+        env,
+        "ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD",
+        5,
+        10000,
+      ),
+      monthlyBudgetCents: centsEnv(
+        env,
+        "ANTHROPIC_WORKSPACE_MONTHLY_BUDGET_USD",
+        50,
+        100000,
+      ),
       // Wall-clock time of one turn, counted from its first start.
-      turnTimeoutMs: numberEnv(env, "ANTHROPIC_WORKSPACE_TURN_TIMEOUT_MS", 1200000, 1, 86400000),
-      ultraTurnTimeoutMs: numberEnv(env, "ANTHROPIC_WORKSPACE_ULTRA_TURN_TIMEOUT_MS", 3600000, 1, 86400000),
+      turnTimeoutMs: numberEnv(
+        env,
+        "ANTHROPIC_WORKSPACE_TURN_TIMEOUT_MS",
+        1200000,
+        1,
+        86400000,
+      ),
+      ultraTurnTimeoutMs: numberEnv(
+        env,
+        "ANTHROPIC_WORKSPACE_ULTRA_TURN_TIMEOUT_MS",
+        3600000,
+        1,
+        86400000,
+      ),
       // Workspace turns running at once in the whole bot, and the longest
       // user message one of them accepts.
-      concurrency: Math.floor(numberEnv(env, "ANTHROPIC_WORKSPACE_MAX_CONCURRENT", 2, 1, 64)),
-      inputMaxChars: Math.floor(numberEnv(env, "ANTHROPIC_WORKSPACE_INPUT_MAX_CHARS", 60000, 1, 1000000)),
+      concurrency: Math.floor(
+        numberEnv(env, "ANTHROPIC_WORKSPACE_MAX_CONCURRENT", 2, 1, 64),
+      ),
+      inputMaxChars: Math.floor(
+        numberEnv(
+          env,
+          "ANTHROPIC_WORKSPACE_INPUT_MAX_CHARS",
+          60000,
+          1,
+          1000000,
+        ),
+      ),
       ...workspaceNetworking(env),
       // The container's own web search and fetch. Decided when a session is
       // created; an existing session keeps what it was created with.
@@ -268,7 +377,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     // Each explicit connection gets a fresh lease credential from HomeSession.
     browserProxyUrl,
     browserProxyUsername: env.BROWSER_PROXY_USERNAME || "",
-    homeControlSocket: env.HOME_RELAY_CONTROL_SOCKET || "/run/hibana-home-egress/control.sock",
+    homeControlSocket:
+      env.HOME_RELAY_CONTROL_SOCKET || "/run/hibana-home-egress/control.sock",
     workspaceRoot: resolve(
       env.SANDBOX_WORKSPACE_ROOT || `${dataDir}/workspaces`,
     ),
@@ -311,8 +421,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     ultracodeKeywordTrigger: flag(env, "ULTRACODE_KEYWORD_TRIGGER", true),
     // Claude Code runs min(16, max(2, CPUs - 2)) agent() calls at once per
     // workflow; CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS overrides it there.
-    workflowConcurrency: Math.floor(numberEnv(env, "WORKFLOW_MAX_CONCURRENT_AGENTS",
-      Math.min(16, Math.max(2, availableCpus() - 2)), 1, 256)),
+    workflowConcurrency: Math.floor(
+      numberEnv(
+        env,
+        "WORKFLOW_MAX_CONCURRENT_AGENTS",
+        Math.min(16, Math.max(2, availableCpus() - 2)),
+        1,
+        256,
+      ),
+    ),
     // Advice appended to the Workflow description (default medium: <10 agents).
     workflowSizeGuideline: sizeGuideline(env),
     workflowSizeGuidelineDefault: !env.WORKFLOW_SIZE_GUIDELINE?.trim(),

@@ -115,7 +115,9 @@ export function GuildList() {
                   <span className="model">
                     {g.preset ? (
                       <>
-                        <ProviderTile provider={g.provider ?? providerOf(g.preset)} />
+                        <ProviderTile
+                          provider={g.provider ?? providerOf(g.preset)}
+                        />
                         {g.preset}
                       </>
                     ) : (

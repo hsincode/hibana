@@ -20,15 +20,26 @@ export function harnessFor(selection: Pick<Selection, "provider">): Harness {
  *  It also names the variant, because the session's agent is fixed when the
  *  session is created. Every other key is exactly what it was before this
  *  path existed, so those conversations survive the deploy that adds it. */
-export function conversationKey(selection: Selection, harness: Harness, variant?: WorkspaceVariant): string {
-  if (harness === "workspace") return JSON.stringify({ ...selection, harness, variant: variant ?? "plain" });
+export function conversationKey(
+  selection: Selection,
+  harness: Harness,
+  variant?: WorkspaceVariant,
+): string {
+  if (harness === "workspace")
+    return JSON.stringify({
+      ...selection,
+      harness,
+      variant: variant ?? "plain",
+    });
   return JSON.stringify(selection);
 }
 
 export function keyHarness(key: string): Harness {
   try {
     const parsed = JSON.parse(key);
-    return (Array.isArray(parsed) ? parsed[0] : parsed)?.harness === "workspace" ? "workspace" : "codex";
+    return (Array.isArray(parsed) ? parsed[0] : parsed)?.harness === "workspace"
+      ? "workspace"
+      : "codex";
   } catch {
     return "codex";
   }
@@ -36,5 +47,6 @@ export function keyHarness(key: string): Harness {
 
 /** The variant a Workspace turn runs as. `Runtime.resolve` is the only place
  *  that decides Haiku Ultra; everything else reads its answer through this. */
-export const workspaceVariant = (settings: { workspace_ultra?: boolean }): WorkspaceVariant =>
-  settings.workspace_ultra ? "ultra" : "plain";
+export const workspaceVariant = (settings: {
+  workspace_ultra?: boolean;
+}): WorkspaceVariant => (settings.workspace_ultra ? "ultra" : "plain");

@@ -12,10 +12,16 @@ interface Redirect {
 // bypass header are the deploy job's own and must reach the deployment.
 for (const app of ["api", "web"]) {
   test(`${app}: the *.vercel.app redirect lets the deploy job's check through`, async () => {
-    const config = (await Bun.file(join(import.meta.dir, `../apps/${app}/vercel.json`)).json()) as { redirects: Redirect[] };
-    const rule = config.redirects.find((r) => r.has?.some((h) => h.type === "host" && h.value === ".*\\.vercel\\.app"));
+    const config = (await Bun.file(
+      join(import.meta.dir, `../apps/${app}/vercel.json`),
+    ).json()) as { redirects: Redirect[] };
+    const rule = config.redirects.find((r) =>
+      r.has?.some((h) => h.type === "host" && h.value === ".*\\.vercel\\.app"),
+    );
     expect(rule).toBeDefined();
-    expect(rule!.missing).toEqual([{ type: "header", key: "x-vercel-protection-bypass" }]);
+    expect(rule!.missing).toEqual([
+      { type: "header", key: "x-vercel-protection-bypass" },
+    ]);
   });
 }
 
@@ -23,6 +29,8 @@ for (const app of ["api", "web"]) {
 // API request makes several queries in a row, so the functions run there too
 // (#93). On Vercel's default (iad1) each query would cross the Pacific.
 test("api: functions run in Tokyo, next to the database", async () => {
-  const config = (await Bun.file(join(import.meta.dir, "../apps/api/vercel.json")).json()) as { regions?: string[] };
+  const config = (await Bun.file(
+    join(import.meta.dir, "../apps/api/vercel.json"),
+  ).json()) as { regions?: string[] };
   expect(config.regions).toEqual(["hnd1"]);
 });

@@ -2,16 +2,16 @@
 
 2026-09-19にTypeScript版Hibanaへ切り替えました。
 
-| 対象 | 配置 |
-| --- | --- |
-| Web | https://bot.hsincode.com （Vercel `hsincode/hibana-web`、Root Directory `apps/web`。既定URLは https://hibana-web-mu.vercel.app） |
-| API | https://api.bot.hsincode.com （Vercel `hsincode/hibana-api`、Root Directory `apps/api`。既定URLは https://hibana-api.vercel.app。関数は `hnd1`） |
-| API の DB | Supabase（東京）の Postgres。2026-10 に Neon から移した（[database.md](database.md)、#93） |
-| bot | 既存VPSの `/opt/hibana`、`hibana.service` |
-| bot設定 | `/etc/hibana/bot.env` |
-| botデータ | `/var/lib/hibana` |
-| botの会話履歴・Auto Routing の経路 | `/var/lib/hibana/conversations.db`（SQLite。[ADR-0008](adr/0008-keep-conversations-across-restarts.md)） |
-| 退避データ | `/var/backups/hibana-migration`、旧 `/opt/deepseeker`・`/var/lib/deepseeker` |
+| 対象                               | 配置                                                                                                                                             |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Web                                | https://bot.hsincode.com （Vercel `hsincode/hibana-web`、Root Directory `apps/web`。既定URLは https://hibana-web-mu.vercel.app）                 |
+| API                                | https://api.bot.hsincode.com （Vercel `hsincode/hibana-api`、Root Directory `apps/api`。既定URLは https://hibana-api.vercel.app。関数は `hnd1`） |
+| API の DB                          | Supabase（東京）の Postgres。2026-10 に Neon から移した（[database.md](database.md)、#93）                                                       |
+| bot                                | 既存VPSの `/opt/hibana`、`hibana.service`                                                                                                        |
+| bot設定                            | `/etc/hibana/bot.env`                                                                                                                            |
+| botデータ                          | `/var/lib/hibana`                                                                                                                                |
+| botの会話履歴・Auto Routing の経路 | `/var/lib/hibana/conversations.db`（SQLite。[ADR-0008](adr/0008-keep-conversations-across-restarts.md)）                                         |
+| 退避データ                         | `/var/backups/hibana-migration`、旧 `/opt/deepseeker`・`/var/lib/deepseeker`                                                                     |
 
 `api.bot.hsincode.com` はCloudflare Universal SSL（`*.hsincode.com`）の対象外です。CloudflareではCNAME `api.bot` → `d9916215ed191ef6.vercel-dns-017.com` をDNS only（グレー雲）に設定し、Vercelの証明書で配信します。
 
@@ -275,21 +275,21 @@ bot は、会話履歴と Auto Routing の経路を `/var/lib/hibana/conversatio
 
 既定値と範囲は AI の案で、本人未確認です（#76）。範囲の外の値は、起動時にエラーになります。
 
-| 変数 | 既定 | 中身 |
-|---|---|---|
-| `ANTHROPIC_WORKSPACE_API_KEY` | なし | 鍵。無ければ、Workspace のターンは認証エラーになる |
-| `ANTHROPIC_WORKSPACE_BASE_URL` | `https://api.anthropic.com` | 接続先。末尾の `/v1` は付けても付けなくてもよい |
-| `ANTHROPIC_WORKSPACE_TURN_BUDGET_USD` | 1 | 1 ターンがセッションに足せる額（USD。0.05〜100） |
-| `ANTHROPIC_WORKSPACE_ULTRA_TURN_BUDGET_USD` | 3 | 同、Haiku Ultra のターン（0.05〜100） |
-| `ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD` | 5 | bot 全体の 1 日の額（UTC。0.01〜10000） |
-| `ANTHROPIC_WORKSPACE_MONTHLY_BUDGET_USD` | 50 | bot 全体の月の額（UTC。0.01〜100000） |
-| `ANTHROPIC_WORKSPACE_TURN_TIMEOUT_MS` | 1200000 | 1 ターンの時間（20 分） |
-| `ANTHROPIC_WORKSPACE_ULTRA_TURN_TIMEOUT_MS` | 3600000 | 同、Haiku Ultra のターン（60 分） |
-| `ANTHROPIC_WORKSPACE_MAX_CONCURRENT` | 2 | bot 全体で同時に動く Workspace のターン（1〜64） |
-| `ANTHROPIC_WORKSPACE_INPUT_MAX_CHARS` | 60000 | 1 回の発言の長さ。いちばん新しい発言 1 件が超えると断る。まだ送っていない発言と合わせて超えるときは、新しいものから収まるだけを送る（下の「データとログ」の再開の項） |
-| `ANTHROPIC_WORKSPACE_NETWORKING` | `unrestricted` | コンテナのネットワーク。`limited` にすると、下の一覧とパッケージの配布元だけになる |
-| `ANTHROPIC_WORKSPACE_ALLOWED_HOSTS` | 空 | `limited` のときに許すホスト名（カンマ区切り。スキーム・ポート・パスは書かない）。`limited` 以外で指定すると起動時にエラー |
-| `ANTHROPIC_WORKSPACE_WEB_ENABLED` | `true` | コンテナの web 検索と web 取得 |
+| 変数                                        | 既定                        | 中身                                                                                                                                                                  |
+| ------------------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ANTHROPIC_WORKSPACE_API_KEY`               | なし                        | 鍵。無ければ、Workspace のターンは認証エラーになる                                                                                                                    |
+| `ANTHROPIC_WORKSPACE_BASE_URL`              | `https://api.anthropic.com` | 接続先。末尾の `/v1` は付けても付けなくてもよい                                                                                                                       |
+| `ANTHROPIC_WORKSPACE_TURN_BUDGET_USD`       | 1                           | 1 ターンがセッションに足せる額（USD。0.05〜100）                                                                                                                      |
+| `ANTHROPIC_WORKSPACE_ULTRA_TURN_BUDGET_USD` | 3                           | 同、Haiku Ultra のターン（0.05〜100）                                                                                                                                 |
+| `ANTHROPIC_WORKSPACE_DAILY_BUDGET_USD`      | 5                           | bot 全体の 1 日の額（UTC。0.01〜10000）                                                                                                                               |
+| `ANTHROPIC_WORKSPACE_MONTHLY_BUDGET_USD`    | 50                          | bot 全体の月の額（UTC。0.01〜100000）                                                                                                                                 |
+| `ANTHROPIC_WORKSPACE_TURN_TIMEOUT_MS`       | 1200000                     | 1 ターンの時間（20 分）                                                                                                                                               |
+| `ANTHROPIC_WORKSPACE_ULTRA_TURN_TIMEOUT_MS` | 3600000                     | 同、Haiku Ultra のターン（60 分）                                                                                                                                     |
+| `ANTHROPIC_WORKSPACE_MAX_CONCURRENT`        | 2                           | bot 全体で同時に動く Workspace のターン（1〜64）                                                                                                                      |
+| `ANTHROPIC_WORKSPACE_INPUT_MAX_CHARS`       | 60000                       | 1 回の発言の長さ。いちばん新しい発言 1 件が超えると断る。まだ送っていない発言と合わせて超えるときは、新しいものから収まるだけを送る（下の「データとログ」の再開の項） |
+| `ANTHROPIC_WORKSPACE_NETWORKING`            | `unrestricted`              | コンテナのネットワーク。`limited` にすると、下の一覧とパッケージの配布元だけになる                                                                                    |
+| `ANTHROPIC_WORKSPACE_ALLOWED_HOSTS`         | 空                          | `limited` のときに許すホスト名（カンマ区切り。スキーム・ポート・パスは書かない）。`limited` 以外で指定すると起動時にエラー                                            |
+| `ANTHROPIC_WORKSPACE_WEB_ENABLED`           | `true`                      | コンテナの web 検索と web 取得                                                                                                                                        |
 
 - 金額は、セッションが報告する list cost（公開単価での額）で数えます。請求額とは一致しないことがあります
 - 1 ターンの 2 つの上限は、0.05 未満にできません（枠が 5 セント未満のターンは始めないため）。**`bot.env` に 0.05 未満の値があると、bot は起動時のエラーで止まります。** 配信の前に確かめてください（実際の `bot.env` の値は、AI は確かめていません）。1 日と月の上限は 0.01 まで下げられます

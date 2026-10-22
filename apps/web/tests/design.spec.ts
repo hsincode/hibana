@@ -1,6 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
-import { emptyGuild, emptyUserOverride, subagentModePatch } from "@hibana/shared/settings";
+import {
+  emptyGuild,
+  emptyUserOverride,
+  subagentModePatch,
+} from "@hibana/shared/settings";
 import { AUTO_ROUTE_FALLBACK } from "@hibana/shared/catalog";
 import { GUILD_PAGES, GUILD_SETTINGS, guildPath } from "../src/nav";
 
@@ -62,11 +66,19 @@ async function mockApi(page: Page, retainSettings = false) {
     // The models page also lists ChatGPT master accounts.
     else if (path === "/api/chatgpt/accounts") data = { accounts: [] };
     else if (path.endsWith("/settings")) {
-      const saved = { ...emptyGuild(), selection: { provider: "deepseek", model: "DeepSeek V4", effort: "max" }, ...(retainSettings ? settingsByPath.get(path) : {}), ...body };
+      const saved = {
+        ...emptyGuild(),
+        selection: {
+          provider: "deepseek",
+          model: "DeepSeek V4",
+          effort: "max",
+        },
+        ...(retainSettings ? settingsByPath.get(path) : {}),
+        ...body,
+      };
       settingsByPath.set(path, saved);
       data = { settings: saved };
-    }
-    else if (path.endsWith("/skills"))
+    } else if (path.endsWith("/skills"))
       data = {
         skills: [
           {
@@ -120,33 +132,71 @@ for (const [url, path, scope] of [
   ["/me", "/api/me/settings", "personal"],
 ] as const) {
   for (const width of [1440, 390]) {
-    test(`Jev modes toggle independently and persist: ${scope}, ${width}px`, async ({ page }) => {
+    test(`Jev modes toggle independently and persist: ${scope}, ${width}px`, async ({
+      page,
+    }) => {
       const writes = await mockApi(page, true);
       await page.setViewportSize({ width, height: 900 });
       await page.goto(url);
-      for (const [name, key] of [["Jev 判定", "jev_enabled"], ["Jev 行動選択モード", "jev_task_enabled"]] as const) {
+      for (const [name, key] of [
+        ["Jev 判定", "jev_enabled"],
+        ["Jev 行動選択モード", "jev_task_enabled"],
+      ] as const) {
         const control = page.getByRole("group", { name, exact: true });
-        const other = page.getByRole("group", { name: name === "Jev 判定" ? "Jev 行動選択モード" : "Jev 判定", exact: true });
+        const other = page.getByRole("group", {
+          name: name === "Jev 判定" ? "Jev 行動選択モード" : "Jev 判定",
+          exact: true,
+        });
         const initial = key === "jev_enabled";
-        await expect(control.getByRole("button", { name: initial ? "ON" : "OFF", exact: true })).toHaveAttribute("aria-pressed", "true");
-        await expect(control.getByRole("button")).toHaveCount(scope === "personal" ? 3 : 2);
+        await expect(
+          control.getByRole("button", {
+            name: initial ? "ON" : "OFF",
+            exact: true,
+          }),
+        ).toHaveAttribute("aria-pressed", "true");
+        await expect(control.getByRole("button")).toHaveCount(
+          scope === "personal" ? 3 : 2,
+        );
         for (const value of [!initial, initial]) {
           const label = value ? "ON" : "OFF";
           const count = writes.length;
-          await control.getByRole("button", { name: label, exact: true }).click();
-          await expect(control.getByRole("button", { name: label, exact: true })).toHaveAttribute("aria-pressed", "true");
-          await expect.poll(() => writes.slice(count).some((w) => w.path === path && w.body[key] === value)).toBe(true);
-          await expect(other.getByRole("button", { name: initial ? "OFF" : "ON", exact: true })).toHaveAttribute("aria-pressed", "true");
+          await control
+            .getByRole("button", { name: label, exact: true })
+            .click();
+          await expect(
+            control.getByRole("button", { name: label, exact: true }),
+          ).toHaveAttribute("aria-pressed", "true");
+          await expect
+            .poll(() =>
+              writes
+                .slice(count)
+                .some((w) => w.path === path && w.body[key] === value),
+            )
+            .toBe(true);
+          await expect(
+            other.getByRole("button", {
+              name: initial ? "OFF" : "ON",
+              exact: true,
+            }),
+          ).toHaveAttribute("aria-pressed", "true");
           await page.reload();
-          await expect(control.getByRole("button", { name: label, exact: true })).toHaveAttribute("aria-pressed", "true");
+          await expect(
+            control.getByRole("button", { name: label, exact: true }),
+          ).toHaveAttribute("aria-pressed", "true");
         }
       }
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
     });
   }
 }
 
-test("personal defaults follow the server until a control is changed", async ({ page }) => {
+test("personal defaults follow the server until a control is changed", async ({
+  page,
+}) => {
   const writes: { path: string; body: Record<string, unknown> }[] = [];
   let settings: Record<string, unknown> = {
     selection: null,
@@ -165,50 +215,118 @@ test("personal defaults follow the server until a control is changed", async ({ 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
-    const body = request.method() === "PATCH" ? request.postDataJSON() : undefined;
+    const body =
+      request.method() === "PATCH" ? request.postDataJSON() : undefined;
     if (body) {
       writes.push({ path, body });
       settings = { ...settings, ...body };
-      if (body.preset === "reset") settings = { ...settings, selection: null, effort: null };
+      if (body.preset === "reset")
+        settings = { ...settings, selection: null, effort: null };
       if (typeof body.preset === "string" && body.preset !== "reset") {
         const preset = catalog.presets.find((p) => p.id === body.preset);
-        if (preset) settings.selection = { provider: preset.provider, model: preset.model, effort: "max" };
+        if (preset)
+          settings.selection = {
+            provider: preset.provider,
+            model: preset.model,
+            effort: "max",
+          };
       }
       if (body.effort !== undefined) settings.effort = body.effort;
     }
-    const data = path === "/api/me"
-      ? { id: "1", username: "xuanling", avatar: null, role: "admin", can_manage_users: true }
-      : path === "/api/catalog"
-        ? catalog
-        : path === "/api/me/settings"
-          ? { settings }
-          : { guilds };
+    const data =
+      path === "/api/me"
+        ? {
+            id: "1",
+            username: "xuanling",
+            avatar: null,
+            role: "admin",
+            can_manage_users: true,
+          }
+        : path === "/api/catalog"
+          ? catalog
+          : path === "/api/me/settings"
+            ? { settings }
+            : { guilds };
     await route.fulfill({ json: data });
   });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/me");
-  const mode = page.getByRole("radiogroup", { name: "サブエージェント", exact: true });
-  await expect(mode.getByRole("radio", { name: /^デフォルト/ })).toHaveAttribute("aria-checked", "true");
+  const mode = page.getByRole("radiogroup", {
+    name: "サブエージェント",
+    exact: true,
+  });
+  await expect(
+    mode.getByRole("radio", { name: /^デフォルト/ }),
+  ).toHaveAttribute("aria-checked", "true");
   // The model follows the server: the card says so, and the picker has デフォルト chosen.
-  await expect(page.locator('[data-row="me-preset"] .model-card')).toContainText("デフォルト");
+  await expect(
+    page.locator('[data-row="me-preset"] .model-card'),
+  ).toContainText("デフォルト");
   await page.getByRole("button", { name: "モデルを変更" }).click();
-  await expect(page.getByRole("dialog", { name: "モデルを選ぶ" }).getByRole("button", { name: /^デフォルト/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page
+      .getByRole("dialog", { name: "モデルを選ぶ" })
+      .getByRole("button", { name: /^デフォルト/ }),
+  ).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("group", { name: "Jev 判定" }).getByRole("button", { name: "デフォルト", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page
+      .getByRole("group", { name: "Jev 判定" })
+      .getByRole("button", { name: "デフォルト", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
   await mode.getByRole("radio", { name: /^multi/ }).click();
-  await expect.poll(() => writes.some((w) => w.body.multi_agent === true && w.body.subagent_enabled === true)).toBe(true);
-  await expect(page.getByText("役割ごとの設定はサーバーに従っています。")).toBeVisible();
+  await expect
+    .poll(() =>
+      writes.some(
+        (w) => w.body.multi_agent === true && w.body.subagent_enabled === true,
+      ),
+    )
+    .toBe(true);
+  await expect(
+    page.getByText("役割ごとの設定はサーバーに従っています。"),
+  ).toBeVisible();
   await mode.getByRole("radio", { name: /^デフォルト/ }).click();
-  await expect.poll(() => writes.some((w) => w.body.subagent_enabled === null && w.body.ultra_mode === null && w.body.multi_agent === null)).toBe(true);
-  await page.getByRole("group", { name: "Jev 判定" }).getByRole("button", { name: "OFF", exact: true }).click();
-  await expect.poll(() => writes.some((w) => w.body.jev_enabled === false)).toBe(true);
-  await page.getByRole("group", { name: "Jev 判定" }).getByRole("button", { name: "デフォルト", exact: true }).click();
-  await expect.poll(() => writes.some((w) => w.path === "/api/me/settings" && w.body.jev_enabled === null)).toBe(true);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await expect
+    .poll(() =>
+      writes.some(
+        (w) =>
+          w.body.subagent_enabled === null &&
+          w.body.ultra_mode === null &&
+          w.body.multi_agent === null,
+      ),
+    )
+    .toBe(true);
+  await page
+    .getByRole("group", { name: "Jev 判定" })
+    .getByRole("button", { name: "OFF", exact: true })
+    .click();
+  await expect
+    .poll(() => writes.some((w) => w.body.jev_enabled === false))
+    .toBe(true);
+  await page
+    .getByRole("group", { name: "Jev 判定" })
+    .getByRole("button", { name: "デフォルト", exact: true })
+    .click();
+  await expect
+    .poll(() =>
+      writes.some(
+        (w) => w.path === "/api/me/settings" && w.body.jev_enabled === null,
+      ),
+    )
+    .toBe(true);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
   await page.setViewportSize({ width: 390, height: 900 });
   await page.reload();
   await expect(mode.getByRole("radio", { name: /^デフォルト/ })).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
 });
 
 test("MCP endpoint and enable setting save on desktop and mobile", async ({
@@ -221,7 +339,9 @@ test("MCP endpoint and enable setting save on desktop and mobile", async ({
     await page.goto("/g/100#mcp");
     await expect(page).toHaveURL(/\/g\/100\/tools#mcp$/);
     await page.reload();
-    await expect(page.getByRole("link", { name: "速度 / 検証" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "速度 / 検証" })).toHaveCount(
+      0,
+    );
     await expect(page.locator("#runtime")).toHaveCount(0);
     await expect(page.getByRole("group", { name: "fast" })).toHaveCount(0);
     await expect(page.getByRole("group", { name: "verify" })).toHaveCount(0);
@@ -447,9 +567,7 @@ test("capture review gallery", async ({ page }) => {
       );
       for (const [name, path, title] of routes) {
         await page.goto(path);
-        await expect(
-          page.locator("h1"),
-        ).toBeVisible();
+        await expect(page.locator("h1")).toBeVisible();
         await expect(page.locator(".skeleton")).toHaveCount(0);
         if (path === "/g/100/skills")
           await expect(
@@ -503,14 +621,22 @@ test("capture review gallery", async ({ page }) => {
     ).toBeVisible();
     await capture("select", "設定ドロップダウン", false);
     await page.getByRole("option", { name: "high", exact: true }).click();
-    await expect(page.locator(".topbar").getByRole("status")).toContainText("保存済み");
+    await expect(page.locator(".topbar").getByRole("status")).toContainText(
+      "保存済み",
+    );
     await capture("saved", "保存の表示", false);
-    await page.getByRole("button", { name: "検索・移動（コマンドパレット）" }).click();
-    await expect(page.getByRole("dialog", { name: "コマンドパレット" })).toBeVisible();
+    await page
+      .getByRole("button", { name: "検索・移動（コマンドパレット）" })
+      .click();
+    await expect(
+      page.getByRole("dialog", { name: "コマンドパレット" }),
+    ).toBeVisible();
     await capture("palette", "コマンドパレット", false);
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "モデルを変更" }).click();
-    await expect(page.getByRole("dialog", { name: "モデルを選ぶ" })).toBeVisible();
+    await expect(
+      page.getByRole("dialog", { name: "モデルを選ぶ" }),
+    ).toBeVisible();
     await capture("model-picker", "モデルを選ぶダイアログ", false);
     await page.keyboard.press("Escape");
     await page.goto("/g/100/skills");
@@ -548,40 +674,117 @@ test("capture review gallery", async ({ page }) => {
   );
 });
 
-
-test("subagent model and effort policies save independently on desktop and mobile", async ({ page }) => {
+test("subagent model and effort policies save independently on desktop and mobile", async ({
+  page,
+}) => {
   const writes = await mockApi(page, true);
-  for (const [url, path, width] of [["/g/100", "/api/guilds/100/settings", 1440], ["/me", "/api/me/settings", 390]] as const) {
+  for (const [url, path, width] of [
+    ["/g/100", "/api/guilds/100/settings", 1440],
+    ["/me", "/api/me/settings", 390],
+  ] as const) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto(url);
     await expect(page.locator("body")).not.toContainText("継承");
-    for (const [label, mode] of [["同一（親エージェントと同じ）", "same"], ["任意（エージェントが選択）", "auto"], ["固定（指定したモデル）", "fixed"]] as const) {
-      await page.getByRole("combobox", { name: "サブエージェントのモデル選択方式" }).click();
+    for (const [label, mode] of [
+      ["同一（親エージェントと同じ）", "same"],
+      ["任意（エージェントが選択）", "auto"],
+      ["固定（指定したモデル）", "fixed"],
+    ] as const) {
+      await page
+        .getByRole("combobox", { name: "サブエージェントのモデル選択方式" })
+        .click();
       await page.getByRole("option", { name: label, exact: true }).click();
-      await expect.poll(() => writes.some(w => w.path === path && (w.body.subagent_model as { mode?: string })?.mode === mode)).toBe(true);
+      await expect
+        .poll(() =>
+          writes.some(
+            (w) =>
+              w.path === path &&
+              (w.body.subagent_model as { mode?: string })?.mode === mode,
+          ),
+        )
+        .toBe(true);
     }
     await page.getByRole("button", { name: /^固定モデル:/ }).click();
     const dialog = page.getByRole("dialog");
     await dialog.getByRole("button", { name: /GPT/ }).click();
-    await expect.poll(() => writes.some(w => w.path === path && (w.body.subagent_model as { preset?: string })?.preset === "gpt")).toBe(true);
-    await page.getByRole("combobox", { name: "サブエージェントの effort 選択方式" }).click();
-    await page.getByRole("option", { name: "固定（指定した effort）", exact: true }).click();
-    await page.getByRole("combobox", { name: "サブエージェントの固定 effort" }).click();
+    await expect
+      .poll(() =>
+        writes.some(
+          (w) =>
+            w.path === path &&
+            (w.body.subagent_model as { preset?: string })?.preset === "gpt",
+        ),
+      )
+      .toBe(true);
+    await page
+      .getByRole("combobox", { name: "サブエージェントの effort 選択方式" })
+      .click();
+    await page
+      .getByRole("option", { name: "固定（指定した effort）", exact: true })
+      .click();
+    await page
+      .getByRole("combobox", { name: "サブエージェントの固定 effort" })
+      .click();
     await page.getByRole("option", { name: "high", exact: true }).click();
-    await expect.poll(() => writes.some(w => w.path === path && (w.body.subagent_effort as { effort?: string })?.effort === "high")).toBe(true);
-    await expect(page.getByRole("button", { name: /^固定モデル:/ })).toContainText("GPT");
-    for (const label of ["任意（エージェントが選択）", "同一（親エージェントと同じ）"]) {
-      await page.getByRole("combobox", { name: "サブエージェントの effort 選択方式" }).click();
+    await expect
+      .poll(() =>
+        writes.some(
+          (w) =>
+            w.path === path &&
+            (w.body.subagent_effort as { effort?: string })?.effort === "high",
+        ),
+      )
+      .toBe(true);
+    await expect(
+      page.getByRole("button", { name: /^固定モデル:/ }),
+    ).toContainText("GPT");
+    for (const label of [
+      "任意（エージェントが選択）",
+      "同一（親エージェントと同じ）",
+    ]) {
+      await page
+        .getByRole("combobox", { name: "サブエージェントの effort 選択方式" })
+        .click();
       await page.getByRole("option", { name: label, exact: true }).click();
-      await expect(page.getByRole("combobox", { name: "サブエージェントの固定 effort" })).toHaveCount(0);
+      await expect(
+        page.getByRole("combobox", { name: "サブエージェントの固定 effort" }),
+      ).toHaveCount(0);
     }
-    for (const name of ["サブエージェントのモデル選択方式", "サブエージェントの effort 選択方式"]) {
+    for (const name of [
+      "サブエージェントのモデル選択方式",
+      "サブエージェントの effort 選択方式",
+    ]) {
       await page.getByRole("combobox", { name, exact: true }).click();
-      await page.getByRole("option", { name: "任意（エージェントが選択）", exact: true }).click();
+      await page
+        .getByRole("option", {
+          name: "任意（エージェントが選択）",
+          exact: true,
+        })
+        .click();
     }
-    await expect.poll(() => writes.some(w => w.path === path && (w.body.subagent_model as { mode?: string })?.mode === "auto")).toBe(true);
-    await expect.poll(() => writes.some(w => w.path === path && (w.body.subagent_effort as { mode?: string })?.mode === "auto")).toBe(true);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await expect
+      .poll(() =>
+        writes.some(
+          (w) =>
+            w.path === path &&
+            (w.body.subagent_model as { mode?: string })?.mode === "auto",
+        ),
+      )
+      .toBe(true);
+    await expect
+      .poll(() =>
+        writes.some(
+          (w) =>
+            w.path === path &&
+            (w.body.subagent_effort as { mode?: string })?.mode === "auto",
+        ),
+      )
+      .toBe(true);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
   }
 });
 
@@ -590,17 +793,33 @@ for (const [url, path, scope] of [
   ["/me", "/api/me/settings", "personal"],
 ] as const) {
   for (const width of [1440, 390]) {
-    test(`Subagent modes preserve selected effort and Jev settings: ${scope}, ${width}px`, async ({ page }) => {
+    test(`Subagent modes preserve selected effort and Jev settings: ${scope}, ${width}px`, async ({
+      page,
+    }) => {
       const writes = await mockApi(page, true);
       await page.setViewportSize({ width, height: 900 });
       await page.goto(url);
-      const mode = page.getByRole("radiogroup", { name: "サブエージェント", exact: true });
-      const effort = page.getByRole("combobox", { name: "effort", exact: true });
-      await expect(mode.getByRole("radio", { checked: true })).toHaveText(/^on/);
+      const mode = page.getByRole("radiogroup", {
+        name: "サブエージェント",
+        exact: true,
+      });
+      const effort = page.getByRole("combobox", {
+        name: "effort",
+        exact: true,
+      });
+      await expect(mode.getByRole("radio", { checked: true })).toHaveText(
+        /^on/,
+      );
       await effort.click();
-      await expect(page.getByRole("option", { name: "ultra", exact: true })).toHaveCount(0);
+      await expect(
+        page.getByRole("option", { name: "ultra", exact: true }),
+      ).toHaveCount(0);
       await page.getByRole("option", { name: "low", exact: true }).click();
-      await expect.poll(() => writes.some(w => w.path === path && w.body.effort === "low")).toBe(true);
+      await expect
+        .poll(() =>
+          writes.some((w) => w.path === path && w.body.effort === "low"),
+        )
+        .toBe(true);
       for (const [label, enabled, ultra, multi] of [
         ["ultra", true, true, false],
         ["multi", true, true, true],
@@ -608,89 +827,189 @@ for (const [url, path, scope] of [
         ["on", true, false, false],
       ] as const) {
         const count = writes.length;
-        await mode.getByRole("radio", { name: new RegExp(`^${label}`) }).click();
+        await mode
+          .getByRole("radio", { name: new RegExp(`^${label}`) })
+          .click();
         // Every choice writes all three switches, so leaving multi clears it.
-        await expect.poll(() => writes.slice(count).some(w => w.path === path && w.body.ultra_mode === ultra &&
-          w.body.subagent_enabled === enabled && w.body.multi_agent === multi)).toBe(true);
+        await expect
+          .poll(() =>
+            writes
+              .slice(count)
+              .some(
+                (w) =>
+                  w.path === path &&
+                  w.body.ultra_mode === ultra &&
+                  w.body.subagent_enabled === enabled &&
+                  w.body.multi_agent === multi,
+              ),
+          )
+          .toBe(true);
         await page.reload();
-        await expect(mode.getByRole("radio", { checked: true })).toHaveText(new RegExp(`^${label}`));
+        await expect(mode.getByRole("radio", { checked: true })).toHaveText(
+          new RegExp(`^${label}`),
+        );
         // Role overrides only exist for the Multi-Agent team.
-        await expect(page.getByRole("combobox", { name: "検証のモデル" })).toHaveCount(multi ? 1 : 0);
+        await expect(
+          page.getByRole("combobox", { name: "検証のモデル" }),
+        ).toHaveCount(multi ? 1 : 0);
         await expect(effort).toHaveText("low");
         for (const name of ["Jev 判定", "Jev 行動選択モード"])
-          await expect(page.getByRole("group", { name, exact: true }).getByRole("button", { name: name === "Jev 判定" ? "ON" : "OFF", exact: true })).toHaveAttribute("aria-pressed", "true");
+          await expect(
+            page.getByRole("group", { name, exact: true }).getByRole("button", {
+              name: name === "Jev 判定" ? "ON" : "OFF",
+              exact: true,
+            }),
+          ).toHaveAttribute("aria-pressed", "true");
       }
       await mode.getByRole("radio", { name: /^multi/ }).click();
-      await expect(page.getByText("サブエージェントが multi のときは並列の分担を優先するため使用しません。", { exact: false })).toBeVisible();
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await expect(
+        page.getByText(
+          "サブエージェントが multi のときは並列の分担を優先するため使用しません。",
+          { exact: false },
+        ),
+      ).toBeVisible();
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
     });
   }
 }
 
-test("guild settings show the authorized server name and icon on direct navigation", async ({ page }) => {
+test("guild settings show the authorized server name and icon on direct navigation", async ({
+  page,
+}) => {
   await mockApi(page);
-  await page.route("**/api/guilds", route => route.fulfill({ json: { guilds: [
-    { ...guilds[0], icon: "fixture-icon" }, guilds[1],
-  ] } }));
-  await page.route("https://cdn.discordapp.com/icons/**", route => route.fulfill({
-    contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect width="48" height="48" fill="blue"/></svg>',
-  }));
+  await page.route("**/api/guilds", (route) =>
+    route.fulfill({
+      json: { guilds: [{ ...guilds[0], icon: "fixture-icon" }, guilds[1]] },
+    }),
+  );
+  await page.route("https://cdn.discordapp.com/icons/**", (route) =>
+    route.fulfill({
+      contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect width="48" height="48" fill="blue"/></svg>',
+    }),
+  );
   await page.goto("/g/100");
-  await expect(page.getByRole("heading", { name: "Design workspace", exact: true })).toBeVisible();
-  await expect(page.locator(".guild-heading img")).toHaveAttribute("src", /\/icons\/100\/fixture-icon/);
+  await expect(
+    page.getByRole("heading", { name: "Design workspace", exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".guild-heading img")).toHaveAttribute(
+    "src",
+    /\/icons\/100\/fixture-icon/,
+  );
   await expect(page).toHaveTitle(/Design workspace/);
   await page.goto("/g/200");
-  await expect(page.getByRole("heading", { name: "開発コミュニティ", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "開発コミュニティ", exact: true }),
+  ).toBeVisible();
   await expect(page.locator(".guild-heading .avatar")).toHaveText("開");
 });
 
-for (const [url, path] of [["/g/100", "/api/guilds/100/settings"], ["/me", "/api/me/settings"]]) {
+for (const [url, path] of [
+  ["/g/100", "/api/guilds/100/settings"],
+  ["/me", "/api/me/settings"],
+]) {
   test(`Service Tier saves and survives reload: ${url}`, async ({ page }) => {
     const writes = await mockApi(page, true);
     await page.goto(url!);
-    const tier = page.getByRole("combobox", { name: "Service Tier", exact: true });
+    const tier = page.getByRole("combobox", {
+      name: "Service Tier",
+      exact: true,
+    });
     await expect(tier).toHaveText("auto");
     for (const value of ["priority", "flex", "ultrafast", "default", "auto"]) {
       const count = writes.length;
       await tier.click();
       await page.getByRole("option", { name: value, exact: true }).click();
-      await expect.poll(() => writes.slice(count).some(w => w.path === path && w.body.service_tier === value)).toBe(true);
+      await expect
+        .poll(() =>
+          writes
+            .slice(count)
+            .some((w) => w.path === path && w.body.service_tier === value),
+        )
+        .toBe(true);
       await page.reload();
       await expect(tier).toHaveText(value);
     }
   });
 }
 
-for (const [url, path, width] of [["/g/100", "/api/guilds/100/settings", 1440], ["/me", "/api/me/settings", 390]] as const)
-  test(`Multi-Agent role overrides save per role and show the effective model: ${width}px`, async ({ page }) => {
+for (const [url, path, width] of [
+  ["/g/100", "/api/guilds/100/settings", 1440],
+  ["/me", "/api/me/settings", 390],
+] as const)
+  test(`Multi-Agent role overrides save per role and show the effective model: ${width}px`, async ({
+    page,
+  }) => {
     const writes = await mockApi(page, true);
     await page.setViewportSize({ width, height: 900 });
     await page.goto(url);
-    await page.getByRole("radiogroup", { name: "サブエージェント" }).getByRole("radio", { name: /^multi/ }).click();
+    await page
+      .getByRole("radiogroup", { name: "サブエージェント" })
+      .getByRole("radio", { name: /^multi/ })
+      .click();
     // Only the reviewer on another model: the others keep the common policy.
     await page.getByRole("combobox", { name: "検証のモデル" }).click();
     await page.getByRole("option", { name: "固定", exact: true }).click();
     await page.getByRole("button", { name: /^検証の固定モデル:/ }).click();
-    await page.getByRole("dialog").getByRole("button", { name: /Claude Opus/ }).click();
-    await expect.poll(() => writes.some(w => w.path === path &&
-      JSON.stringify((w.body.multi_agent_roles as Record<string, unknown>)?.reviewer) === JSON.stringify({ model: { mode: "fixed", preset: "claude" }, effort: { mode: "default" } }))).toBe(true);
-    await expect(page.getByLabel("検証の実際の設定")).toContainText("Claude Opus");
-    await expect(page.getByLabel("作成の実際の設定")).toContainText("DeepSeek V4（任意）");
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: /Claude Opus/ })
+      .click();
+    await expect
+      .poll(() =>
+        writes.some(
+          (w) =>
+            w.path === path &&
+            JSON.stringify(
+              (w.body.multi_agent_roles as Record<string, unknown>)?.reviewer,
+            ) ===
+              JSON.stringify({
+                model: { mode: "fixed", preset: "claude" },
+                effort: { mode: "default" },
+              }),
+        ),
+      )
+      .toBe(true);
+    await expect(page.getByLabel("検証の実際の設定")).toContainText(
+      "Claude Opus",
+    );
+    await expect(page.getByLabel("作成の実際の設定")).toContainText(
+      "DeepSeek V4（任意）",
+    );
     await page.getByRole("combobox", { name: "調査の effort" }).click();
     await page.getByRole("option", { name: "固定", exact: true }).click();
     await page.getByRole("combobox", { name: "調査の固定 effort" }).click();
     await page.getByRole("option", { name: "low", exact: true }).click();
     await expect(page.getByLabel("調査の実際の設定")).toContainText("low");
-    const last = writes.filter(w => w.path === path && w.body.multi_agent_roles).at(-1)!.body.multi_agent_roles as Record<string, { model: { mode: string } }>;
+    const last = writes
+      .filter((w) => w.path === path && w.body.multi_agent_roles)
+      .at(-1)!.body.multi_agent_roles as Record<
+      string,
+      { model: { mode: string } }
+    >;
     // The reviewer override survives the explorer edit.
     expect(last.reviewer!.model.mode).toBe("fixed");
     await page.reload();
-    await expect(page.getByLabel("検証の実際の設定")).toContainText("Claude Opus");
+    await expect(page.getByLabel("検証の実際の設定")).toContainText(
+      "Claude Opus",
+    );
     await page.getByRole("combobox", { name: "検証のモデル" }).click();
     await page.getByRole("option", { name: "親と同じ", exact: true }).click();
-    await expect(page.getByLabel("検証の実際の設定")).toContainText("DeepSeek V4");
-    await expect(page.getByRole("button", { name: /^検証の固定モデル:/ })).toHaveCount(0);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await expect(page.getByLabel("検証の実際の設定")).toContainText(
+      "DeepSeek V4",
+    );
+    await expect(
+      page.getByRole("button", { name: /^検証の固定モデル:/ }),
+    ).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
   });
 
 /* ============================================================
@@ -698,11 +1017,17 @@ for (const [url, path, width] of [["/g/100", "/api/guilds/100/settings", 1440], 
    the command palette, the server switcher and how a save is shown.
    ============================================================ */
 
-test("server settings are split into five pages, reachable from the sidebar and the tab strip", async ({ page }) => {
+test("server settings are split into five pages, reachable from the sidebar and the tab strip", async ({
+  page,
+}) => {
   await mockApi(page);
   let settingsReads = 0;
   page.on("request", (request) => {
-    if (request.method() === "GET" && new URL(request.url()).pathname === "/api/guilds/100/settings") settingsReads += 1;
+    if (
+      request.method() === "GET" &&
+      new URL(request.url()).pathname === "/api/guilds/100/settings"
+    )
+      settingsReads += 1;
   });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/g/100");
@@ -710,9 +1035,15 @@ test("server settings are split into five pages, reachable from the sidebar and 
   const tabs = page.getByRole("navigation", { name: "サーバーのページ" });
   // One heading that only that page has.
   const headings: Record<string, string> = {
-    "": "/switch モデル", tools: "MCP", context: "サーバーコンテキスト", skills: "スキル", artifacts: "成果物",
+    "": "/switch モデル",
+    tools: "MCP",
+    context: "サーバーコンテキスト",
+    skills: "スキル",
+    artifacts: "成果物",
   };
-  await expect(page.getByRole("heading", { name: "/switch モデル", level: 2 })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "/switch モデル", level: 2 }),
+  ).toBeVisible();
   const readsAfterLoad = settingsReads;
   await expect(tabs).toBeHidden();
   for (const p of GUILD_PAGES) {
@@ -721,8 +1052,16 @@ test("server settings are split into five pages, reachable from the sidebar and 
     await expect(page).toHaveURL(new RegExp(`${guildPath("100", p.path)}$`));
     await expect(link).toHaveAttribute("aria-current", "page");
     await expect(nav.locator('[aria-current="page"]')).toHaveCount(1);
-    await expect(page.getByRole("heading", { name: "Design workspace", level: 1 })).toBeVisible();
-    await expect(page.getByRole("heading", { name: headings[p.path]!, level: 2, exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Design workspace", level: 1 }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", {
+        name: headings[p.path]!,
+        level: 2,
+        exact: true,
+      }),
+    ).toBeVisible();
     await expect(page).toHaveTitle(`Design workspace · ${p.label} · Hibana`);
   }
   // The pages share one copy of the settings: moving between them does not load it again.
@@ -731,32 +1070,48 @@ test("server settings are split into five pages, reachable from the sidebar and 
   // Narrow screens: the sidebar is a drawer, so the same five pages are a tab strip.
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(nav).toBeHidden();
-  await expect(tabs.getByRole("link")).toHaveText(GUILD_PAGES.map((p) => p.label));
+  await expect(tabs.getByRole("link")).toHaveText(
+    GUILD_PAGES.map((p) => p.label),
+  );
   await tabs.getByRole("link", { name: "ツールと挙動" }).click();
   await expect(page).toHaveURL(/\/g\/100\/tools$/);
-  await expect(tabs.getByRole("link", { name: "ツールと挙動" })).toHaveAttribute("aria-current", "page");
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await expect(
+    tabs.getByRole("link", { name: "ツールと挙動" }),
+  ).toHaveAttribute("aria-current", "page");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
 });
 
 // The first of the five pages is covered with the other routes in "responsive pages";
 // the four new ones get their own test so that one stays within its time on CI (#56).
-test("the pages split off from server settings fit every width", async ({ page }) => {
+test("the pages split off from server settings fit every width", async ({
+  page,
+}) => {
   await mockApi(page);
   for (const width of [1440, 768, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     for (const p of GUILD_PAGES.filter((p) => p.path !== "")) {
       await page.goto(guildPath("100", p.path));
-      await expect(page.getByRole("heading", { name: "Design workspace", level: 1 })).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: "Design workspace", level: 1 }),
+      ).toBeVisible();
       await expect(page.locator(".skeleton")).toHaveCount(0);
       expect(
-        await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
         `${p.label} at ${width}px`,
       ).toBe(true);
     }
   }
 });
 
-test("links from the one-page layout and the old skills page lead to where the content now lives", async ({ page }) => {
+test("links from the one-page layout and the old skills page lead to where the content now lives", async ({
+  page,
+}) => {
   await mockApi(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   for (const [from, to, section] of [
@@ -773,21 +1128,33 @@ test("links from the one-page layout and the old skills page lead to where the c
   }
   // /skills used to ask for a server; it now opens the server last looked at.
   await page.goto("/g/200");
-  await expect(page.getByRole("heading", { name: "開発コミュニティ", level: 1 })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "開発コミュニティ", level: 1 }),
+  ).toBeVisible();
   await page.goto("/skills");
   await expect(page).toHaveURL(/\/g\/200\/skills$/);
-  await expect(page.getByRole("button", { name: "importable-skill", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "importable-skill", exact: true }),
+  ).toBeVisible();
   await page.goto("/g/100/unknown");
-  await expect(page.getByRole("heading", { name: "ページが見つからない" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "ページが見つからない" }),
+  ).toBeVisible();
 });
 
-test("command palette reaches servers, pages and every listed setting from the keyboard", async ({ page }) => {
+test("command palette reaches servers, pages and every listed setting from the keyboard", async ({
+  page,
+}) => {
   test.setTimeout(60_000);
   await mockApi(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/g/100");
-  await expect(page.getByRole("heading", { name: "/switch モデル", level: 2 })).toBeVisible();
-  const opener = page.getByRole("button", { name: "検索・移動（コマンドパレット）" });
+  await expect(
+    page.getByRole("heading", { name: "/switch モデル", level: 2 }),
+  ).toBeVisible();
+  const opener = page.getByRole("button", {
+    name: "検索・移動（コマンドパレット）",
+  });
   const palette = page.getByRole("dialog", { name: "コマンドパレット" });
   const input = palette.getByRole("combobox");
 
@@ -800,7 +1167,9 @@ test("command palette reaches servers, pages and every listed setting from the k
   await expect(palette).toBeHidden();
   await expect(page).toHaveURL(/\/g\/100\/tools$/);
   await expect(page.locator('[data-row="g-exa"]')).toHaveClass(/is-target/);
-  await expect(page.getByRole("combobox", { name: "exa", exact: true })).toBeFocused();
+  await expect(
+    page.getByRole("combobox", { name: "exa", exact: true }),
+  ).toBeFocused();
 
   // The arrow keys move through the candidates and wrap at the ends.
   await opener.click();
@@ -818,13 +1187,17 @@ test("command palette reaches servers, pages and every listed setting from the k
   await expect(options).toHaveCount(1);
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/g\/200$/);
-  await expect(page.getByRole("heading", { name: "開発コミュニティ", level: 1 })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "開発コミュニティ", level: 1 }),
+  ).toBeVisible();
   await expect(page.locator("#main-content")).toBeFocused();
 
   // Pages the account may not open are not offered (this account cannot see 利用料).
   await page.keyboard.press("Control+k");
   await input.fill("ユーザー");
-  await expect(palette.getByRole("option", { name: /^ユーザー/ })).toHaveCount(1);
+  await expect(palette.getByRole("option", { name: /^ユーザー/ })).toHaveCount(
+    1,
+  );
   await input.fill("利用料");
   await expect(palette.getByRole("option")).toHaveCount(0);
   await expect(palette.getByText("一致するものがありません。")).toBeVisible();
@@ -842,13 +1215,25 @@ test("command palette reaches servers, pages and every listed setting from the k
   for (const setting of GUILD_SETTINGS) {
     await page.keyboard.press("Control+k");
     await input.fill(setting.label);
-    await palette.getByRole("option").filter({ hasText: "›" }).filter({ hasText: setting.label }).first().click();
-    await expect(page).toHaveURL(new RegExp(`${guildPath("100", setting.page)}$`));
-    await expect(page.locator(`[data-row="${setting.row}"]`), setting.label).toBeVisible();
+    await palette
+      .getByRole("option")
+      .filter({ hasText: "›" })
+      .filter({ hasText: setting.label })
+      .first()
+      .click();
+    await expect(page).toHaveURL(
+      new RegExp(`${guildPath("100", setting.page)}$`),
+    );
+    await expect(
+      page.locator(`[data-row="${setting.row}"]`),
+      setting.label,
+    ).toBeVisible();
   }
 });
 
-test("the server switcher filters by name or ID and keeps the kind of page", async ({ page }) => {
+test("the server switcher filters by name or ID and keeps the kind of page", async ({
+  page,
+}) => {
   await mockApi(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/g/100/tools");
@@ -860,10 +1245,14 @@ test("the server switcher filters by name or ID and keeps the kind of page", asy
   await expect(page.getByRole("option")).toHaveCount(3);
   await search.fill("200");
   await expect(page.getByRole("option")).toHaveCount(1);
-  await expect(page.getByRole("option", { name: "開発コミュニティ" })).toBeVisible();
+  await expect(
+    page.getByRole("option", { name: "開発コミュニティ" }),
+  ).toBeVisible();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/g\/200\/tools$/);
-  await expect(page.getByRole("heading", { name: "開発コミュニティ", level: 1 })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "開発コミュニティ", level: 1 }),
+  ).toBeVisible();
   await expect(switcher).toContainText("開発コミュニティ");
   await expect(switcher).toBeFocused();
   // Escape and a click elsewhere close it without moving.
@@ -884,13 +1273,19 @@ test("the server switcher filters by name or ID and keeps the kind of page", asy
   await switcher.click();
   await page.keyboard.press("Escape");
   await expect(search).toBeHidden();
-  await expect(page.getByRole("navigation", { name: "メイン", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "メイン", exact: true }),
+  ).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("navigation", { name: "メイン", exact: true })).toBeHidden();
+  await expect(
+    page.getByRole("navigation", { name: "メイン", exact: true }),
+  ).toBeHidden();
   await expect(toggle).toBeFocused();
 });
 
-test("a save shows on the row and in the top bar, and a failed save rolls the control back", async ({ page }) => {
+test("a save shows on the row and in the top bar, and a failed save rolls the control back", async ({
+  page,
+}) => {
   const writes = await mockApi(page, true);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/g/100");
@@ -912,32 +1307,51 @@ test("a save shows on the row and in the top bar, and a failed save rolls the co
   await expect(page.locator(".toast")).toHaveCount(0);
 
   // Leaving a field without changing it writes nothing.
-  await page.getByRole("navigation", { name: "メイン", exact: true }).getByRole("link", { name: "ツールと挙動" }).click();
+  await page
+    .getByRole("navigation", { name: "メイン", exact: true })
+    .getByRole("link", { name: "ツールと挙動" })
+    .click();
   const before = writes.length;
   await page.getByRole("textbox", { name: "MCP サーバー URL" }).focus();
   await page.keyboard.press("Tab");
   await page.getByRole("spinbutton", { name: "temperature" }).focus();
   await page.keyboard.press("Tab");
-  await page.locator("#mcp").getByRole("button", { name: "OFF", exact: true }).click();
-  await expect.poll(() => writes.slice(before).some((w) => w.body.mcp_enabled === false)).toBe(true);
-  expect(writes.slice(before).some((w) => "mcp_url" in w.body || "temperature" in w.body)).toBe(false);
+  await page
+    .locator("#mcp")
+    .getByRole("button", { name: "OFF", exact: true })
+    .click();
+  await expect
+    .poll(() => writes.slice(before).some((w) => w.body.mcp_enabled === false))
+    .toBe(true);
+  expect(
+    writes
+      .slice(before)
+      .some((w) => "mcp_url" in w.body || "temperature" in w.body),
+  ).toBe(false);
 
   // The API refuses the next change.
   await page.route("**/api/guilds/100/settings", (route) =>
     route.request().method() === "PATCH"
       ? route.fulfill({ status: 500, json: { error: "書き込めませんでした" } })
-      : route.fallback());
+      : route.fallback(),
+  );
   const exa = page.getByRole("combobox", { name: "exa", exact: true });
   await expect(exa).toHaveText("auto");
   await exa.click();
   await page.getByRole("option", { name: "off", exact: true }).click();
   await expect(status).toHaveText("保存に失敗");
   await expect(exa).toHaveText("auto");
-  await expect(page.locator('[data-row="g-exa"] .row-mark')).toHaveText("保存に失敗");
-  await expect(page.locator(".toast.is-danger")).toContainText("書き込めませんでした");
+  await expect(page.locator('[data-row="g-exa"] .row-mark')).toHaveText(
+    "保存に失敗",
+  );
+  await expect(page.locator(".toast.is-danger")).toContainText(
+    "書き込めませんでした",
+  );
 });
 
-test("a slow save for one server never lands on another server's page", async ({ page }) => {
+test("a slow save for one server never lands on another server's page", async ({
+  page,
+}) => {
   await mockApi(page, true);
   let release!: () => void;
   const held = new Promise<void>((resolve) => (release = resolve));
@@ -956,30 +1370,46 @@ test("a slow save for one server never lands on another server's page", async ({
   // Move to another server while the first one's save is still on its way.
   await page.getByRole("button", { name: /^サーバーを切り替える/ }).click();
   await page.getByRole("option", { name: "開発コミュニティ" }).click();
-  await expect(page.getByRole("heading", { name: "開発コミュニティ", level: 1 })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "開発コミュニティ", level: 1 }),
+  ).toBeVisible();
   await expect(effort).toHaveText("max");
   await expect(status).toHaveText("変更は自動保存されます");
 
-  const answered = page.waitForResponse((response) =>
-    response.request().method() === "PATCH" && response.url().endsWith("/api/guilds/100/settings"));
+  const answered = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" &&
+      response.url().endsWith("/api/guilds/100/settings"),
+  );
   release();
   await answered;
   // Give the late answer every chance to be drawn before looking.
-  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+  await page.evaluate(
+    () =>
+      new Promise((done) =>
+        requestAnimationFrame(() => requestAnimationFrame(done)),
+      ),
+  );
   await expect(effort).toHaveText("max");
   await expect(status).toHaveText("変更は自動保存されます");
 });
 
-test("実際の動作 shows what a combination of settings does, not just what was saved", async ({ page }) => {
+test("実際の動作 shows what a combination of settings does, not just what was saved", async ({
+  page,
+}) => {
   await mockApi(page);
   let custom: Record<string, unknown> = {};
   await page.route("**/api/guilds/100/settings", (route) =>
-    route.fulfill({ json: { settings: { ...emptyGuild(), ...custom } } }));
+    route.fulfill({ json: { settings: { ...emptyGuild(), ...custom } } }),
+  );
   await page.setViewportSize({ width: 1440, height: 900 });
   const strip = page.getByRole("region", { name: "実際の動作" });
   const item = (label: string) =>
-    strip.locator(".eff-item").filter({ has: page.locator("dt", { hasText: new RegExp(`^${label}$`) }) });
-  const unused = (row: string) => page.locator(`[data-row="${row}"]`).getByText("いまは使われません。");
+    strip.locator(".eff-item").filter({
+      has: page.locator("dt", { hasText: new RegExp(`^${label}$`) }),
+    });
+  const unused = (row: string) =>
+    page.locator(`[data-row="${row}"]`).getByText("いまは使われません。");
 
   // Nothing interacts: the saved values are the ones in use.
   await page.goto("/g/100");
@@ -989,7 +1419,12 @@ test("実際の動作 shows what a combination of settings does, not just what w
   await expect(page.getByText("いまは使われません。")).toHaveCount(0);
 
   // Anthropic / Auto: Jev decides the model and effort, and subagents are off whatever was saved.
-  custom = { selection: { provider: "anthropic", model: "auto", effort: "high" }, effort: "high", ultra_mode: true, multi_agent: true };
+  custom = {
+    selection: { provider: "anthropic", model: "auto", effort: "high" },
+    effort: "high",
+    ultra_mode: true,
+    multi_agent: true,
+  };
   await page.reload();
   await expect(item("モデル")).toContainText("Jev が会話ごとに選ぶ");
   await expect(item("effort")).toContainText("Jev が決める");
@@ -999,20 +1434,30 @@ test("実際の動作 shows what a combination of settings does, not just what w
   await expect(unused("g-effort")).toBeVisible();
   await expect(unused("g-mode")).toBeVisible();
   // The controls stay usable: the saved value applies again under another provider.
-  await expect(page.getByRole("combobox", { name: "effort", exact: true })).toBeEnabled();
+  await expect(
+    page.getByRole("combobox", { name: "effort", exact: true }),
+  ).toBeEnabled();
 
   // …and with Jev 判定 off, Auto falls back to one fixed model.
   custom = { ...custom, jev_enabled: false };
   await page.reload();
   await expect(item("モデル")).toContainText(AUTO_ROUTE_FALLBACK.model);
   await expect(item("effort")).toContainText(AUTO_ROUTE_FALLBACK.effort);
-  await expect(page.locator('[data-row="g-jev"]')).toContainText(`毎回 ${AUTO_ROUTE_FALLBACK.model} / ${AUTO_ROUTE_FALLBACK.effort} で応答します。`);
+  await expect(page.locator('[data-row="g-jev"]')).toContainText(
+    `毎回 ${AUTO_ROUTE_FALLBACK.model} / ${AUTO_ROUTE_FALLBACK.effort} で応答します。`,
+  );
 
   // Ultra runs at xhigh and keeps the saved effort for later.
-  custom = { effort: "low", selection: { provider: "deepseek", model: "DeepSeek V4", effort: "low" }, ultra_mode: true };
+  custom = {
+    effort: "low",
+    selection: { provider: "deepseek", model: "DeepSeek V4", effort: "low" },
+    ultra_mode: true,
+  };
   await page.reload();
   await expect(item("effort")).toContainText("xhigh");
-  await expect(item("effort")).toContainText("保存値 low は ultra を外すと使われます。");
+  await expect(item("effort")).toContainText(
+    "保存値 low は ultra を外すと使われます。",
+  );
   await expect(unused("g-effort")).toBeVisible();
 
   // Multi does not run the Jev task loop even when it is saved as ON.
@@ -1032,13 +1477,22 @@ test("overlays stay inside narrow screens", async ({ page }) => {
     expect(box, selector).not.toBeNull();
     expect(box!.x, selector).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width, selector).toBeLessThanOrEqual(width);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), selector).toBe(true);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      selector,
+    ).toBe(true);
   };
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 800 });
     await page.goto("/g/100");
-    await expect(page.getByRole("heading", { name: "/switch モデル", level: 2 })).toBeVisible();
-    await page.getByRole("button", { name: "検索・移動（コマンドパレット）" }).click();
+    await expect(
+      page.getByRole("heading", { name: "/switch モデル", level: 2 }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "検索・移動（コマンドパレット）" })
+      .click();
     await fits(".palette");
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "モデルを変更" }).click();
@@ -1057,23 +1511,62 @@ test("overlays stay inside narrow screens", async ({ page }) => {
   }
 });
 
-test("long names and URLs wrap or scroll inside their own frame", async ({ page }) => {
+test("long names and URLs wrap or scroll inside their own frame", async ({
+  page,
+}) => {
   await mockApi(page);
   const word = `VeryLongNameWithoutAnySpacesAtAll_${"0123456789_abcdefghijklmnopqrstuvwxyz_".repeat(3)}`;
-  await page.route("**/api/guilds", (route) => route.fulfill({ json: { guilds: [
-    { id: "100", name: `とても長い名前のサーバー${word}`, icon: null, preset: `model-${word}` },
-  ] } }));
-  await page.route("**/api/artifacts", (route) => route.fulfill({ json: { sites: [{
-    token: "long", guild_id: "100", channel_id: "100",
-    url: `https://example.com/published/${"very-long-path-segment/".repeat(8)}index.html`,
-    source_path: `${"dir/".repeat(20)}report.html`,
-    created_at_unix: 1788652800, updated_at_unix: null, expires_at_unix: 1791244800,
-    retention: "month", bytes: 1024, file_count: 1, permanent: false, pending: "unpermanent",
-  }] } }));
-  await page.route("**/api/users", (route) => route.fulfill({ json: {
-    users: [{ discord_id: "123456789012345678901234567890", username: `member-${word}`, role: "user" }],
-    assignable: ["user", "premium"],
-  } }));
+  await page.route("**/api/guilds", (route) =>
+    route.fulfill({
+      json: {
+        guilds: [
+          {
+            id: "100",
+            name: `とても長い名前のサーバー${word}`,
+            icon: null,
+            preset: `model-${word}`,
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/api/artifacts", (route) =>
+    route.fulfill({
+      json: {
+        sites: [
+          {
+            token: "long",
+            guild_id: "100",
+            channel_id: "100",
+            url: `https://example.com/published/${"very-long-path-segment/".repeat(8)}index.html`,
+            source_path: `${"dir/".repeat(20)}report.html`,
+            created_at_unix: 1788652800,
+            updated_at_unix: null,
+            expires_at_unix: 1791244800,
+            retention: "month",
+            bytes: 1024,
+            file_count: 1,
+            permanent: false,
+            pending: "unpermanent",
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/api/users", (route) =>
+    route.fulfill({
+      json: {
+        users: [
+          {
+            discord_id: "123456789012345678901234567890",
+            username: `member-${word}`,
+            role: "user",
+          },
+        ],
+        assignable: ["user", "premium"],
+      },
+    }),
+  );
   // 768px is the widest layout where tables are still tables: a column pushed past the
   // frame has to scroll inside it, including its screen-reader-only header text.
   for (const width of [1440, 768, 390, 320]) {
@@ -1083,39 +1576,58 @@ test("long names and URLs wrap or scroll inside their own frame", async ({ page 
       await expect(page.locator("h1")).toBeVisible();
       await expect(page.locator(".skeleton")).toHaveCount(0);
       expect(
-        await page.evaluate(() => document.documentElement.scrollWidth - innerWidth),
+        await page.evaluate(
+          () => document.documentElement.scrollWidth - innerWidth,
+        ),
         `${path} at ${width}px`,
       ).toBeLessThanOrEqual(0);
     }
   }
 });
 
-test("motion plays once, and not at all when the OS asks for less", async ({ page }) => {
+test("motion plays once, and not at all when the OS asks for less", async ({
+  page,
+}) => {
   await mockApi(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/g/100");
   const block = page.getByRole("region", { name: "実際の動作" });
   await expect(block).toBeVisible();
-  const seconds = () => block.evaluate((el) => parseFloat(getComputedStyle(el).animationDuration));
+  const seconds = () =>
+    block.evaluate((el) => parseFloat(getComputedStyle(el).animationDuration));
   expect(await seconds()).toBeCloseTo(0.38);
   // Nothing on a loaded page keeps moving by itself.
-  const looping = await page.evaluate(() =>
-    [...document.querySelectorAll("*")].flatMap((el) =>
-      [null, "::before", "::after"].filter((pseudo) => getComputedStyle(el, pseudo).animationIterationCount === "infinite")).length);
+  const looping = await page.evaluate(
+    () =>
+      [...document.querySelectorAll("*")].flatMap((el) =>
+        [null, "::before", "::after"].filter(
+          (pseudo) =>
+            getComputedStyle(el, pseudo).animationIterationCount === "infinite",
+        ),
+      ).length,
+  );
   expect(looping).toBe(0);
   await page.emulateMedia({ reducedMotion: "reduce" });
   expect(await seconds()).toBeLessThan(0.001);
 });
 
-test("the two typefaces are served by the app itself", async ({ page, baseURL }) => {
+test("the two typefaces are served by the app itself", async ({
+  page,
+  baseURL,
+}) => {
   const hosts = new Set<string>();
   page.on("request", (request) => hosts.add(new URL(request.url()).host));
   await mockApi(page);
   await page.goto("/g/100");
-  await expect(page.getByRole("heading", { name: "/switch モデル", level: 2 })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "/switch モデル", level: 2 }),
+  ).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
   const loaded = await page.evaluate(() =>
-    [...document.fonts].filter((face) => face.status === "loaded").map((face) => face.family.replace(/"/g, "")));
+    [...document.fonts]
+      .filter((face) => face.status === "loaded")
+      .map((face) => face.family.replace(/"/g, "")),
+  );
   expect(loaded).toEqual(expect.arrayContaining(["Outfit", "Red Hat Mono"]));
   // No font host, no CDN: every request went to the dashboard's own origin.
   expect([...hosts]).toEqual([new URL(baseURL!).host]);
@@ -1142,20 +1654,35 @@ const workspacePresets = [
     label: "Anthropic Workspace / Claude Sonnet 5.5",
   },
 ];
-const onWorkspace = (model: string) =>
-  ({ selection: { provider: "anthropic_workspace", model, effort: "high" }, effort: "high" });
+const onWorkspace = (model: string) => ({
+  selection: { provider: "anthropic_workspace", model, effort: "high" },
+  effort: "high",
+});
 
 /** A settings endpoint that applies `preset` the way the API does, so that a pick moves the selection. */
-async function mockSettings(page: Page, path: string, initial: object, presets = catalog.presets) {
+async function mockSettings(
+  page: Page,
+  path: string,
+  initial: object,
+  presets = catalog.presets,
+) {
   let settings: Record<string, unknown> = { ...initial };
   const writes: Record<string, unknown>[] = [];
   await page.route(`**${path}`, async (route) => {
     if (route.request().method() === "PATCH") {
-      const { preset, ...rest } = route.request().postDataJSON() as Record<string, unknown>;
+      const { preset, ...rest } = route.request().postDataJSON() as Record<
+        string,
+        unknown
+      >;
       writes.push({ preset, ...rest });
       settings = { ...settings, ...rest };
       const picked = presets.find((p) => p.id === preset);
-      if (picked) settings.selection = { provider: picked.provider, model: picked.model, effort: "max" };
+      if (picked)
+        settings.selection = {
+          provider: picked.provider,
+          model: picked.model,
+          effort: "max",
+        };
       if (preset === "reset") settings.selection = null;
     }
     await route.fulfill({ json: { settings } });
@@ -1163,103 +1690,183 @@ async function mockSettings(page: Page, path: string, initial: object, presets =
   return writes;
 }
 
-test("Anthropic Workspace: Haiku with Ultra runs as ultra; other models and modes are marked as not used", async ({ page }) => {
+test("Anthropic Workspace: Haiku with Ultra runs as ultra; other models and modes are marked as not used", async ({
+  page,
+}) => {
   await mockApi(page);
   await page.route("**/api/catalog", (route) =>
-    route.fulfill({ json: { ...catalog, presets: [...catalog.presets, ...workspacePresets] } }));
+    route.fulfill({
+      json: { ...catalog, presets: [...catalog.presets, ...workspacePresets] },
+    }),
+  );
   let custom: Record<string, unknown> = {};
   const writes: Record<string, unknown>[] = [];
   await page.route("**/api/guilds/100/settings", (route) => {
-    if (route.request().method() === "PATCH") writes.push(route.request().postDataJSON());
-    return route.fulfill({ json: { settings: { ...emptyGuild(), ...custom } } });
+    if (route.request().method() === "PATCH")
+      writes.push(route.request().postDataJSON());
+    return route.fulfill({
+      json: { settings: { ...emptyGuild(), ...custom } },
+    });
   });
   await page.setViewportSize({ width: 1440, height: 900 });
   const strip = page.getByRole("region", { name: "実際の動作" });
   const item = (label: string) =>
-    strip.locator(".eff-item").filter({ has: page.locator("dt", { hasText: new RegExp(`^${label}$`) }) });
-  const unused = (row: string) => page.locator(`[data-row="${row}"]`).getByText("いまは使われません。");
-  const mode = page.getByRole("radiogroup", { name: "サブエージェント", exact: true });
+    strip.locator(".eff-item").filter({
+      has: page.locator("dt", { hasText: new RegExp(`^${label}$`) }),
+    });
+  const unused = (row: string) =>
+    page.locator(`[data-row="${row}"]`).getByText("いまは使われません。");
+  const mode = page.getByRole("radiogroup", {
+    name: "サブエージェント",
+    exact: true,
+  });
   const model = page.locator('[data-row="g-preset"]');
 
   // Haiku 5.5 with a saved Ultra: Ultra is what runs, and at the saved effort.
-  custom = { ...onWorkspace("claude-haiku-5-5"), ...subagentModePatch("ultra") };
+  custom = {
+    ...onWorkspace("claude-haiku-5-5"),
+    ...subagentModePatch("ultra"),
+  };
   await page.goto("/g/100");
   await expect(item("モデル")).toContainText("claude-haiku-5-5");
   await expect(item("モデル")).toContainText("Anthropic Workspace");
-  await expect(item("サブエージェント")).toHaveText(/^サブエージェント\s*ultra/);
-  await expect(item("サブエージェント")).toContainText("Managed Agents の dynamic workflows");
+  await expect(item("サブエージェント")).toHaveText(
+    /^サブエージェント\s*ultra/,
+  );
+  await expect(item("サブエージェント")).toContainText(
+    "Managed Agents の dynamic workflows",
+  );
   await expect(item("effort")).toHaveText(/^effort\s*high$/);
   await expect(page.getByText("いまは使われません。")).toHaveCount(0);
   // The model row says where the work happens.
-  await expect(model.locator(".model-card")).toContainText("Anthropic Workspace");
+  await expect(model.locator(".model-card")).toContainText(
+    "Anthropic Workspace",
+  );
   await expect(model.locator(".badge")).toHaveCount(0);
-  await expect(model).toContainText("作業領域（ファイルとコマンドの実行環境）は Anthropic のクラウドにあり、チャンネルごとに別です。");
+  await expect(model).toContainText(
+    "作業領域（ファイルとコマンドの実行環境）は Anthropic のクラウドにあり、チャンネルごとに別です。",
+  );
   // The Ultra card describes what Ultra is here, not Hibana's Ultracode.
   await expect(mode.getByRole("radio", { checked: true })).toHaveText(/^ultra/);
-  await expect(mode.getByRole("radio", { checked: true })).toContainText("Managed Agents の dynamic workflows");
+  await expect(mode.getByRole("radio", { checked: true })).toContainText(
+    "Managed Agents の dynamic workflows",
+  );
   await expect(mode).not.toContainText("xhigh");
 
   // Another model keeps the saved Ultra and runs without delegation. Nothing is forced to xhigh.
-  custom = { ...onWorkspace("claude-sonnet-5-5"), ...subagentModePatch("ultra") };
+  custom = {
+    ...onWorkspace("claude-sonnet-5-5"),
+    ...subagentModePatch("ultra"),
+  };
   await page.reload();
   await expect(item("サブエージェント")).toHaveText(/^サブエージェント\s*off/);
-  await expect(item("サブエージェント")).toContainText("保存値 ultra は他のモデルに切り替えると使われます。");
+  await expect(item("サブエージェント")).toContainText(
+    "保存値 ultra は他のモデルに切り替えると使われます。",
+  );
   await expect(unused("g-mode")).toBeVisible();
-  await expect(page.locator('[data-row="g-mode"]')).toContainText("ultra は Claude Haiku 5.5 のときだけです。");
+  await expect(page.locator('[data-row="g-mode"]')).toContainText(
+    "ultra は Claude Haiku 5.5 のときだけです。",
+  );
   await expect(mode.getByRole("radio", { checked: true })).toHaveText(/^ultra/);
   await expect(item("effort")).toHaveText(/^effort\s*high$/);
   await expect(unused("g-effort")).toHaveCount(0);
 
   // On Haiku, a saved on or multi is not Ultra either. The Jev task loop is not run in a Workspace session.
   for (const saved of ["on", "multi"] as const) {
-    custom = { ...onWorkspace("claude-haiku-5-5"), ...subagentModePatch(saved), jev_task_enabled: true };
+    custom = {
+      ...onWorkspace("claude-haiku-5-5"),
+      ...subagentModePatch(saved),
+      jev_task_enabled: true,
+    };
     await page.reload();
-    await expect(item("サブエージェント")).toHaveText(/^サブエージェント\s*off/);
-    await expect(item("サブエージェント")).toContainText(`保存値 ${saved} は他のモデルに切り替えると使われます。`);
+    await expect(item("サブエージェント")).toHaveText(
+      /^サブエージェント\s*off/,
+    );
+    await expect(item("サブエージェント")).toContainText(
+      `保存値 ${saved} は他のモデルに切り替えると使われます。`,
+    );
     await expect(unused("g-mode")).toBeVisible();
-    await expect(item("Jev 行動選択")).toContainText("Anthropic Workspace では使いません。");
+    await expect(item("Jev 行動選択")).toContainText(
+      "Anthropic Workspace では使いません。",
+    );
     await expect(unused("g-jev-task")).toBeVisible();
     await expect(unused("g-effort")).toHaveCount(0);
   }
   // The cards stay usable: the saved mode applies again under another model.
   await expect(mode.getByRole("radio")).toHaveCount(4);
-  for (const card of await mode.getByRole("radio").all()) await expect(card).toBeEnabled();
+  for (const card of await mode.getByRole("radio").all())
+    await expect(card).toBeEnabled();
   await mode.getByRole("radio", { name: /^ultra/ }).click();
-  await expect.poll(() => writes.at(-1)).toMatchObject(subagentModePatch("ultra"));
+  await expect
+    .poll(() => writes.at(-1))
+    .toMatchObject(subagentModePatch("ultra"));
 
   // A plain off is what runs, so nothing is marked. The long notes fit a narrow screen.
   custom = { ...onWorkspace("claude-sonnet-5-5"), ...subagentModePatch("off") };
   await page.reload();
   await expect(item("サブエージェント")).toHaveText(/^サブエージェント\s*off$/);
   await expect(page.getByText("いまは使われません。")).toHaveCount(0);
-  custom = { ...onWorkspace("claude-sonnet-5-5"), ...subagentModePatch("multi"), jev_task_enabled: true };
+  custom = {
+    ...onWorkspace("claude-sonnet-5-5"),
+    ...subagentModePatch("multi"),
+    jev_task_enabled: true,
+  };
   await page.setViewportSize({ width: 390, height: 900 });
   await page.reload();
   await expect(unused("g-mode")).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
 
   // マイ設定 cannot tell the server's model, so it marks nothing. With a
   // Workspace model as the personal one, the section says the rule instead.
   await mockSettings(page, "/api/me/settings", {
-    ...emptyUserOverride(), ...onWorkspace("claude-sonnet-5-5"), ...subagentModePatch("ultra"),
+    ...emptyUserOverride(),
+    ...onWorkspace("claude-sonnet-5-5"),
+    ...subagentModePatch("ultra"),
   });
   await page.goto("/me");
-  await expect(page.locator("#agents .sec-desc")).toContainText("Anthropic Workspace で効くのは off と ultra で、ultra は Claude Haiku 5.5 のときだけです。");
-  await expect(page.locator('[data-row="me-preset"]')).toContainText("チャンネルごとに別です。");
-  await expect(mode.getByRole("radio", { checked: true })).toContainText("Managed Agents の dynamic workflows");
-  await expect(page.locator('[data-row="me-effort"]')).not.toContainText("xhigh");
+  await expect(page.locator("#agents .sec-desc")).toContainText(
+    "Anthropic Workspace で効くのは off と ultra で、ultra は Claude Haiku 5.5 のときだけです。",
+  );
+  await expect(page.locator('[data-row="me-preset"]')).toContainText(
+    "チャンネルごとに別です。",
+  );
+  await expect(mode.getByRole("radio", { checked: true })).toContainText(
+    "Managed Agents の dynamic workflows",
+  );
+  await expect(page.locator('[data-row="me-effort"]')).not.toContainText(
+    "xhigh",
+  );
   await expect(page.getByText("いまは使われません。")).toHaveCount(0);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
 });
 
-test("an Anthropic Workspace preset is offered as the main model, never as a subagent's fixed model", async ({ page }) => {
+test("an Anthropic Workspace preset is offered as the main model, never as a subagent's fixed model", async ({
+  page,
+}) => {
   await mockApi(page);
   // First in the catalog, so a picker that took the first preset there would take a Workspace one.
   const presets = [...workspacePresets, ...catalog.presets];
-  await page.route("**/api/catalog", (route) => route.fulfill({ json: { ...catalog, presets } }));
-  const writes = await mockSettings(page, "/api/guilds/100/settings", {
-    ...emptyGuild(), ...onWorkspace("claude-haiku-5-5"), ...subagentModePatch("on"),
-  }, presets);
+  await page.route("**/api/catalog", (route) =>
+    route.fulfill({ json: { ...catalog, presets } }),
+  );
+  const writes = await mockSettings(
+    page,
+    "/api/guilds/100/settings",
+    {
+      ...emptyGuild(),
+      ...onWorkspace("claude-haiku-5-5"),
+      ...subagentModePatch("on"),
+    },
+    presets,
+  );
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/g/100");
   const rows = page.getByRole("dialog").locator(".picker-row");
@@ -1268,60 +1875,139 @@ test("an Anthropic Workspace preset is offered as the main model, never as a sub
   await page.getByRole("button", { name: "モデルを変更" }).click();
   const dialog = page.getByRole("dialog", { name: "モデルを選ぶ" });
   await expect(rows).toHaveCount(5);
-  const filters = dialog.getByRole("group", { name: "プロバイダで絞り込み" }).getByRole("button");
+  const filters = dialog
+    .getByRole("group", { name: "プロバイダで絞り込み" })
+    .getByRole("button");
   await expect(filters.first()).toHaveText(/^すべて\s*5$/);
-  await expect(filters.filter({ hasText: "Anthropic Workspace" })).toHaveText(/^Anthropic Workspace\s*2$/);
+  await expect(filters.filter({ hasText: "Anthropic Workspace" })).toHaveText(
+    /^Anthropic Workspace\s*2$/,
+  );
   const haiku = rows.filter({ hasText: "anthropic-workspace-haiku-5-5" });
   await expect(haiku).toHaveAttribute("aria-pressed", "true");
   await expect(haiku.locator(".p-prov")).toHaveText("Anthropic Workspace");
   await rows.filter({ hasText: "anthropic-workspace-sonnet-5-5" }).click();
-  await expect.poll(() => writes.at(-1)?.preset).toBe("anthropic-workspace-sonnet-5-5");
-  await expect(page.locator('[data-row="g-preset"] .model-card')).toContainText("claude-sonnet-5-5");
+  await expect
+    .poll(() => writes.at(-1)?.preset)
+    .toBe("anthropic-workspace-sonnet-5-5");
+  await expect(page.locator('[data-row="g-preset"] .model-card')).toContainText(
+    "claude-sonnet-5-5",
+  );
 
   // A subagent Hibana runs itself cannot be on one (the API refuses it): a new
   // 固定 starts on the first preset that can be, and its picker lists only those.
-  await page.getByRole("combobox", { name: "サブエージェントのモデル選択方式" }).click();
-  await page.getByRole("option", { name: "固定（指定したモデル）", exact: true }).click();
-  await expect.poll(() => writes.at(-1)?.subagent_model).toEqual({ mode: "fixed", preset: "deepseek" });
+  await page
+    .getByRole("combobox", { name: "サブエージェントのモデル選択方式" })
+    .click();
+  await page
+    .getByRole("option", { name: "固定（指定したモデル）", exact: true })
+    .click();
+  await expect
+    .poll(() => writes.at(-1)?.subagent_model)
+    .toEqual({ mode: "fixed", preset: "deepseek" });
   await page.getByRole("button", { name: /^固定モデル:/ }).click();
   await expect(rows).toHaveCount(3);
   await expect(rows.filter({ hasText: "Anthropic Workspace" })).toHaveCount(0);
-  await expect(rows.filter({ hasText: "DeepSeek V4" })).toHaveAttribute("aria-pressed", "true");
+  await expect(rows.filter({ hasText: "DeepSeek V4" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
 });
 
-test("the server list and the model list tell Anthropic Workspace from Anthropic", async ({ page }) => {
+test("the server list and the model list tell Anthropic Workspace from Anthropic", async ({
+  page,
+}) => {
   await mockApi(page);
   // As in the real catalog: both providers carry a model of the same name, and
   // the Workspace presets start out unpublished.
-  const direct = { id: "anthropic-haiku-5-5", provider: "anthropic", model: "claude-haiku-5-5", label: "Anthropic / Claude Haiku 5.5" };
-  const presets = [...catalog.presets, direct, ...workspacePresets.map((p) => ({ ...p, published: false }))];
-  await page.route("**/api/catalog", (route) => route.fulfill({ json: { ...catalog, presets } }));
-  await page.route("**/api/guilds", (route) => route.fulfill({ json: { guilds: [
-    { id: "100", name: "Cloud", icon: null, preset: "claude-haiku-5-5", provider: "anthropic_workspace" },
-    { id: "200", name: "Direct", icon: null, preset: "claude-haiku-5-5", provider: "anthropic" },
-    // An API from before #76 names no provider: the catalog decides, where only one provider has the model.
-    { id: "300", name: "Older", icon: null, preset: "DeepSeek V4" },
-    { id: "400", name: "Unnamed", icon: null, preset: "claude-haiku-5-5" },
-  ] } }));
+  const direct = {
+    id: "anthropic-haiku-5-5",
+    provider: "anthropic",
+    model: "claude-haiku-5-5",
+    label: "Anthropic / Claude Haiku 5.5",
+  };
+  const presets = [
+    ...catalog.presets,
+    direct,
+    ...workspacePresets.map((p) => ({ ...p, published: false })),
+  ];
+  await page.route("**/api/catalog", (route) =>
+    route.fulfill({ json: { ...catalog, presets } }),
+  );
+  await page.route("**/api/guilds", (route) =>
+    route.fulfill({
+      json: {
+        guilds: [
+          {
+            id: "100",
+            name: "Cloud",
+            icon: null,
+            preset: "claude-haiku-5-5",
+            provider: "anthropic_workspace",
+          },
+          {
+            id: "200",
+            name: "Direct",
+            icon: null,
+            preset: "claude-haiku-5-5",
+            provider: "anthropic",
+          },
+          // An API from before #76 names no provider: the catalog decides, where only one provider has the model.
+          { id: "300", name: "Older", icon: null, preset: "DeepSeek V4" },
+          {
+            id: "400",
+            name: "Unnamed",
+            icon: null,
+            preset: "claude-haiku-5-5",
+          },
+        ],
+      },
+    }),
+  );
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   const shapes = (name: string) =>
-    page.locator(".guild-card").filter({ hasText: name }).locator(".mono-tile svg")
-      .evaluate((svg) => [...svg.querySelectorAll("rect, circle, path")].map((el) => el.tagName).join(" "));
+    page
+      .locator(".guild-card")
+      .filter({ hasText: name })
+      .locator(".mono-tile svg")
+      .evaluate((svg) =>
+        [...svg.querySelectorAll("rect, circle, path")]
+          .map((el) => el.tagName)
+          .join(" "),
+      );
   await expect(page.locator(".guild-card")).toHaveCount(4);
   // Workspace is the asterisk in a rounded frame, Anthropic the asterisk in a ring.
   expect(await shapes("Cloud")).toBe("rect path");
   expect(await shapes("Direct")).toBe("circle path");
   // DeepSeek's mark from the catalog, and the plain hexagon when the name alone cannot tell.
-  await expect(page.locator(".guild-card").filter({ hasText: "Older" }).locator('.mono-tile path[fill="currentColor"]')).toHaveCount(1);
-  await expect(page.locator(".guild-card").filter({ hasText: "Unnamed" }).locator('.mono-tile path[stroke="currentColor"]')).toHaveCount(1);
+  await expect(
+    page
+      .locator(".guild-card")
+      .filter({ hasText: "Older" })
+      .locator('.mono-tile path[fill="currentColor"]'),
+  ).toHaveCount(1);
+  await expect(
+    page
+      .locator(".guild-card")
+      .filter({ hasText: "Unnamed" })
+      .locator('.mono-tile path[stroke="currentColor"]'),
+  ).toHaveCount(1);
   expect(await shapes("Unnamed")).toBe("path");
 
   await page.goto("/models");
-  await expect(page.locator(".lead")).toContainText("Anthropic Workspace のプリセットは最初は非公開です。");
+  await expect(page.locator(".lead")).toContainText(
+    "Anthropic Workspace のプリセットは最初は非公開です。",
+  );
   await expect(page.locator(".counts")).toContainText("非公開 2 / 6");
-  const row = page.locator("tbody tr").filter({ has: page.getByRole("cell", { name: "anthropic-workspace-haiku-5-5", exact: true }) });
+  const row = page.locator("tbody tr").filter({
+    has: page.getByRole("cell", {
+      name: "anthropic-workspace-haiku-5-5",
+      exact: true,
+    }),
+  });
   await expect(row.locator(".cell-sub")).toHaveText("Anthropic Workspace");
   await expect(row.locator(".badge")).toHaveCount(0);
-  await expect(row.getByRole("button", { name: "非公開", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    row.getByRole("button", { name: "非公開", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
 });

@@ -66,7 +66,11 @@ export function App() {
                 <Route
                   path="/analytics"
                   element={
-                    me.can_view_analytics ? <AnalyticsPage /> : <Navigate to="/" />
+                    me.can_view_analytics ? (
+                      <AnalyticsPage />
+                    ) : (
+                      <Navigate to="/" />
+                    )
                   }
                 />
                 <Route path="*" element={<NotFound />} />
@@ -112,7 +116,8 @@ function SkillsRedirect() {
   }, []);
   const current = useCurrentGuild(guilds ?? []);
 
-  if (current.id) return <Navigate to={guildPath(current.id, "skills")} replace />;
+  if (current.id)
+    return <Navigate to={guildPath(current.id, "skills")} replace />;
   return (
     <div className="page">
       {err ? (

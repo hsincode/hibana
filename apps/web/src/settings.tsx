@@ -1,8 +1,18 @@
-import type { SubagentModel, SubagentEffort, ServiceTier } from "@hibana/shared/settings";
+import type {
+  SubagentModel,
+  SubagentEffort,
+  ServiceTier,
+} from "@hibana/shared/settings";
 import { modelEffort, type MultiAgentRoles } from "@hibana/shared/settings";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Preset } from "./api";
-import { Row, type Mark, type Pulse, type SaveMarks, type SaveState } from "./save";
+import {
+  Row,
+  type Mark,
+  type Pulse,
+  type SaveMarks,
+  type SaveState,
+} from "./save";
 import { BoolSeg, Icon, Section } from "./ui";
 
 /* ============================================================
@@ -168,7 +178,10 @@ export function useOptimisticPatch<T extends OverlaySettings>(opts: {
 
   const setMark = useCallback((rows: string[], mark: Mark) => {
     if (rows.length === 0) return;
-    setMarks((m) => ({ ...m, ...Object.fromEntries(rows.map((r) => [r, mark])) }));
+    setMarks((m) => ({
+      ...m,
+      ...Object.fromEntries(rows.map((r) => [r, mark])),
+    }));
     for (const row of rows) {
       clearTimeout(markTimers.current[row]);
       if (mark !== "saved") continue;
@@ -184,7 +197,9 @@ export function useOptimisticPatch<T extends OverlaySettings>(opts: {
   const pulse = useCallback((rows: string[], failed: boolean) => {
     setPulses((p) => ({
       ...p,
-      ...Object.fromEntries(rows.map((r) => [r, { n: ++pulseSeq.current, failed }])),
+      ...Object.fromEntries(
+        rows.map((r) => [r, { n: ++pulseSeq.current, failed }]),
+      ),
     }));
   }, []);
 
@@ -203,7 +218,8 @@ export function useOptimisticPatch<T extends OverlaySettings>(opts: {
     setSave("saving");
 
     void (async () => {
-      const { send, setSettings, onError, presets, blankReset } = optsRef.current;
+      const { send, setSettings, onError, presets, blankReset } =
+        optsRef.current;
       try {
         const r = await send(merged);
         // 応答を待つ間に別のサーバーへ移っていたら、前のサーバーの結果は捨てる。
@@ -223,7 +239,10 @@ export function useOptimisticPatch<T extends OverlaySettings>(opts: {
         }
         // 同じ行にまだ送っていない変更があれば、その行は「保存中」のままにする。
         const queued = new Set(pendingRef.current.map((x) => x.row));
-        setMark(rows.filter((row) => !queued.has(row)), "saved");
+        setMark(
+          rows.filter((row) => !queued.has(row)),
+          "saved",
+        );
       } catch (e) {
         if (scope !== lastScope.current) return;
         if (pendingRef.current.length === 0) {
@@ -250,7 +269,12 @@ export function useOptimisticPatch<T extends OverlaySettings>(opts: {
     (body, row) => {
       const current = settingsRef.current;
       if (!current) return;
-      const next = applyLocalPatch(current, body, optsRef.current.presets, optsRef.current.blankReset);
+      const next = applyLocalPatch(
+        current,
+        body,
+        optsRef.current.presets,
+        optsRef.current.blankReset,
+      );
       optsRef.current.setSettings(next);
       settingsRef.current = next;
       pendingRef.current.push({ body, row });
@@ -298,9 +322,11 @@ export function ContextSection({
     <Section
       id="context"
       title={inherit ? "ユーザーコンテキスト" : "サーバーコンテキスト"}
-      desc={inherit
-        ? "空のままならサーバーのコンテキストに従います。文章を保存したときだけ、あなたへの応答に追加します。"
-        : "このサーバーでの応答に常に添える前提テキスト。"}
+      desc={
+        inherit
+          ? "空のままならサーバーのコンテキストに従います。文章を保存したときだけ、あなたへの応答に追加します。"
+          : "このサーバーでの応答に常に添える前提テキスト。"
+      }
     >
       <div className="rows">
         <Row
@@ -312,7 +338,8 @@ export function ContextSection({
           after={
             <div className="sec-foot">
               <span>
-                <span className="mono">{text.length.toLocaleString()}</span> 文字
+                <span className="mono">{text.length.toLocaleString()}</span>{" "}
+                文字
                 {dirty && (
                   <>
                     {" · "}
@@ -336,7 +363,9 @@ export function ContextSection({
                   type="button"
                   className="btn btn-primary btn-sm"
                   disabled={!dirty}
-                  onClick={() => patch({ context_text: text || null }, `${px}-context`)}
+                  onClick={() =>
+                    patch({ context_text: text || null }, `${px}-context`)
+                  }
                 >
                   保存
                 </button>
@@ -349,7 +378,11 @@ export function ContextSection({
             id="ctx-text"
             value={text}
             onChange={(e) => onDraft(e.target.value)}
-            placeholder={inherit ? "例: タメ口で話して。敬語は禁止。" : "例: このサーバーは…"}
+            placeholder={
+              inherit
+                ? "例: タメ口で話して。敬語は禁止。"
+                : "例: このサーバーは…"
+            }
           />
         </Row>
         <Row

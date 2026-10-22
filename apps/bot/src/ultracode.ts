@@ -28,55 +28,96 @@ export function systemReminder(text: string): string {
   return `<system-reminder>\n${text}\n</system-reminder>`;
 }
 
-type Settings = { subagent_enabled: boolean; ultra_mode: boolean; multi_agent: boolean };
+type Settings = {
+  subagent_enabled: boolean;
+  ultra_mode: boolean;
+  multi_agent: boolean;
+};
 
 /** Dynamic workflows need the collaboration surface: Claude Code's
  *  disableWorkflows also turns off the keyword and ultracode. */
-export function workflowsEnabled(config: Pick<Config, "toolsEnabled" | "subagentEnabled" | "workflowsEnabled">, settings: Pick<Settings, "subagent_enabled">): boolean {
-  return config.toolsEnabled && config.subagentEnabled && config.workflowsEnabled && settings.subagent_enabled;
+export function workflowsEnabled(
+  config: Pick<Config, "toolsEnabled" | "subagentEnabled" | "workflowsEnabled">,
+  settings: Pick<Settings, "subagent_enabled">,
+): boolean {
+  return (
+    config.toolsEnabled &&
+    config.subagentEnabled &&
+    config.workflowsEnabled &&
+    settings.subagent_enabled
+  );
 }
 
 /** Ultra is Ultracode. Multi-Agent also stores ultra_mode=true (it used to
  *  extend the Codex Ultra policy) but keeps its own team protocol instead. */
-export function ultracodeActive(config: Pick<Config, "toolsEnabled" | "subagentEnabled" | "workflowsEnabled">, settings: Settings): boolean {
-  return workflowsEnabled(config, settings) && subagentMode(settings) === "ultra";
+export function ultracodeActive(
+  config: Pick<Config, "toolsEnabled" | "subagentEnabled" | "workflowsEnabled">,
+  settings: Settings,
+): boolean {
+  return (
+    workflowsEnabled(config, settings) && subagentMode(settings) === "ultra"
+  );
 }
 
-export function turnSelection(selection: Selection, active: boolean): Selection {
+export function turnSelection(
+  selection: Selection,
+  active: boolean,
+): Selection {
   return active ? { ...selection, effort: ULTRACODE_EFFORT } : selection;
 }
 
-const OPENERS = new Map([["`", "`"], ['"', '"'], ["<", ">"], ["{", "}"], ["[", "]"], ["(", ")"], ["'", "'"]]);
+const OPENERS = new Map([
+  ["`", "`"],
+  ['"', '"'],
+  ["<", ">"],
+  ["{", "}"],
+  ["[", "]"],
+  ["(", ")"],
+  ["'", "'"],
+]);
 const wordChar = (c: string | undefined) => !!c && /[\p{L}\p{N}_]/u.test(c);
 
 /** Port of Claude Code's keyword matcher: a slash command never matches, and
  *  neither does a mention inside quotes/brackets/tags or a path, flag, file
  *  name or question such as `/ultracode`, `ultracode-x`, `ultracode.js`. */
-export function keywordSpans(text: string, keyword: string): { word: string; start: number; end: number }[] {
+export function keywordSpans(
+  text: string,
+  keyword: string,
+): { word: string; start: number; end: number }[] {
   if (!new RegExp(keyword, "i").test(text) || text.startsWith("/")) return [];
   const quoted: { start: number; end: number }[] = [];
-  let open: string | undefined, from = 0;
+  let open: string | undefined,
+    from = 0;
   for (let i = 0; i < text.length; i++) {
     const c = text[i]!;
     if (open) {
-      if (open === "[" && c === "[") { from = i; continue; }
+      if (open === "[" && c === "[") {
+        from = i;
+        continue;
+      }
       if (c !== OPENERS.get(open)) continue;
       if (open === "'" && wordChar(text[i + 1])) continue;
       quoted.push({ start: from, end: i + 1 });
       open = undefined;
-    } else if ((c === "<" && i + 1 < text.length && /[a-zA-Z/]/.test(text[i + 1]!)) ||
-      (c === "'" && !wordChar(text[i - 1])) || (c !== "<" && c !== "'" && OPENERS.has(c))) {
+    } else if (
+      (c === "<" && i + 1 < text.length && /[a-zA-Z/]/.test(text[i + 1]!)) ||
+      (c === "'" && !wordChar(text[i - 1])) ||
+      (c !== "<" && c !== "'" && OPENERS.has(c))
+    ) {
       open = c;
       from = i;
     }
   }
   const spans: { word: string; start: number; end: number }[] = [];
   for (const match of text.matchAll(new RegExp(`\\b${keyword}\\b`, "gi"))) {
-    const start = match.index!, end = start + match[0].length;
+    const start = match.index!,
+      end = start + match[0].length;
     if (quoted.some((q) => start >= q.start && start < q.end)) continue;
-    const before = text[start - 1], after = text[end];
+    const before = text[start - 1],
+      after = text[end];
     if (before === "/" || before === "\\" || before === "-") continue;
-    if (after === "/" || after === "\\" || after === "-" || after === "?") continue;
+    if (after === "/" || after === "\\" || after === "-" || after === "?")
+      continue;
     if (after === "." && wordChar(text[end + 1])) continue;
     spans.push({ word: match[0], start, end });
   }
@@ -89,7 +130,10 @@ export function hasUltracodeKeyword(text: string): boolean {
 
 const reminderKind = (m: Message): "enter" | "exit" | undefined => {
   if (m.role !== "user" || !m.internal) return undefined;
-  if (m.content === systemReminder(ULTRACODE_ENTER_FULL) || m.content === systemReminder(ULTRACODE_ENTER_SPARSE))
+  if (
+    m.content === systemReminder(ULTRACODE_ENTER_FULL) ||
+    m.content === systemReminder(ULTRACODE_ENTER_SPARSE)
+  )
     return "enter";
   return m.content === systemReminder(ULTRACODE_EXIT) ? "exit" : undefined;
 };
@@ -97,22 +141,38 @@ const reminderKind = (m: Message): "enter" | "exit" | undefined => {
 /** Claude Code's ultra_effort_enter / ultra_effort_exit attachments, computed
  *  from the conversation before the new prompt. Reminders stay in history, so
  *  the next turn can tell whether the model last heard "on" or "off". */
-export function ultracodeReminder(history: readonly Message[], active: boolean): Message | undefined {
+export function ultracodeReminder(
+  history: readonly Message[],
+  active: boolean,
+): Message | undefined {
   let last: "enter" | "exit" | undefined;
   let prompts = 0;
   for (let i = history.length - 1; i >= 0; i--) {
     const kind = reminderKind(history[i]!);
-    if (kind) { last = kind; break; }
+    if (kind) {
+      last = kind;
+      break;
+    }
     if (history[i]!.role === "user" && !history[i]!.internal) prompts++;
   }
-  const reminder = (text: string): Message => ({ role: "user", internal: true, content: systemReminder(text) });
+  const reminder = (text: string): Message => ({
+    role: "user",
+    internal: true,
+    content: systemReminder(text),
+  });
   if (active) {
     if (last !== "enter") return reminder(ULTRACODE_ENTER_FULL);
-    return prompts >= ULTRACODE_REMINDER_TURNS ? reminder(ULTRACODE_ENTER_SPARSE) : undefined;
+    return prompts >= ULTRACODE_REMINDER_TURNS
+      ? reminder(ULTRACODE_ENTER_SPARSE)
+      : undefined;
   }
   return last === "enter" ? reminder(ULTRACODE_EXIT) : undefined;
 }
 
 export function workflowKeywordReminder(): Message {
-  return { role: "user", internal: true, content: systemReminder(WORKFLOW_KEYWORD_REMINDER) };
+  return {
+    role: "user",
+    internal: true,
+    content: systemReminder(WORKFLOW_KEYWORD_REMINDER),
+  };
 }

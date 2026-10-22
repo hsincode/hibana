@@ -2,18 +2,18 @@
 
 欧文と数字に使う 2 書体を、外部への通信なしで配るために同梱している（判断記録: #61）。日本語は端末の書体で表示する。
 
-| ファイル | 書体 | ウェイト | 大きさ | SHA-256 |
-|---|---|---|---|---|
-| `outfit-latin-wght.woff2` | Outfit（可変） | 300〜600 | 28,532 バイト | `73e8f95ff8b51b481d549854d8220bd96e3fef828cf0a91b46cdbcef914b49ad` |
+| ファイル                      | 書体                 | ウェイト | 大きさ        | SHA-256                                                            |
+| ----------------------------- | -------------------- | -------- | ------------- | ------------------------------------------------------------------ |
+| `outfit-latin-wght.woff2`     | Outfit（可変）       | 300〜600 | 28,532 バイト | `73e8f95ff8b51b481d549854d8220bd96e3fef828cf0a91b46cdbcef914b49ad` |
 | `redhatmono-latin-wght.woff2` | Red Hat Mono（可変） | 400〜500 | 14,992 バイト | `5d4d381cb364246444810d6212214258354a6b6aa5cb1c3f554038e5a0546ecc` |
 
 ## 出所
 
 [google/fonts](https://github.com/google/fonts) のコミット `bd8f81ddb5c74d5c8897b36ad88b440266245103`（2026-10-10 に取得）。
 
-| 元ファイル | SHA-256 | 上流のリポジトリ |
-|---|---|---|
-| `ofl/outfit/Outfit[wght].ttf` | `fc7287273e66929776e2ba54f144fe699080bec29f61bf649d70d871468aeade` | https://github.com/Outfitio/Outfit-Fonts |
+| 元ファイル                            | SHA-256                                                            | 上流のリポジトリ                             |
+| ------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------- |
+| `ofl/outfit/Outfit[wght].ttf`         | `fc7287273e66929776e2ba54f144fe699080bec29f61bf649d70d871468aeade` | https://github.com/Outfitio/Outfit-Fonts     |
 | `ofl/redhatmono/RedHatMono[wght].ttf` | `253377ac29ccce89cb1b5fb297c69812ffe993b0c436322b3656323ff30fd14f` | https://github.com/RedHatOfficial/RedHatFont |
 
 ## ライセンス

@@ -6,6 +6,7 @@
 - 置き換える／置き換えられた ADR: なし
 
 ## 要求と決定
+
 - プロダクトの特性と、満たす要求:
   - 配信先が API・Web・bot の 3 つあり、変更の内容によって配信される組み合わせが変わる（ADR-0001）。「いつ、どの commit が、どこへ出て、成功したか」を配信先ごとに追えること
   - これまでの記録は、Actions の実行ログ（保存期限あり）、relay の `deployments.json`（30 件まで）、Discord の通知だけだった（#1 の観察 11）
@@ -19,6 +20,7 @@
   - 持ち主の言葉での理由は #5 に追記する
 
 ## 影響
+
 - 得られる効果: リポジトリの Deployments と、commit・PR の画面から、配信先ごとの履歴を辿れる。保存期限がない
 - 費用・運用の負荷・残る制約:
   - 変更の一覧は記録に含まれない。commit の範囲は Discord の通知か、前後の Deployment の commit の差分で見る
@@ -27,6 +29,7 @@
 - セキュリティ・障害時の挙動: Environment は main 以外のブランチからの配信を拒否する。配信の job が main でしか動かない条件（`changes` job）に加えた、二重の制限になる
 
 ## 実装と検証
+
 - 適用した commit・構成図: この ADR を追加した PR
 - 要求ごとの検証記録（2026-10-04）:
   - 配信した job は記録を作る: `production-bot` に `32f6253`、`production-api` と `production-web` に `b51de5d`、`production-api` に `a8542da`。状態は queued → in_progress → success と遷移し、実行のログへのリンクが付く
@@ -35,5 +38,6 @@
 - 実際の運用・CI/CD の実行記録: https://github.com/hsincode/hibana/deployments
 
 ## 見直す条件
+
 - 変更の一覧を配信の記録と一緒に残したくなったとき（タグと Release を足す）
 - `superseded` の記録が紛らわしく、配信の履歴を読み誤ったとき

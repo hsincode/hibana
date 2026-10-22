@@ -19,11 +19,13 @@ export type RouteCase = {
   requested?: Tier;
 };
 
-const difficulty = (tiers: Tier[], ...texts: string[]): RouteCase[] => texts.map((text) => ({ text, tiers }));
+const difficulty = (tiers: Tier[], ...texts: string[]): RouteCase[] =>
+  texts.map((text) => ({ text, tiers }));
 const all: Tier[] = ["haiku", "sonnet", "opus"];
 
 export const ROUTE_CASES: RouteCase[] = [
-  ...difficulty(["haiku"],
+  ...difficulty(
+    ["haiku"],
     "おはよう",
     "ありがとう、助かった",
     "東京の人口は？",
@@ -35,8 +37,14 @@ export const ROUTE_CASES: RouteCase[] = [
     "次の文章を3行で要約して: 昨日の定例では、来月のリリース日を一週間延ばすこと、QA の人員を一人増やすこと、ドキュメントの担当を決めることが話し合われた。",
     "What's the capital of Australia?",
     "「了解しました」を丁寧な英語のメールの一文にして",
-    "こんばんは〜", "今日は何曜日？", "「ありがとう」を韓国語で", "富士山の高さは？", "眠い",
-    "この英文を和訳して: The meeting has been moved to Friday.", "りんごは英語で？", "OK、了解",
+    "こんばんは〜",
+    "今日は何曜日？",
+    "「ありがとう」を韓国語で",
+    "富士山の高さは？",
+    "眠い",
+    "この英文を和訳して: The meeting has been moved to Friday.",
+    "りんごは英語で？",
+    "OK、了解",
     "Pythonでフィボナッチ数列を出力するスクリプトを書いて",
     "メールアドレスにマッチする正規表現を書いて",
     "git で直前のコミットを取り消す方法を教えて",
@@ -54,11 +62,13 @@ export const ROUTE_CASES: RouteCase[] = [
     "このシェルスクリプトを Python に書き換えて、エラー処理も足して",
     "GitHub Actions でテストとデプロイを自動化するワークフローを書いて",
   ),
-  ...difficulty(["haiku", "opus"],
+  ...difficulty(
+    ["haiku", "opus"],
     "ユーザー管理の REST API を設計して。エンドポイントとスキーマを一覧にして",
     "このエラーログを見て原因を調べて: TypeError: Cannot read properties of undefined (reading 'map') at UserList.tsx:42",
   ),
-  ...difficulty(["opus"],
+  ...difficulty(
+    ["opus"],
     // Judgment about existing material or competing options: changing or
     // reviewing existing code, finding a cause, choosing against requirements.
     "このリポジトリにレート制限のミドルウェアを追加して、テストも書いて",
@@ -90,7 +100,8 @@ export const ROUTE_CASES: RouteCase[] = [
   ),
   // Held out on 2026-10-10: written before their first run and not used to
   // word the criteria. They sit on both sides of the Haiku / Opus line.
-  ...difficulty(["haiku"],
+  ...difficulty(
+    ["haiku"],
     "Next.js でお問い合わせフォームのページを作って。バリデーションも入れて",
     "この JSON を CSV に変換する Node.js スクリプトを書いて",
     "東京・大阪・福岡のコワーキングスペースの料金を調べて、表にまとめて",
@@ -99,7 +110,8 @@ export const ROUTE_CASES: RouteCase[] = [
     "nginx でリバースプロキシを設定する conf を書いて。HTTPS と WebSocket も通して",
     "3泊4日の京都旅行のプランを作って。移動手段と予算も入れて",
   ),
-  ...difficulty(["opus"],
+  ...difficulty(
+    ["opus"],
     "このモジュールの設計をレビューして、依存関係の問題と直し方を提案して",
     "CI がときどき落ちる。添付のログを見て、不安定なテストの原因を調べて",
     "うちのチーム（5人、月間10万ユーザー）で、モノレポに移行すべきか判断して。根拠も",
@@ -109,17 +121,45 @@ export const ROUTE_CASES: RouteCase[] = [
   ),
   { text: "Opusで答えて。日本の首都は？", tiers: all, requested: "opus" },
   { text: "ここからはOpusに切り替えて", tiers: all, requested: "opus" },
-  { text: "オーパスでお願い。この設計の弱点を挙げて", tiers: all, requested: "opus" },
+  {
+    text: "オーパスでお願い。この設計の弱点を挙げて",
+    tiers: all,
+    requested: "opus",
+  },
   { text: "use opus for this: explain monads", tiers: all, requested: "opus" },
-  { text: "Sonnetを使ってこのコードをレビューして", tiers: all, requested: "sonnet" },
-  { text: "ソネットで答えてください。おすすめの本は？", tiers: all, requested: "sonnet" },
+  {
+    text: "Sonnetを使ってこのコードをレビューして",
+    tiers: all,
+    requested: "sonnet",
+  },
+  {
+    text: "ソネットで答えてください。おすすめの本は？",
+    tiers: all,
+    requested: "sonnet",
+  },
   { text: "次の返信は sonnet にして", tiers: all, requested: "sonnet" },
-  { text: "haikuでいいよ、道の聞き方を英語で教えて", tiers: all, requested: "haiku" },
-  { text: "軽い質問だからハイクで。1マイルは何キロ？", tiers: all, requested: "haiku" },
+  {
+    text: "haikuでいいよ、道の聞き方を英語で教えて",
+    tiers: all,
+    requested: "haiku",
+  },
+  {
+    text: "軽い質問だからハイクで。1マイルは何キロ？",
+    tiers: all,
+    requested: "haiku",
+  },
   { text: "opusで。今日の晩ごはん何がいい？", tiers: all, requested: "opus" },
-  { text: "この質問は Sonnet に答えさせて: HTTP/3 の利点は？", tiers: all, requested: "sonnet" },
+  {
+    text: "この質問は Sonnet に答えさせて: HTTP/3 の利点は？",
+    tiers: all,
+    requested: "sonnet",
+  },
   { text: "Haiku に切り替えて", tiers: all, requested: "haiku" },
-  { text: "一番賢いやつ（Opus）で頼む。このバグ見て", tiers: all, requested: "opus" },
+  {
+    text: "一番賢いやつ（Opus）で頼む。このバグ見て",
+    tiers: all,
+    requested: "opus",
+  },
   { text: "Opus は高いから使わないで", tiers: all },
   { text: "俳句（haiku）の季語について教えて", tiers: all },
   { text: "Sonnet 5.5 はいつリリースされた？", tiers: all },
@@ -143,26 +183,56 @@ export async function runRouteEval(cases: RouteCase[]): Promise<number> {
   // A call that reports no cost leaves the total unknown, not smaller.
   let cost: number | undefined = 0;
   for (const c of cases) {
-    const messages: Message[] = [{ role: "user", content: c.text + meta, turnStart: true }];
+    const messages: Message[] = [
+      { role: "user", content: c.text + meta, turnStart: true },
+    ];
     try {
       const raw = await jev.decide(routeInput(messages));
-      cost = cost === undefined || raw.cost === undefined ? undefined : cost + raw.cost;
-      const decided = await evaluateRoute(messages, async () => raw, new AbortController().signal);
+      cost =
+        cost === undefined || raw.cost === undefined
+          ? undefined
+          : cost + raw.cost;
+      const decided = await evaluateRoute(
+        messages,
+        async () => raw,
+        new AbortController().signal,
+      );
       const score = (raw.answers.difficulty as { score: number }).score;
       const tier = tierOf(decided.selection.model);
-      const pass = decided.requested === c.requested && (c.requested ? tier === c.requested : c.tiers.includes(tier));
+      const pass =
+        decided.requested === c.requested &&
+        (c.requested ? tier === c.requested : c.tiers.includes(tier));
       if (pass) passed++;
-      console.log(JSON.stringify({
-        pass, score: Math.round(score * 100) / 100, route: `${tier}/${decided.selection.effort}`,
-        requested: decided.requested ?? "none", expected: c.requested ? `requested ${c.requested}` : c.tiers.join("|"),
-        text: c.text.slice(0, 40),
-      }));
+      console.log(
+        JSON.stringify({
+          pass,
+          score: Math.round(score * 100) / 100,
+          route: `${tier}/${decided.selection.effort}`,
+          requested: decided.requested ?? "none",
+          expected: c.requested
+            ? `requested ${c.requested}`
+            : c.tiers.join("|"),
+          text: c.text.slice(0, 40),
+        }),
+      );
     } catch (error) {
-      console.log(JSON.stringify({ pass: false, error: String(error), text: c.text.slice(0, 40) }));
+      console.log(
+        JSON.stringify({
+          pass: false,
+          error: String(error),
+          text: c.text.slice(0, 40),
+        }),
+      );
     }
   }
-  console.log(`passed ${passed}/${cases.length}, cost ${cost === undefined ? "unknown" : `$${cost.toFixed(4)}`}`);
+  console.log(
+    `passed ${passed}/${cases.length}, cost ${cost === undefined ? "unknown" : `$${cost.toFixed(4)}`}`,
+  );
   return passed;
 }
 
-if (import.meta.main && await runRouteEval(ROUTE_CASES) !== ROUTE_CASES.length) process.exitCode = 1;
+if (
+  import.meta.main &&
+  (await runRouteEval(ROUTE_CASES)) !== ROUTE_CASES.length
+)
+  process.exitCode = 1;

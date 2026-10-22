@@ -20,7 +20,13 @@ const USER_CONTEXT_MAX = 4000;
 // "ultrafast" is OpenAI's premium low-latency tier (about 6x the standard
 // price, limited models and accounts). Unentitled requests may come back as
 // HTTP 200 with a lower `service_tier` rather than an error.
-export const SERVICE_TIERS = ["auto", "default", "priority", "flex", "ultrafast"] as const;
+export const SERVICE_TIERS = [
+  "auto",
+  "default",
+  "priority",
+  "flex",
+  "ultrafast",
+] as const;
 export const serviceTierSchema = z.enum(SERVICE_TIERS);
 export type ServiceTier = z.infer<typeof serviceTierSchema>;
 
@@ -32,7 +38,9 @@ export const exaSchema = z.enum(EXA_MODES);
 // session (#76), so its presets are refused here and a saved one is dropped
 // on read. An id the catalog does not know is the first check's to report.
 const childPreset = (raw: string) => !isPresetId(raw) || isChildPresetId(raw);
-const NOT_A_CHILD_PRESET = { message: "Anthropic Workspace presets cannot be a subagent model" };
+const NOT_A_CHILD_PRESET = {
+  message: "Anthropic Workspace presets cannot be a subagent model",
+};
 
 // Each policy is atomic so a personal "auto" choice can override a guild's
 // fixed value without accidentally retaining that guild's model or effort.
@@ -84,21 +92,31 @@ export const roleEffortSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("same") }).strict(),
   z.object({ mode: z.literal("fixed"), effort: effortSchema }).strict(),
 ]);
-const rolePolicySchema = z.object({ model: roleModelSchema, effort: roleEffortSchema }).strict();
+const rolePolicySchema = z
+  .object({ model: roleModelSchema, effort: roleEffortSchema })
+  .strict();
 export type RoleModel = z.infer<typeof roleModelSchema>;
 export type RoleEffort = z.infer<typeof roleEffortSchema>;
 export type RolePolicy = z.infer<typeof rolePolicySchema>;
 export type MultiAgentRoles = Record<MultiAgentRole, RolePolicy>;
 /** PATCH merges per role and per field, so one picker never resets another. */
 export const multiAgentRolesPatchSchema = z
-  .object(Object.fromEntries(MULTI_AGENT_ROLES.map((r) => [r, rolePolicySchema.partial().strict()])) as
-    Record<MultiAgentRole, ReturnType<typeof rolePolicySchema.partial>>)
+  .object(
+    Object.fromEntries(
+      MULTI_AGENT_ROLES.map((r) => [r, rolePolicySchema.partial().strict()]),
+    ) as Record<MultiAgentRole, ReturnType<typeof rolePolicySchema.partial>>,
+  )
   .partial()
   .strict();
 export type MultiAgentRolesPatch = z.infer<typeof multiAgentRolesPatchSchema>;
 
 export const defaultMultiAgentRoles = (): MultiAgentRoles =>
-  Object.fromEntries(MULTI_AGENT_ROLES.map((r) => [r, { model: { mode: "default" }, effort: { mode: "default" } }])) as MultiAgentRoles;
+  Object.fromEntries(
+    MULTI_AGENT_ROLES.map((r) => [
+      r,
+      { model: { mode: "default" }, effort: { mode: "default" } },
+    ]),
+  ) as MultiAgentRoles;
 
 export const selectionSchema = z.object({
   provider: z.string().min(1),
@@ -282,19 +300,34 @@ export function modelEffort(model: string): string {
 }
 
 /** Environment values seed new rows once; saved rows never consult them again. */
-export function settingsDefaults(env: Record<string, string | undefined>): GuildRow {
+export function settingsDefaults(
+  env: Record<string, string | undefined>,
+): GuildRow {
   const row = emptyGuild();
-  const provider = (env.PROVIDER || env.LLM_PROVIDER || "codex_plus").toLowerCase();
+  const provider = (
+    env.PROVIDER ||
+    env.LLM_PROVIDER ||
+    "codex_plus"
+  ).toLowerCase();
   const models: Record<string, string> = {
-    codex_plus: "gpt-6-luna", openai: "gpt-4o-mini", xai: "grok-3-mini",
+    codex_plus: "gpt-6-luna",
+    openai: "gpt-4o-mini",
+    xai: "grok-3-mini",
     orca_router: "obsidian/Qwen3.8-27B",
   };
-  const fallback = env.LLM_MODEL || models[provider] || MODEL_PRESETS.find(p => p.provider === provider)?.model;
+  const fallback =
+    env.LLM_MODEL ||
+    models[provider] ||
+    MODEL_PRESETS.find((p) => p.provider === provider)?.model;
   // Leftover LLM_MODEL=gpt-5.6-* / claude-fable-5 must not keep calling the retired SKU.
   const model = fallback ? canonicalModel(provider, fallback) : fallback;
   if (!model) throw new Error("LLM_MODEL is required for the default provider");
   const effort = env.LLM_EFFORT || modelEffort(model);
-  row.selection = { provider, model, effort: effort === "ultra" ? "max" : effort };
+  row.selection = {
+    provider,
+    model,
+    effort: effort === "ultra" ? "max" : effort,
+  };
   row.effort = row.selection.effort!;
   const flag = (name: string, fallback: boolean) => {
     const value = env[name]?.trim().toLowerCase();
@@ -312,12 +345,28 @@ export function settingsDefaults(env: Record<string, string | undefined>): Guild
   row.jev_enabled = flag("JEV_ENABLED", true);
   row.jev_task_enabled = flag("JEV_TASK_ENABLED", false);
   row.suppress_embeds = flag("DISCORD_SUPPRESS_EMBEDS", false);
-  row.exa_mode = env.EXA_ENABLED === undefined ? "auto" : flag("EXA_ENABLED", true) ? "on" : "off";
-  row.temperature = env.LLM_TEMPERATURE?.trim() ? Number(env.LLM_TEMPERATURE) : 0.7;
-  row.thread_history_max_age_secs = env.THREAD_HISTORY_MAX_AGE_SECS?.trim() ? Number(env.THREAD_HISTORY_MAX_AGE_SECS) : 3600;
-  row.extra_triggers = (env.EXTRA_TRIGGERS || "").split(",").map(x => x.trim()).filter(Boolean);
+  row.exa_mode =
+    env.EXA_ENABLED === undefined
+      ? "auto"
+      : flag("EXA_ENABLED", true)
+        ? "on"
+        : "off";
+  row.temperature = env.LLM_TEMPERATURE?.trim()
+    ? Number(env.LLM_TEMPERATURE)
+    : 0.7;
+  row.thread_history_max_age_secs = env.THREAD_HISTORY_MAX_AGE_SECS?.trim()
+    ? Number(env.THREAD_HISTORY_MAX_AGE_SECS)
+    : 3600;
+  row.extra_triggers = (env.EXTRA_TRIGGERS || "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
   // Reuse public validation without including credentials in settings or errors.
-  guildPatchSchema.parse({ temperature: row.temperature, thread_history_max_age_secs: row.thread_history_max_age_secs, effort: row.effort });
+  guildPatchSchema.parse({
+    temperature: row.temperature,
+    thread_history_max_age_secs: row.thread_history_max_age_secs,
+    effort: row.effort,
+  });
   return row;
 }
 
@@ -403,10 +452,13 @@ function mergeMultiAgentRoles(
 export function patchPresetIds(patch: {
   preset?: string;
   subagent_model?: { mode: string; preset?: string } | null;
-  multi_agent_roles?: Partial<Record<string, { model?: { mode: string; preset?: string } }>> | null;
+  multi_agent_roles?: Partial<
+    Record<string, { model?: { mode: string; preset?: string } }>
+  > | null;
 }): string[] {
   const ids: string[] = [];
-  if (patch.preset && patch.preset !== "reset") ids.push(canonicalPresetId(patch.preset));
+  if (patch.preset && patch.preset !== "reset")
+    ids.push(canonicalPresetId(patch.preset));
   if (patch.subagent_model?.mode === "fixed" && patch.subagent_model.preset)
     ids.push(canonicalPresetId(patch.subagent_model.preset));
   for (const role of Object.values(patch.multi_agent_roles ?? {}))
@@ -415,7 +467,11 @@ export function patchPresetIds(patch: {
   return ids;
 }
 
-export function applyPatch(row: GuildRow, patch: GuildPatch, defaults = emptyGuild()): GuildRow {
+export function applyPatch(
+  row: GuildRow,
+  patch: GuildPatch,
+  defaults = emptyGuild(),
+): GuildRow {
   const clean = normalizeGuild(row, defaults);
   const next = { ...clean, disabled_triggers: [...clean.disabled_triggers] };
   if (patch.mcp_enabled !== undefined) next.mcp_enabled = patch.mcp_enabled;
@@ -429,7 +485,8 @@ export function applyPatch(row: GuildRow, patch: GuildPatch, defaults = emptyGui
   if (patch.filler_removal !== undefined)
     next.filler_removal = patch.filler_removal;
   if (patch.jev_enabled !== undefined) next.jev_enabled = patch.jev_enabled;
-  if (patch.jev_task_enabled !== undefined) next.jev_task_enabled = patch.jev_task_enabled;
+  if (patch.jev_task_enabled !== undefined)
+    next.jev_task_enabled = patch.jev_task_enabled;
   if (patch.subagent_model !== undefined)
     next.subagent_model = normalizeSubagentModel(patch.subagent_model);
   if (patch.subagent_effort !== undefined)
@@ -515,13 +572,18 @@ export function applyPatch(row: GuildRow, patch: GuildPatch, defaults = emptyGui
     next.selection = { ...next.selection, effort: patch.effort };
   }
   if (patch.effort !== undefined) next.effort = patch.effort;
-  if (patch.effort === "ultra" && patch.ultra_mode === undefined) next.ultra_mode = true;
+  if (patch.effort === "ultra" && patch.ultra_mode === undefined)
+    next.ultra_mode = true;
   if (patch.ultra_mode !== undefined) next.ultra_mode = patch.ultra_mode;
   applyMultiAgentPatch(next, patch);
   if (patch.multi_agent_roles !== undefined)
-    next.multi_agent_roles = mergeMultiAgentRoles(next.multi_agent_roles, patch.multi_agent_roles);
+    next.multi_agent_roles = mergeMultiAgentRoles(
+      next.multi_agent_roles,
+      patch.multi_agent_roles,
+    );
   if (patch.service_tier !== undefined) next.service_tier = patch.service_tier;
-  if (patch.subagent_enabled !== undefined) next.subagent_enabled = patch.subagent_enabled;
+  if (patch.subagent_enabled !== undefined)
+    next.subagent_enabled = patch.subagent_enabled;
   return normalizeGuild(next, defaults);
 }
 
@@ -623,15 +685,18 @@ export function applyUserOverridePatch(
   // default would turn one click into a full copy that stops following the server.
   const next: UserOverrideRow = normalizeUserOverride(row);
   if (patch.jev_enabled !== undefined) next.jev_enabled = patch.jev_enabled;
-  if (patch.jev_task_enabled !== undefined) next.jev_task_enabled = patch.jev_task_enabled;
+  if (patch.jev_task_enabled !== undefined)
+    next.jev_task_enabled = patch.jev_task_enabled;
   if (patch.subagent_model !== undefined)
-    next.subagent_model = patch.subagent_model === null
-      ? null
-      : normalizeSubagentModel(patch.subagent_model);
+    next.subagent_model =
+      patch.subagent_model === null
+        ? null
+        : normalizeSubagentModel(patch.subagent_model);
   if (patch.subagent_effort !== undefined)
-    next.subagent_effort = patch.subagent_effort === null
-      ? null
-      : normalizeSubagentEffort(patch.subagent_effort);
+    next.subagent_effort =
+      patch.subagent_effort === null
+        ? null
+        : normalizeSubagentEffort(patch.subagent_effort);
   if (patch.context_clear) {
     next.context = null;
   } else if (
@@ -670,15 +735,18 @@ export function applyUserOverridePatch(
     next.selection = { ...next.selection, effort: patch.effort };
   }
   if (patch.effort !== undefined) next.effort = patch.effort;
-  if (patch.effort === "ultra" && patch.ultra_mode === undefined) next.ultra_mode = true;
+  if (patch.effort === "ultra" && patch.ultra_mode === undefined)
+    next.ultra_mode = true;
   if (patch.ultra_mode !== undefined) next.ultra_mode = patch.ultra_mode;
   applyMultiAgentPatch(next, patch);
   if (patch.multi_agent_roles !== undefined)
-    next.multi_agent_roles = patch.multi_agent_roles === null
-      ? null
-      : mergeMultiAgentRoles(next.multi_agent_roles, patch.multi_agent_roles);
+    next.multi_agent_roles =
+      patch.multi_agent_roles === null
+        ? null
+        : mergeMultiAgentRoles(next.multi_agent_roles, patch.multi_agent_roles);
   if (patch.service_tier !== undefined) next.service_tier = patch.service_tier;
-  if (patch.subagent_enabled !== undefined) next.subagent_enabled = patch.subagent_enabled;
+  if (patch.subagent_enabled !== undefined)
+    next.subagent_enabled = patch.subagent_enabled;
   return normalizeUserOverride(next);
 }
 
@@ -695,18 +763,30 @@ export function normalizeGuild(
   ) as GuildRow;
   row.selection = normalizeSelection(row.selection) ?? defaults.selection;
   // Resolve old nulls once. They must never resume following another row.
-  row.effort = raw?.effort ?? raw?.selection?.effort ??
+  row.effort =
+    raw?.effort ??
+    raw?.selection?.effort ??
     (raw?.selection ? modelEffort(row.selection!.model) : defaults.effort);
-  row.ultra_mode = raw?.ultra_mode ??
-    (row.effort === "ultra" ? true : defaults.ultra_mode);
-  row.service_tier = serviceTierSchema.safeParse(row.service_tier).data ?? defaults.service_tier;
-  row.subagent_model = normalizeSubagentModel(raw?.subagent_model, raw) ?? defaults.subagent_model;
-  row.subagent_effort = normalizeSubagentEffort(row.subagent_effort) ?? defaults.subagent_effort;
-  row.multi_agent_roles = normalizeMultiAgentRoles(raw?.multi_agent_roles ?? defaults.multi_agent_roles);
+  row.ultra_mode =
+    raw?.ultra_mode ?? (row.effort === "ultra" ? true : defaults.ultra_mode);
+  row.service_tier =
+    serviceTierSchema.safeParse(row.service_tier).data ?? defaults.service_tier;
+  row.subagent_model =
+    normalizeSubagentModel(raw?.subagent_model, raw) ?? defaults.subagent_model;
+  row.subagent_effort =
+    normalizeSubagentEffort(row.subagent_effort) ?? defaults.subagent_effort;
+  row.multi_agent_roles = normalizeMultiAgentRoles(
+    raw?.multi_agent_roles ?? defaults.multi_agent_roles,
+  );
   return normalizeMode(row);
 }
 
-function normalizeMode<T extends Pick<GuildRow, "selection" | "effort" | "ultra_mode" | "multi_agent">>(row: T): T {
+function normalizeMode<
+  T extends Pick<
+    GuildRow,
+    "selection" | "effort" | "ultra_mode" | "multi_agent"
+  >,
+>(row: T): T {
   // Store effort independently so model and reasoning depth have separate controls.
   // Keep selection.effort synchronized for older dashboard/bot clients.
   row.effort ??= row.selection?.effort ?? null;
@@ -728,14 +808,17 @@ function normalizeMultiAgentRoles(value: unknown): MultiAgentRoles {
   const out = defaultMultiAgentRoles();
   if (!value || typeof value !== "object") return out;
   for (const role of MULTI_AGENT_ROLES) {
-    const raw = (value as Record<string, { model?: unknown; effort?: unknown } | undefined>)[role];
+    const raw = (
+      value as Record<string, { model?: unknown; effort?: unknown } | undefined>
+    )[role];
     const model = roleModelSchema.safeParse(raw?.model);
     const effort = roleEffortSchema.safeParse(raw?.effort);
     if (model.success) out[role].model = model.data;
     if (effort.success)
-      out[role].effort = effort.data.mode === "fixed" && effort.data.effort === "ultra"
-        ? { mode: "fixed", effort: "max" }
-        : effort.data;
+      out[role].effort =
+        effort.data.mode === "fixed" && effort.data.effort === "ultra"
+          ? { mode: "fixed", effort: "max" }
+          : effort.data;
   }
   return out;
 }
@@ -809,28 +892,33 @@ export function normalizeUserOverride(
   // An explicit Multi choice still implies Ultra, even if that switch was left null.
   if (multi === true) ultra = true;
   if (selection && effort != null) selection = { ...selection, effort };
-  const context = src.context && !emptyContext(src.context)
-    ? {
-        text: typeof src.context.text === "string" ? src.context.text : "",
-        persona_override: Boolean(src.context.persona_override),
-      }
-    : null;
+  const context =
+    src.context && !emptyContext(src.context)
+      ? {
+          text: typeof src.context.text === "string" ? src.context.text : "",
+          persona_override: Boolean(src.context.persona_override),
+        }
+      : null;
   return {
     selection,
     effort,
-    service_tier: src.service_tier == null
-      ? null
-      : serviceTierSchema.safeParse(src.service_tier).data ?? null,
-    subagent_enabled: typeof src.subagent_enabled === "boolean" ? src.subagent_enabled : null,
+    service_tier:
+      src.service_tier == null
+        ? null
+        : (serviceTierSchema.safeParse(src.service_tier).data ?? null),
+    subagent_enabled:
+      typeof src.subagent_enabled === "boolean" ? src.subagent_enabled : null,
     ultra_mode: typeof ultra === "boolean" ? ultra : null,
     multi_agent: typeof multi === "boolean" ? multi : null,
-    multi_agent_roles: src.multi_agent_roles == null
-      ? null
-      : normalizeMultiAgentRoles(src.multi_agent_roles),
+    multi_agent_roles:
+      src.multi_agent_roles == null
+        ? null
+        : normalizeMultiAgentRoles(src.multi_agent_roles),
     subagent_model: normalizeSubagentModel(src.subagent_model, src),
     subagent_effort: normalizeSubagentEffort(src.subagent_effort),
     jev_enabled: typeof src.jev_enabled === "boolean" ? src.jev_enabled : null,
-    jev_task_enabled: typeof src.jev_task_enabled === "boolean" ? src.jev_task_enabled : null,
+    jev_task_enabled:
+      typeof src.jev_task_enabled === "boolean" ? src.jev_task_enabled : null,
     context,
   };
 }

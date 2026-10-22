@@ -33,7 +33,12 @@ export type VmHooks = {
   /** One agent() call. `phase` is the script's current phase() title (the
    *  host applies opts.phase first); `child` names a nested workflow.
    *  Resolves to a JSON value or null; a rejection surfaces as the Error. */
-  agent(prompt: unknown, opts: unknown, phase: string | undefined, child: string | undefined): Promise<unknown>;
+  agent(
+    prompt: unknown,
+    opts: unknown,
+    phase: string | undefined,
+    child: string | undefined,
+  ): Promise<unknown>;
   log(message: string, child: string | undefined): void;
   phase(title: string, child: string | undefined): void;
   /** Records a parallel()/pipeline() slot that became null. */
@@ -52,7 +57,8 @@ export class WorkflowVmError extends Error {
 const FILE = "workflow.js";
 // The wrapper adds one line before the body; stacks report body line + 1.
 const lineOf = (stack: unknown) => {
-  const match = typeof stack === "string" ? /workflow\.js:(\d+)/.exec(stack) : null;
+  const match =
+    typeof stack === "string" ? /workflow\.js:(\d+)/.exec(stack) : null;
   return match ? Math.max(1, Number(match[1]) - 1) : undefined;
 };
 
@@ -68,7 +74,9 @@ function describe(dumped: unknown, limits: VmLimits): string {
       return `${typeof e.name === "string" ? e.name : "Error"}: ${e.message}${line ? ` (line ${line})` : ""}`;
     }
   }
-  return typeof dumped === "string" ? dumped : JSON.stringify(dumped) ?? String(dumped);
+  return typeof dumped === "string"
+    ? dumped
+    : (JSON.stringify(dumped) ?? String(dumped));
 }
 
 // Runs inside QuickJS before the script. It wires the hook functions, adds
@@ -171,7 +179,10 @@ const PRELUDE = String.raw`(() => {
 
 /** Compile without running, so a syntax error is reported by the Workflow
  *  call itself ("was not launched") instead of as a failed background run. */
-export async function checkWorkflowSyntax(body: string, sliceMs = DEFAULT_VM_LIMITS.sliceMs): Promise<string | undefined> {
+export async function checkWorkflowSyntax(
+  body: string,
+  sliceMs = DEFAULT_VM_LIMITS.sliceMs,
+): Promise<string | undefined> {
   const module = await newQuickJSWASMModuleFromVariant(variant);
   const rt = module.newRuntime();
   const deadline = Date.now() + sliceMs;
@@ -179,7 +190,9 @@ export async function checkWorkflowSyntax(body: string, sliceMs = DEFAULT_VM_LIM
   rt.setMemoryLimit(DEFAULT_VM_LIMITS.memoryBytes);
   const vm = rt.newContext();
   try {
-    const compiled = vm.evalCode(`(async () => {\n${body}\n})`, FILE, { compileOnly: true });
+    const compiled = vm.evalCode(`(async () => {\n${body}\n})`, FILE, {
+      compileOnly: true,
+    });
     if (!compiled.error) {
       compiled.value.dispose();
       return undefined;
@@ -208,7 +221,9 @@ export async function runWorkflowScript(o: {
   let deadline = 0;
   rt.setInterruptHandler(() => Date.now() > deadline);
   const vm: QuickJSContext = rt.newContext();
-  const slice = () => { deadline = Date.now() + limits.sliceMs; };
+  const slice = () => {
+    deadline = Date.now() + limits.sliceMs;
+  };
   const deferreds = new Set<QuickJSDeferredPromise>();
   const timers = new Map<number, ReturnType<typeof setTimeout>>();
   let fire: QuickJSHandle | undefined;
@@ -240,15 +255,25 @@ export async function runWorkflowScript(o: {
   };
   const vmError = (error: unknown) => {
     const e = error instanceof Error ? error : new Error(String(error));
-    return vm.newError({ name: e.name === "Error" || !e.name ? "Error" : e.name, message: e.message });
+    return vm.newError({
+      name: e.name === "Error" || !e.name ? "Error" : e.name,
+      message: e.message,
+    });
   };
-  const asyncHook = (name: string, run: (...args: QuickJSHandle[]) => Promise<unknown>, wrap: (value: unknown) => QuickJSHandle = toVm) =>
+  const asyncHook = (
+    name: string,
+    run: (...args: QuickJSHandle[]) => Promise<unknown>,
+    wrap: (value: unknown) => QuickJSHandle = toVm,
+  ) =>
     vm.newFunction(name, (...args) => {
       const deferred = vm.newPromise();
       deferreds.add(deferred);
       let started: Promise<unknown>;
-      try { started = run(...args); }
-      catch (error) { started = Promise.reject(error); }
+      try {
+        started = run(...args);
+      } catch (error) {
+        started = Promise.reject(error);
+      }
       started.then(
         (value) => {
           if (disposed || !deferreds.delete(deferred)) return;
@@ -275,66 +300,132 @@ export async function runWorkflowScript(o: {
       );
       return deferred.handle;
     });
-  const syncHook = (name: string, run: (...args: QuickJSHandle[]) => QuickJSHandle | void) =>
+  const syncHook = (
+    name: string,
+    run: (...args: QuickJSHandle[]) => QuickJSHandle | void,
+  ) =>
     vm.newFunction(name, (...args) => {
-      try { return run(...args) ?? undefined; }
-      catch (error) { return { error: vmError(error) }; }
+      try {
+        return run(...args) ?? undefined;
+      } catch (error) {
+        return { error: vmError(error) };
+      }
     });
   const optionalString = (handle?: QuickJSHandle) =>
     handle && vm.typeof(handle) === "string" ? vm.getString(handle) : undefined;
 
   const hostObject = vm.newObject();
   const hooks: [string, QuickJSHandle][] = [
-    ["agent", asyncHook("agent", (prompt, opts, phase, child) =>
-      o.hooks.agent(fromVm(prompt), fromVm(opts), optionalString(phase), optionalString(child)))],
-    ["log", syncHook("log", (message, child) => { o.hooks.log(vm.getString(message), optionalString(child)); })],
-    ["phase", syncHook("phase", (title, child) => { o.hooks.phase(vm.getString(title), optionalString(child)); })],
-    ["failure", syncHook("failure", (message) => { o.hooks.failure(vm.getString(message)); })],
-    ["checkCaps", syncHook("checkCaps", () => { o.hooks.checkCaps(); })],
+    [
+      "agent",
+      asyncHook("agent", (prompt, opts, phase, child) =>
+        o.hooks.agent(
+          fromVm(prompt),
+          fromVm(opts),
+          optionalString(phase),
+          optionalString(child),
+        ),
+      ),
+    ],
+    [
+      "log",
+      syncHook("log", (message, child) => {
+        o.hooks.log(vm.getString(message), optionalString(child));
+      }),
+    ],
+    [
+      "phase",
+      syncHook("phase", (title, child) => {
+        o.hooks.phase(vm.getString(title), optionalString(child));
+      }),
+    ],
+    [
+      "failure",
+      syncHook("failure", (message) => {
+        o.hooks.failure(vm.getString(message));
+      }),
+    ],
+    [
+      "checkCaps",
+      syncHook("checkCaps", () => {
+        o.hooks.checkCaps();
+      }),
+    ],
     ["spent", syncHook("spent", () => vm.newNumber(o.hooks.spent()))],
-    ["bindTimers", syncHook("bindTimers", (fn) => { fire?.dispose(); fire = fn!.dup(); })],
-    ["setTimer", syncHook("setTimer", (idHandle, msHandle) => {
-      if (timers.size >= limits.maxTimers) throw new Error(`Too many pending timers (max ${limits.maxTimers})`);
-      const id = vm.getNumber(idHandle!);
-      const ms = Math.max(0, Math.min(limits.maxTimerMs, vm.getNumber(msHandle!) || 0));
-      timers.set(id, setTimeout(() => {
+    [
+      "bindTimers",
+      syncHook("bindTimers", (fn) => {
+        fire?.dispose();
+        fire = fn!.dup();
+      }),
+    ],
+    [
+      "setTimer",
+      syncHook("setTimer", (idHandle, msHandle) => {
+        if (timers.size >= limits.maxTimers)
+          throw new Error(`Too many pending timers (max ${limits.maxTimers})`);
+        const id = vm.getNumber(idHandle!);
+        const ms = Math.max(
+          0,
+          Math.min(limits.maxTimerMs, vm.getNumber(msHandle!) || 0),
+        );
+        timers.set(
+          id,
+          setTimeout(() => {
+            timers.delete(id);
+            if (disposed || !fire) return;
+            slice();
+            const idArg = vm.newNumber(id);
+            const called = vm.callFunction(fire, vm.undefined, idArg);
+            idArg.dispose();
+            if (called.error) {
+              const dumped = vm.dump(called.error);
+              called.error.dispose();
+              // A throwing timer callback is an uncaught error, as in Node.
+              fail(new WorkflowVmError(describe(dumped, limits)));
+            } else called.value.dispose();
+            pump();
+          }, ms),
+        );
+      }),
+    ],
+    [
+      "clearTimer",
+      syncHook("clearTimer", (idHandle) => {
+        const id = vm.getNumber(idHandle!);
+        clearTimeout(timers.get(id));
         timers.delete(id);
-        if (disposed || !fire) return;
-        slice();
-        const idArg = vm.newNumber(id);
-        const called = vm.callFunction(fire, vm.undefined, idArg);
-        idArg.dispose();
-        if (called.error) {
-          const dumped = vm.dump(called.error);
-          called.error.dispose();
-          // A throwing timer callback is an uncaught error, as in Node.
-          fail(new WorkflowVmError(describe(dumped, limits)));
-        } else called.value.dispose();
-        pump();
-      }, ms));
-    })],
-    ["clearTimer", syncHook("clearTimer", (idHandle) => {
-      const id = vm.getNumber(idHandle!);
-      clearTimeout(timers.get(id));
-      timers.delete(id);
-    })],
-    ["child", asyncHook("child", (ref) => o.hooks.loadChild(fromVm(ref)), (loaded) => {
-      const { name, body } = loaded as { name: string; body: string };
-      slice();
-      const compiled = vm.evalCode(`(async function (args, workflow, phase, log, agent) {\n${body}\n})`, `${NESTED_MARK} ${name}.js`);
-      if (compiled.error) {
-        const dumped = vm.dump(compiled.error);
-        compiled.error.dispose();
-        throw new WorkflowVmError(`workflow(${JSON.stringify(name)}) failed to start: ${describe(dumped, limits)}`);
-      }
-      const result = vm.newObject();
-      const nameHandle = vm.newString(name);
-      vm.setProp(result, "name", nameHandle);
-      vm.setProp(result, "run", compiled.value);
-      nameHandle.dispose();
-      compiled.value.dispose();
-      return result;
-    })],
+      }),
+    ],
+    [
+      "child",
+      asyncHook(
+        "child",
+        (ref) => o.hooks.loadChild(fromVm(ref)),
+        (loaded) => {
+          const { name, body } = loaded as { name: string; body: string };
+          slice();
+          const compiled = vm.evalCode(
+            `(async function (args, workflow, phase, log, agent) {\n${body}\n})`,
+            `${NESTED_MARK} ${name}.js`,
+          );
+          if (compiled.error) {
+            const dumped = vm.dump(compiled.error);
+            compiled.error.dispose();
+            throw new WorkflowVmError(
+              `workflow(${JSON.stringify(name)}) failed to start: ${describe(dumped, limits)}`,
+            );
+          }
+          const result = vm.newObject();
+          const nameHandle = vm.newString(name);
+          vm.setProp(result, "name", nameHandle);
+          vm.setProp(result, "run", compiled.value);
+          nameHandle.dispose();
+          compiled.value.dispose();
+          return result;
+        },
+      ),
+    ],
   ];
   for (const [name, fn] of hooks) {
     vm.setProp(hostObject, name, fn);
@@ -362,10 +453,18 @@ export async function runWorkflowScript(o: {
     }
   };
 
-  const abort = () => fail(o.signal.reason instanceof Error ? o.signal.reason : new Error("Workflow stopped"));
+  const abort = () =>
+    fail(
+      o.signal.reason instanceof Error
+        ? o.signal.reason
+        : new Error("Workflow stopped"),
+    );
   try {
     return await new Promise<unknown>((resolve, reject) => {
-      fatal = (error) => { fatal = undefined; reject(error); };
+      fatal = (error) => {
+        fatal = undefined;
+        reject(error);
+      };
       if (o.signal.aborted) return abort();
       o.signal.addEventListener("abort", abort, { once: true });
       slice();
@@ -373,7 +472,11 @@ export async function runWorkflowScript(o: {
       if (prelude.error) {
         const dumped = vm.dump(prelude.error);
         prelude.error.dispose();
-        return reject(new WorkflowVmError(`workflow prelude failed: ${describe(dumped, limits)}`));
+        return reject(
+          new WorkflowVmError(
+            `workflow prelude failed: ${describe(dumped, limits)}`,
+          ),
+        );
       }
       prelude.value.dispose();
       if (o.args !== undefined) {
@@ -400,13 +503,24 @@ export async function runWorkflowScript(o: {
           return fail(new WorkflowVmError(describe(dumped, limits)));
         }
         slice();
-        const text = vm.callFunction(jsonStringify, vm.undefined, outcome.value);
+        const text = vm.callFunction(
+          jsonStringify,
+          vm.undefined,
+          outcome.value,
+        );
         outcome.value.dispose();
         if (text.error) {
           text.error.dispose();
-          return fail(new WorkflowVmError("workflow result is not JSON-serializable (a circular reference?)"));
+          return fail(
+            new WorkflowVmError(
+              "workflow result is not JSON-serializable (a circular reference?)",
+            ),
+          );
         }
-        const json = vm.typeof(text.value) === "string" ? vm.getString(text.value) : undefined;
+        const json =
+          vm.typeof(text.value) === "string"
+            ? vm.getString(text.value)
+            : undefined;
         text.value.dispose();
         fatal = undefined;
         resolve(json === undefined ? undefined : JSON.parse(json));

@@ -150,7 +150,7 @@
 .mode-name::after { content: ""; width: 8px; height: 8px; border: 1px solid var(--line-strong); border-radius: 50%; }
 .mode-body { font-size: var(--fs-xs); line-height: 1.6; }
 /* 選んだモード: 箔の縁と、藤色の薄い色づけ。切り替えたときは、縁と色づけが短く現れるだけにする
-   （まとまり全体を光が回る動きは、本人の指摘「派手すぎる」で外した） */
+   （まとまり全体を光が回る動きは、派手すぎるので外した） */
 .mode[aria-checked="true"] { border-color: transparent; background: color-mix(in oklch, var(--f2) 9%, transparent); color: var(--ink); }
 .mode[aria-checked="true"] .mode-name::after { border-color: transparent; background: var(--f2); }
 [data-row$="-mode"] .trace::after, [data-row$="-mode"] .trace.is-traced::before { content: none; }

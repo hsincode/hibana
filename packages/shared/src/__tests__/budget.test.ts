@@ -12,7 +12,7 @@ import {
 } from "../budget";
 
 describe("budget fallback (#89)", () => {
-  test("the owner's threshold and default: below $10, Anthropic API Haiku 5.5 High", () => {
+  test("the threshold and default of #89: below $10, Anthropic API Haiku 5.5 High", () => {
     expect(DEFAULT_BUDGET_FALLBACK_THRESHOLD_USD).toBe(10);
     expect(budgetLow(9.99, 10)).toBe(true);
     expect(budgetLow(10, 10)).toBe(false);

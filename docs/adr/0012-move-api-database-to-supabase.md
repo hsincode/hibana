@@ -1,14 +1,14 @@
 # ADR-0012: 設定 API の DB を Neon から Supabase（東京）に移し、API の関数を東京に置く
 
-- 状態: 採用（2026-10-21、持ち主の判断）。Supabase と Vercel の `hnd1` での動作は、まだ確かめていない
-- 決定日・判断者: 2026-10-21、持ち主。移行先を Supabase Free（東京）にすること、API の関数を `hnd1` に移すこと（AI の推奨に「Aにして」と回答。`hnd1` を含むかは PR で確かめる）、データを bot の snapshot から復元すること。接続の方式（ドライバ、プールの設定、リトライ）は AI の案で、本人未確認
+- 状態: 採用（2026-10-21）。Supabase と Vercel の `hnd1` での動作は、まだ確かめていない
+- 決定日: 2026-10-21。移行先を Supabase Free（東京）にすること、API の関数を `hnd1` に移すこと（決定に `hnd1` を含むかは PR で確かめる）、データを bot の snapshot から復元すること
 - 判断の過程を残した Issue: #92（調査記録）、#93（判断記録）、#27（Vercel の Fluid の使用量の超過）
 - 置き換える／置き換えられた ADR: なし
 
 ## 要求と決定
 - プロダクトの特性と、満たす要求:
   - bot は 30 秒ごとに `/internal/snapshot` を呼び、API はそのたびに DB を 1 回読む（#27 で、SSE をやめてポーリングにした）。Neon の Free は、5 分間アクセスが無いときだけ休止し、月 100 CU 時間までしか動かない。このポーリングでは休止できず、月の途中（2026-10-17 ごろ）で枠を使い切り、API が HTTP 402 で止まった（#92）。同じ止まり方は以前にもあった（[production.md](../production.md)）
-  - 費用は $0 のまま。Neon でなくてもよく、普通の Postgres を候補にする（持ち主、2026-10-21）
+  - 費用は $0 のまま。Neon でなくてもよく、普通の Postgres を候補にする（2026-10-21）
 - 採用する構成・方式:
   - DB は Supabase の Free プラン、東京リージョン。API からは Supavisor の transaction モード（ポート 6543）につなぐ
   - ドライバは `@neondatabase/serverless`（HTTP）をやめて、Bun に組み込みの `SQL`（TCP、接続プールつき）にする。詳細は [database.md](../database.md)

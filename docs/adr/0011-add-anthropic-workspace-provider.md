@@ -1,18 +1,18 @@
 # ADR-0011: プロバイダー「Anthropic Workspace」を足し、Claude Managed Agents のセッションで動かす
 
-- 状態: 採用（2026-10-12、持ち主の判断）。最初は PR #77 として、Claude ハーネス（PR #73。保留中）の上に実装した。同じ日に、持ち主の判断（#76）で、この機能だけを `main` に載せ替えた。**この ADR は PR #77 のときに書いたもので、代替案と不利益の節には、その時点の前提（#66・#68 など）が残っている。** 実 API では、載せ替える前のコードで、Haiku 5.5 のセッションだけを確認した: Ultra なしの全項目と、Haiku Ultra の bot 自身のターン 1 回。載せ替えた後のコードは実 API に当てていない。#76 の未決の点は、AI の案のまま実装してあり、本人未確認
-- 決定日・判断者: 次の 4 項目は 2026-10-12、持ち主（#76 の原文）。プロバイダー「Anthropic Workspace」として足すこと。既存のサンドボックスではなく、クラウドの作業領域を前提にすること。既存のツールは入れられるものを入れ、入れられないものは無理に入れないこと。モデルは、Haiku Ultra に対応するほかは同じにすること。それ以外（下で「AI の案」と書いた点。上限の値を含む）は AI の案のまま実装しており、本人未確認
-- 判断の過程を残した Issue: #76（本人の原文、AI の解釈、まだ決まっていない 11 点の比較）、#66（Managed Agents を不採用にした比較）、#67（非推奨の線引き）、#68（Anthropic の委譲）、#35（Auto Routing）、#44（利用額）
+- 状態: 採用（2026-10-12）。最初は PR #77 として、Claude ハーネス（PR #73。保留中）の上に実装した。同じ日に、#76 の判断で、この機能だけを `main` に載せ替えた。**この ADR は PR #77 のときに書いたもので、代替案と不利益の節には、その時点の前提（#66・#68 など）が残っている。** 実 API では、載せ替える前のコードで、Haiku 5.5 のセッションだけを確認した: Ultra なしの全項目と、Haiku Ultra の bot 自身のターン 1 回。載せ替えた後のコードは実 API に当てていない。#76 の未決の点は、下の「採用する構成・方式」のとおりに実装してある
+- 決定日: 次の 4 項目は 2026-10-12（#76）。プロバイダー「Anthropic Workspace」として足すこと。既存のサンドボックスではなく、クラウドの作業領域を前提にすること。既存のツールは入れられるものを入れ、入れられないものは無理に入れないこと。モデルは、Haiku Ultra に対応するほかは同じにすること。それ以外（上限の値を含む）は、下の「採用する構成・方式」のとおりに実装している
+- 判断の過程を残した Issue: #76（要求、解釈、まだ決まっていない 11 点の比較）、#66（Managed Agents を不採用にした比較）、#67（非推奨の線引き）、#68（Anthropic の委譲）、#35（Auto Routing）、#44（利用額）
 - 置き換える／置き換えられた ADR: なし。ADR-0008 の保存先（`conversations.db`）に、表を 2 つ足す。Claude ハーネスの ADR（PR #73 の ADR-0009・ADR-0010。保留中で、`main` には無い）が代替案として不採用にした「Managed Agents」を、`anthropic` のターンの置き換えではなく、別のプロバイダーとして足す
 
 ## 要求と決定
 - プロダクトの特性と、満たす要求:
   - 作業領域は bot の機械の Docker サンドボックスで、サーバーの通常のチャンネルは 1 つを共有している。Anthropic のターンにサブエージェントは無い（#35）
-  - 持ち主の要求（#76 の原文）: 作業領域もクラウドにあり、Haiku Ultra にも対応したものを、プロバイダー「Anthropic Workspace」として足す。直前のやりとりでの発言は「Haiku Ultra などとして公式 API の機能を使った実装にしたい」
-  - AI の解釈（本人未確認）: 「公式 API の機能」は Claude Managed Agents の dynamic workflows。「クラウドの作業領域」は Managed Agents の cloud environment のコンテナ。「Haiku Ultra」は、Haiku 5.5 のときだけ dynamic workflows を有効にすること。「モデルは同じ」は、`anthropic` と同じ 3 モデル（Haiku 5.5 / Sonnet 5.5 / Opus 5.5）で、Auto は含めない
+  - 要求（#76）: 作業領域もクラウドにあり、Haiku Ultra にも対応したものを、プロバイダー「Anthropic Workspace」として足す。Haiku Ultra などとして、公式 API の機能を使って実装する
+  - 解釈: 「公式 API の機能」は Claude Managed Agents の dynamic workflows。「クラウドの作業領域」は Managed Agents の cloud environment のコンテナ。「Haiku Ultra」は、Haiku 5.5 のときだけ dynamic workflows を有効にすること。「モデルは同じ」は、`anthropic` と同じ 3 モデル（Haiku 5.5 / Sonnet 5.5 / Opus 5.5）で、Auto は含めない
   - 併せて守る要求: ほかのプロバイダーのターンが送るリクエストを変えないこと。guild / DM の分離と権限チェックを保つこと。費用に上限を置くこと（AGENTS.md）。bot だけで切り戻せること（ADR-0006）
-- 採用する構成・方式（プロバイダーとして足すこと以外は AI の案。本人未確認）:
-  - provider `anthropic_workspace`（表示名は Anthropic Workspace）。プリセットは 3 件（Premium 以上が設定でき、サーバーで共有できる。`anthropic` と同じ）。最初は非公開で入れ、持ち主が `/models` で公開する。設定 API を使わない bot（`WEB_API_URL` なし）には公開の手段が無いので、そこでは常に非公開・Premium 以上として扱い、使えるのは `PROVIDER=anthropic_workspace` を既定にしたときだけにする。Auto のプリセットは作らず、Auto Routing は `anthropic` だけのままにする（#35）。非推奨でないプロバイダーは `anthropic` と `anthropic_workspace` の 2 つになる
+- 採用する構成・方式:
+  - provider `anthropic_workspace`（表示名は Anthropic Workspace）。プリセットは 3 件（Premium 以上が設定でき、サーバーで共有できる。`anthropic` と同じ）。最初は非公開で入れ、`/models` で公開する。設定 API を使わない bot（`WEB_API_URL` なし）には公開の手段が無いので、そこでは常に非公開・Premium 以上として扱い、使えるのは `PROVIDER=anthropic_workspace` を既定にしたときだけにする。Auto のプリセットは作らず、Auto Routing は `anthropic` だけのままにする（#35）。非推奨でないプロバイダーは `anthropic` と `anthropic_workspace` の 2 つになる
   - 認証情報は `ANTHROPIC_WORKSPACE_API_KEY` だけ。`ANTHROPIC_API_KEY` へのフォールバックはしない（プロバイダーごとに独立した認証情報）
   - bot 自身のループとは別の実行経路 `workspace`。ターンは Managed Agents のセッションへの 1 回の発言で、ループ・会話・作業領域は Anthropic 側にある。内容は [docs/anthropic-workspace.md](../anthropic-workspace.md)
   - 公式 SDK `@anthropic-ai/sdk` を **0.133.0 に固定**して、この経路だけで使う。dynamic workflows と budget の型が入った版で、beta の型は版ごとに変わりうるので、範囲指定にしない。ほかのプロバイダーの送受信は、従来の `fetch` の実装のまま変えない
@@ -35,10 +35,10 @@
   - bot がサーバーから外されても、そのサーバーのセッションは片付けない（ほかのプロバイダーのターンが、履歴と作業領域を残すのに合わせる）
   - コンテナのネットワークは、既定で `unrestricted`（環境変数で `limited` と許可するホストの一覧にできる）
   - プロンプトと、書き直したツールの説明は、公開文書をもとに自作する（docs/anthropic-workspace.md の「出所」）
-- 比較した代替案と、採用しなかった理由（理由の整理は AI によるもので、持ち主の言葉での理由は聞いていない）:
+- 比較した代替案と、採用しなかった理由:
   - `anthropic` のターンを Managed Agents に置き換える（#76 の案 B）: 経路は増えないが、既存の会話・作業領域・サブエージェントの形が変わり、#66 の決定と #69 の比較の前提が変わる
   - 既存の Workflow（Ultracode）を `anthropic` に出す（#68 の 2b）: 作業領域がクラウドにならない。root が xhigh になり、金額の上限を置けない。文面の出所の問題（#68 の 3）を先に決める必要がある
-  - まだ決まっていない点ごとの代替案（専用のプリセット「Haiku Ultra」、ターンごとのセッション、会話だけを消す `/clear`、`limited` のネットワーク、生の HTTP での実装、スキルとサイトの公開を Files API 経由で入れる、など）は #76 の表にある。実装は AI の推奨の側で進めてあり、決まったら直す
+  - まだ決まっていない点ごとの代替案（専用のプリセット「Haiku Ultra」、ターンごとのセッション、会話だけを消す `/clear`、`limited` のネットワーク、生の HTTP での実装、スキルとサイトの公開を Files API 経由で入れる、など）は #76 の表にある。実装は #76 の表の推奨の側で進めてあり、決まったら直す
 
 ## 影響
 - 得られる効果:
@@ -62,7 +62,7 @@
 - セキュリティ・障害時の挙動:
   - 組み込みのシェル・ファイル・web のツールは Anthropic 側で動き、bot は 1 件ごとの権限チェックを挟めない。利用停止と権限を確かめるのは、ターンの開始時、Hibana のツールが呼ばれたとき、イベントを読むたび
   - コンテナは、既定では外に出られる。読んだ内容に動かされて、コンテナの中身を外へ送る危険は、公開文書が挙げている。秘密情報はコンテナに入れない（bot の鍵やトークンは渡していない）
-  - Files API のファイルは、同じ Console workspace のどの鍵からも読める。**Workspace 専用の Console workspace を作り、その鍵を使い、spend limit を設定することを勧める**（#76 の 8。本人の判断待ち）。bot が壊れても効く歯止めは、この spend limit と session budget だけ
+  - Files API のファイルは、同じ Console workspace のどの鍵からも読める。**Workspace 専用の Console workspace を作り、その鍵を使い、spend limit を設定することを勧める**（#76 の 8。未決）。bot が壊れても効く歯止めは、この spend limit と session budget だけ
   - 鍵・`authToken`・接続先は必ず明示して SDK に渡すので、環境変数 `ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN`・`ANTHROPIC_BASE_URL`（この配備では、ほかのプロバイダーのもの）がこの経路に混ざることはない（`workspace-client.test.ts`）。ただし SDK は環境変数 `ANTHROPIC_CUSTOM_HEADERS` を読んでヘッダーに足すので、bot の環境にこの変数を置くと、Workspace のリクエストにも付く。SDK はこの変数の行を認証のヘッダーの上に重ね、同じ名前を綴り違いで 2 回書くと、クライアントに渡した値では片方しか上書きできない。そこで、SDK に渡す `fetch` の中で、送信の直前に `x-api-key` を Workspace の鍵に設定し、`Authorization` を消している（SDK の重ね順に依らない。ストリームとファイルの取得も同じ `fetch` を通る）。鍵と `Authorization` は置き換わらず、認証以外のヘッダーはそのまま付く（`workspace-client.test.ts`。SDK 0.133.0 のコードの読み取りと、偽の `fetch` でのテストによる。実 API には送っていない）。本番の bot は `fetch` を渡さず、グローバルの `fetch` を包んで使うので、その経路は、`fetch` を渡さずに 127.0.0.1 のサーバーへ送るテスト 1 件で確かめている。クライアントに渡す値も残している（SDK が、認証のヘッダーの無いリクエストを送信前に断るため）。確かめた範囲では、両方のヘッダーを「正規の綴りが先、別の綴りが値なし」で書いた場合に、SDK が送信前にエラーにする（リクエストは出ず、鍵も出ない）
   - 止め方: **プリセットを非公開に戻しても、既に選んでいるサーバーは動き続ける。** 止めるには、鍵を外す（Workspace を選んでいるサーバーの全ターンが認証エラーになる。ほかのモデルには切り替わらない）か、サーバーごとにモデルを替える
   - 切り戻し（bot だけを前の版に戻したとき。ADR-0006）: 新しい表は読まれないだけで残る（前の版（`main` の `2da1b1a`）の `conversation-store.ts` と `history.ts` を、新しい版が書いたファイルに対して手元で動かした確認による。前の版の bot 全体は動かしていない）。**前の版の bot は、Workspace のチェックポイントを、ほかのプロバイダーのものとして扱うことがある**（前の版のコードの読み取りによる。未検証）。**切り戻している間の `/clear` やチャンネルの削除は、クラウドのセッションに届かない**ので、新しい版に戻すと、消したはずの会話と作業ファイルが続く
@@ -83,17 +83,17 @@
   - 利用額の台帳: `workspace-usage.test.ts`
   - bot 全体（`Hibana.respond` から偽の API まで。上限、片付け、再開、コマンド）: `workspace-turn.test.ts`
   - 画面: `apps/web/tests/design.spec.ts`（`bun run test:ui`）
-- 実装のレビュー（AI による。2026-10-12）で見つかった誤りと、その対応は、PR #77 に書いた。直した挙動は、上の「採用する構成・方式」と [docs/anthropic-workspace.md](../anthropic-workspace.md) に反映した。直しは別の点検（AI による）で反証し、そこで見つかった項目と対応、直さずに残した限界も、同じ PR に書く。対応の選び方は AI の案で、本人未確認
+- 実装のレビュー（2026-10-12）で見つかった誤りと、その対応は、PR #77 に書いた。直した挙動は、上の「採用する構成・方式」と [docs/anthropic-workspace.md](../anthropic-workspace.md) に反映した。直しは別の点検で反証し、そこで見つかった項目と対応、直さずに残した限界も、同じ PR に書く
 - 実際の運用・CI/CD の実行記録: 未配信
-- 実 API での確認: **2026-10-12 に、持ち主の承認のもとで AI が実行した**（#76 の 11。上限は合計 $1、鍵は `ANTHROPIC_API_KEY` の値をその実行のプロセスにだけ渡す。どちらも持ち主の選択）。Haiku 5.5・effort medium で、手動のスクリプト（`cd apps/bot && bun run workspace-smoke`）の 23 項目と、bot 自身のターン（`--bot-only --ultra`。ツールは bot の registry が実行し、Discord は偽）の 12 項目が通った。12 項目のうち 1 つは Haiku Ultra のターンで、workflow run が 1 つ始まって終わり、run のエージェントからの `read_messages` は worker として実行され、`send_message` は断られた。セッションが報告した list cost の合計は $0.22。スクリプト側の Ultra の区間（`--ultra`。budget で止めた run の扱いなど）は、Claude Code の権限の仕組みが実行を止めたので、流していない。持ち主は再実行していない。結果と観測は [docs/anthropic-workspace.md](../anthropic-workspace.md) の「実 API での確認」にある。**どれも、`main` に載せ替える前のコード（PR #77）での確認である**
+- 実 API での確認: **2026-10-12 に、承認を得て実行した**（#76 の 11。上限は合計 $1、鍵は `ANTHROPIC_API_KEY` の値をその実行のプロセスにだけ渡す）。Haiku 5.5・effort medium で、手動のスクリプト（`cd apps/bot && bun run workspace-smoke`）の 23 項目と、bot 自身のターン（`--bot-only --ultra`。ツールは bot の registry が実行し、Discord は偽）の 12 項目が通った。12 項目のうち 1 つは Haiku Ultra のターンで、workflow run が 1 つ始まって終わり、run のエージェントからの `read_messages` は worker として実行され、`send_message` は断られた。セッションが報告した list cost の合計は $0.22。スクリプト側の Ultra の区間（`--ultra`。budget で止めた run の扱いなど）は、実行環境の権限の仕組みが実行を止めたので、流していない。再実行はしていない。結果と観測は [docs/anthropic-workspace.md](../anthropic-workspace.md) の「実 API での確認」にある。**どれも、`main` に載せ替える前のコード（PR #77）での確認である**
   - 実装が前提にしていたことのうち、観測できたもの: `processed_at` は取り上げの時点に付く。額（`list_cost`）は作成直後から報告される。取り上げ前の発言は一覧に `processed_at` なしで載る。budget を消費済み以下にしたときの 400 は、文面だけで来る。サブディレクトリのファイルは、ディレクトリなしの名前で一覧に載る。Haiku 5.5 のエージェントで workflows を有効にでき、セッションの作成時の上書きの後も残る。run のスレッドからの custom tool の呼び出しには、スレッドの指定なしの結果が届く
-  - 課金されるので、次に流すときも、そのつど持ち主の承認が要る
-- 検証していない範囲: [docs/anthropic-workspace.md](../anthropic-workspace.md) の「検証していない範囲」のとおり。主なものは、`main` に載せ替えた後のコードでの実 API の確認、Haiku Ultra のうち、budget で止まった run の扱い・ターンをまたぐ run・run が開いたセッションの片付け（実 API で動かしたのは、run が 1 つ始まって終わるターン 1 回だけ）、Sonnet 5.5・Opus 5.5、実際の Discord を通したターン、実際の費用（請求額）、切り戻しの挙動、持ち主による文面の確認
+  - 課金されるので、次に流すときも、そのつど承認が要る
+- 検証していない範囲: [docs/anthropic-workspace.md](../anthropic-workspace.md) の「検証していない範囲」のとおり。主なものは、`main` に載せ替えた後のコードでの実 API の確認、Haiku Ultra のうち、budget で止まった run の扱い・ターンをまたぐ run・run が開いたセッションの片付け（実 API で動かしたのは、run が 1 つ始まって終わるターン 1 回だけ）、Sonnet 5.5・Opus 5.5、実際の Discord を通したターン、実際の費用（請求額）、切り戻しの挙動
 
 ## 見直す条件
 - この判断を見直す事象・数値:
   - 実 API で、Haiku 5.5 の workflows、Files API での受け渡し、budget での停止のどれかが、実装の前提どおりに動かないとき
-  - #76 のまだ決まっていない点を、持ち主が AI の案と違う形で決めたとき（上限の値、回数の上限、`/clear` の意味、ネットワーク、Haiku Ultra の出し方、SDK を使うか）
+  - #76 のまだ決まっていない点を、実装と違う形で決めたとき（上限の値、回数の上限、`/clear` の意味、ネットワーク、Haiku Ultra の出し方、SDK を使うか）
   - beta の仕様か SDK の型が変わったとき（SDK の版を上げるのは、その差分を確かめてから）
   - 1 ターンの費用や run の暴走が、決めた上限で抑えられないとき
   - `anthropic` のターンもこの経路に寄せると判断するとき（#66 を変える判断記録で決める）

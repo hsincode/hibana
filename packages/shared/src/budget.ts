@@ -8,7 +8,7 @@ import { z } from "zod";
 import { AUTO_ROUTE_MODEL, MODEL_PRESETS, SELECTABLE_PRESETS, canonicalPresetId } from "./catalog";
 
 /** Turns switch once this month's remaining budget, today's estimate taken
- *  off, is below the threshold. This is the owner's value (#89), used until
+ *  off, is below the threshold. This is the value of #89, used until
  *  an Administrator stores another on the dashboard (#95). */
 export const DEFAULT_BUDGET_FALLBACK_THRESHOLD_USD = 10;
 

@@ -680,7 +680,7 @@ export class Hibana {
       let routeUsage: Usage | undefined;
       if (budgetFallback && !this.budgetAnnounced.has(ctx.channelId)) {
         this.budgetAnnounced.add(ctx.channelId);
-        await send(budgetHeader(budgetFallback));
+        await send(budgetHeader(budgetFallback, this.runtime.budgetThreshold()));
       }
       if (isAutoRoute(settings.selection) && !budgetFallback) {
         const route = await this.autoRoute(ctx, text, prior, pending);

@@ -26,6 +26,7 @@ import {
 import {
   BUDGET_FALLBACK_PROVIDER,
   DEFAULT_BUDGET_FALLBACK,
+  DEFAULT_BUDGET_FALLBACK_THRESHOLD_USD,
   budgetFallbackSelection,
   parseBudgetFallback,
   type BudgetFallback,
@@ -70,6 +71,9 @@ export type BudgetState = {
   low: boolean;
   /** The remaining budget with today's estimate taken off; null when the API has no Admin API key. */
   remaining_after_today_usd: number | null;
+  /** The threshold the API decided with, which an Administrator sets on the
+   *  dashboard (#95). Absent when the API could not tell, or predates #95. */
+  threshold_usd?: number;
   /** When the bot received the answer (epoch ms). */
   checked_at: number;
 };
@@ -235,6 +239,10 @@ export class Runtime {
   /** Whether Anthropic API turns run on the fallback now. */
   budgetLow(): boolean {
     return this.snapshot.budget?.low === true;
+  }
+  /** The threshold of the last answer, for the Discord notice (#95). */
+  budgetThreshold(): number {
+    return this.snapshot.budget?.threshold_usd ?? DEFAULT_BUDGET_FALLBACK_THRESHOLD_USD;
   }
   /** The selection the fallback runs as. A stored preset that was hidden
    *  since (it may not have a live wire id) runs the default instead. */

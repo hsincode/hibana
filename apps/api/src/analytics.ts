@@ -19,7 +19,7 @@
 // may run more than one instance; each has its own cache and cap.
 
 import { billingBounds, billingMonth } from "@hibana/shared/billing";
-import { budgetLow, BUDGET_FALLBACK_THRESHOLD_USD } from "@hibana/shared/budget";
+import { budgetLow } from "@hibana/shared/budget";
 import { ANTHROPIC_PRICES } from "@hibana/shared/catalog";
 
 const ENDPOINT = "https://api.anthropic.com/v1/organizations/cost_report";
@@ -353,12 +353,12 @@ export class CostReport {
   /**
    * The current billing month's remaining budget with today's estimate taken
    * off, as "今日の推計を含めると残り" on the page, and whether that is below
-   * the fallback threshold (#89). It reads the same caches as the page, so a
-   * caller polling it every few minutes adds at most one call of each report
-   * per minute. Either report failing fails the whole status: half of it would
+   * `thresholdUsd`, the stored fallback threshold (#89, #95). It reads the
+   * same caches as the page, so a caller polling it every few minutes adds at
+   * most one call of each report per minute. Either report failing fails the whole status: half of it would
    * overstate what is left.
    */
-  async budget(): Promise<BudgetStatus> {
+  async budget(thresholdUsd: number): Promise<BudgetStatus> {
     const month = billingMonth(utcDate(this.now()));
     const [m, t] = await Promise.all([this.month(month), this.today()]);
     const after = m.remaining_usd - t.cost_usd;
@@ -368,8 +368,8 @@ export class CostReport {
       remaining_usd: m.remaining_usd,
       today_usd: t.cost_usd,
       remaining_after_today_usd: after,
-      threshold_usd: BUDGET_FALLBACK_THRESHOLD_USD,
-      low: budgetLow(after),
+      threshold_usd: thresholdUsd,
+      low: budgetLow(after, thresholdUsd),
       fetched_at: Math.min(m.fetched_at, t.fetched_at),
     };
   }

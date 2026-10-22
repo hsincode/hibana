@@ -83,6 +83,16 @@ export function canModerate(role: Role): boolean {
 }
 
 /**
+ * Actor may change the budget fallback: the model Anthropic API turns switch
+ * to and the threshold that switches them (#95). Administrator only (the
+ * `WEB_ADMIN_IDS`): it decides what the owner's budget is spent on. Until #95
+ * Moderators could change the model too (#89).
+ */
+export function canManageBudget(role: Role): boolean {
+  return role === "administrator";
+}
+
+/**
  * Actor may read the Anthropic spend (the cost report and today's estimate).
  * It was the owner's alone (decision records #44 and #48); since #85 every
  * role may read it. The figures are the organization's totals, so they say

@@ -15,7 +15,7 @@ Advisor、旧来の自動モデルRouter、品質検証（verify）、速度優�
 
 ## 開発
 
-Bun 1.4以降、Docker（sandboxを使う場合）が必要です。
+Bun 1.4.4以降、Docker（sandboxを使う場合）が必要です。
 
 ```sh
 bun install --frozen-lockfile
@@ -33,7 +33,8 @@ botだけなら `WEB_API_URL` を空にして起動できます。APIの `DATABA
 Discord Developer PortalでMessage Content Intentを有効にしてください。メンバー検索にはServer Members Intent、通話にはVoice関連のBot権限も必要です。
 
 ```sh
-make ci                  # 型検査・テスト・bot / Webビルド
+make fmt                 # bun fmt で整形（プロンプトとスキルは .prettierignore で除外）
+make ci                  # 整形の検査・型検査・テスト・bot / Webビルド
 bun run test:ui          # Chromiumによる画面テスト
 make sandbox-image      # amd64。言語処理系・ブラウザ・メディア処理を含む大きなイメージ
 make sandbox-smoke      # Docker隔離・ファイル操作の確認

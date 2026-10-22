@@ -1,5 +1,9 @@
 import { sleep } from "./io";
-import { readHttpFailure, ProviderError, type ProviderDiagnostics } from "./llm-errors";
+import {
+  readHttpFailure,
+  ProviderError,
+  type ProviderDiagnostics,
+} from "./llm-errors";
 
 export type RetryNotice = {
   diagnostics?: ProviderDiagnostics;
@@ -16,9 +20,18 @@ export type RequestHooks = {
   onRetry?: (notice: RetryNotice) => void;
 };
 
-export function retryDelay(value: string | null, attempt: number, now = Date.now(), random = Math.random()) {
+export function retryDelay(
+  value: string | null,
+  attempt: number,
+  now = Date.now(),
+  random = Math.random(),
+) {
   const seconds = value?.trim() ? Number(value) : NaN;
-  const ms = Number.isFinite(seconds) ? seconds * 1000 : value ? Date.parse(value) - now : NaN;
+  const ms = Number.isFinite(seconds)
+    ? seconds * 1000
+    : value
+      ? Date.parse(value) - now
+      : NaN;
   // Codex's request backoff starts at 200 ms with ±10% jitter. Respect a
   // server's longer Retry-After instead of retrying while it still throttles.
   return Number.isFinite(ms)
@@ -29,13 +42,19 @@ export function retryDelay(value: string | null, attempt: number, now = Date.now
 // Anthropic sends `request-id`, OpenAI-compatible APIs `x-request-id`. Only
 // an id-shaped value is kept, never an arbitrary header.
 function requestId(response: Response | undefined): string | undefined {
-  const id = response?.headers.get("request-id") ?? response?.headers.get("x-request-id");
+  const id =
+    response?.headers.get("request-id") ??
+    response?.headers.get("x-request-id");
   return id && /^[A-Za-z0-9_.:-]{1,128}$/.test(id) ? id : undefined;
 }
 
 export async function requestCompletion<T>(options: {
   fetch: (signal: AbortSignal) => Promise<Response>;
-  read: (response: Response, signal: AbortSignal, activity: () => void) => Promise<T>;
+  read: (
+    response: Response,
+    signal: AbortSignal,
+    activity: () => void,
+  ) => Promise<T>;
   signal?: AbortSignal;
   requestRetries: number;
   streamRetries: number;
@@ -48,11 +67,16 @@ export async function requestCompletion<T>(options: {
     const started = Date.now();
     options.signal?.throwIfAborted();
     const controller = new AbortController();
-    const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, controller.signal])
+      : controller.signal;
     let timer: ReturnType<typeof setTimeout>;
     const activity = () => {
       clearTimeout(timer);
-      timer = setTimeout(() => controller.abort(new ProviderError("transient", true)), options.idleMs);
+      timer = setTimeout(
+        () => controller.abort(new ProviderError("transient", true)),
+        options.idleMs,
+      );
     };
     let response: Response | undefined;
     let phase: RetryNotice["phase"] = "request";
@@ -71,15 +95,30 @@ export async function requestCompletion<T>(options: {
       // A user steering the agent or shutting it down must interrupt both the
       // request and its backoff, never consume the reconnect budget.
       options.signal?.throwIfAborted();
-      failure = error instanceof ProviderError ? error : new ProviderError("transient", true);
+      failure =
+        error instanceof ProviderError
+          ? error
+          : new ProviderError("transient", true);
       failure.diagnostics = {
-        ...failure.diagnostics, phase, elapsed_ms: Date.now() - started,
+        ...failure.diagnostics,
+        phase,
+        elapsed_ms: Date.now() - started,
         response_status: response?.status,
         // Only record recognized media types, never a raw provider header.
-        content_type: response?.headers.get("content-type")?.includes("text/event-stream") ? "text/event-stream"
-          : response?.headers.get("content-type")?.includes("application/json") ? "application/json" : "missing_or_other",
-        reason: controller.signal.aborted ? "idle_timeout" : error instanceof SyntaxError ? "invalid_json"
-          : error instanceof ProviderError ? "provider_error" : "transport_error",
+        content_type: response?.headers
+          .get("content-type")
+          ?.includes("text/event-stream")
+          ? "text/event-stream"
+          : response?.headers.get("content-type")?.includes("application/json")
+            ? "application/json"
+            : "missing_or_other",
+        reason: controller.signal.aborted
+          ? "idle_timeout"
+          : error instanceof SyntaxError
+            ? "invalid_json"
+            : error instanceof ProviderError
+              ? "provider_error"
+              : "transport_error",
         request_id: requestId(response),
         retries: retries.request + retries.stream,
       };
@@ -91,10 +130,21 @@ export async function requestCompletion<T>(options: {
       void response?.body?.cancel().catch(() => {});
       controller.abort();
     }
-    const maxRetries = phase === "request" ? options.requestRetries : options.streamRetries;
+    const maxRetries =
+      phase === "request" ? options.requestRetries : options.streamRetries;
     if (retries[phase] >= maxRetries) throw failure;
-    const delayMs = retryDelay(response?.headers.get("retry-after") ?? null, retries[phase]);
-    const notice = { phase, attempt: ++retries[phase], maxRetries, delayMs, status: failure?.status, diagnostics: failure?.diagnostics };
+    const delayMs = retryDelay(
+      response?.headers.get("retry-after") ?? null,
+      retries[phase],
+    );
+    const notice = {
+      phase,
+      attempt: ++retries[phase],
+      maxRetries,
+      delayMs,
+      status: failure?.status,
+      diagnostics: failure?.diagnostics,
+    };
     // These are separate bounded budgets, not nested loops that multiply
     // attempts. Only the current model request is replayed; tools stay outside.
     options.hooks.onRetry?.(notice);

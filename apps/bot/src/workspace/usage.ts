@@ -21,20 +21,33 @@ export type WorkspaceTotals = {
  *  events. Both shapes of the official SDK fit; this file does not import it. */
 export type SessionUsageLike = {
   active_seconds?: number;
-  cache_creation?: { ephemeral_5m_input_tokens?: number; ephemeral_1h_input_tokens?: number } | null;
+  cache_creation?: {
+    ephemeral_5m_input_tokens?: number;
+    ephemeral_1h_input_tokens?: number;
+  } | null;
   cache_read_input_tokens?: number;
   input_tokens?: number;
   list_cost?: { amount: string; currency: string } | null;
   output_tokens?: number;
-  server_tool_use?: { web_search_requests?: number; web_fetch_requests?: number } | null;
+  server_tool_use?: {
+    web_search_requests?: number;
+    web_fetch_requests?: number;
+  } | null;
 };
 
 // A stored or reported value that is missing, negative or not a number adds nothing.
-const count = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0);
+const count = (value: unknown) =>
+  typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 const emptyTotals = (): WorkspaceTotals => ({
-  list_cost_cents: 0, active_seconds: 0, input_tokens: 0, cache_read_tokens: 0,
-  cache_write_5m_tokens: 0, cache_write_1h_tokens: 0, output_tokens: 0,
-  web_search_requests: 0, web_fetch_requests: 0,
+  list_cost_cents: 0,
+  active_seconds: 0,
+  input_tokens: 0,
+  cache_read_tokens: 0,
+  cache_write_5m_tokens: 0,
+  cache_write_1h_tokens: 0,
+  output_tokens: 0,
+  web_search_requests: 0,
+  web_fetch_requests: 0,
 });
 const TOTAL_KEYS = Object.keys(emptyTotals()) as (keyof WorkspaceTotals)[];
 
@@ -42,11 +55,17 @@ const TOTAL_KEYS = Object.keys(emptyTotals()) as (keyof WorkspaceTotals)[];
  *  list cost, or one that is not whole US cents; `list_cost_cents` is then 0,
  *  which means unknown, not free. The API sends the amount as a string of
  *  minor units. */
-export function sessionTotals(usage: SessionUsageLike | null | undefined): { totals: WorkspaceTotals; cost: boolean } {
+export function sessionTotals(usage: SessionUsageLike | null | undefined): {
+  totals: WorkspaceTotals;
+  cost: boolean;
+} {
   const listed = usage?.list_cost;
-  const cents = listed?.currency === "USD" && typeof listed.amount === "string" && /^\d+$/.test(listed.amount)
-    ? Number(listed.amount)
-    : NaN;
+  const cents =
+    listed?.currency === "USD" &&
+    typeof listed.amount === "string" &&
+    /^\d+$/.test(listed.amount)
+      ? Number(listed.amount)
+      : NaN;
   const cost = Number.isSafeInteger(cents);
   return {
     cost,
@@ -55,8 +74,12 @@ export function sessionTotals(usage: SessionUsageLike | null | undefined): { tot
       active_seconds: count(usage?.active_seconds),
       input_tokens: count(usage?.input_tokens),
       cache_read_tokens: count(usage?.cache_read_input_tokens),
-      cache_write_5m_tokens: count(usage?.cache_creation?.ephemeral_5m_input_tokens),
-      cache_write_1h_tokens: count(usage?.cache_creation?.ephemeral_1h_input_tokens),
+      cache_write_5m_tokens: count(
+        usage?.cache_creation?.ephemeral_5m_input_tokens,
+      ),
+      cache_write_1h_tokens: count(
+        usage?.cache_creation?.ephemeral_1h_input_tokens,
+      ),
       output_tokens: count(usage?.output_tokens),
       web_search_requests: count(usage?.server_tool_use?.web_search_requests),
       web_fetch_requests: count(usage?.server_tool_use?.web_fetch_requests),
@@ -67,18 +90,26 @@ export function sessionTotals(usage: SessionUsageLike | null | undefined): { tot
 /** What a session used between two of its cumulative totals. A field that
  *  went down (a reading without a list cost, a stale one) counts as nothing
  *  rather than as a refund. */
-export function totalsDelta(now: WorkspaceTotals, before?: WorkspaceTotals | null): WorkspaceTotals {
+export function totalsDelta(
+  now: WorkspaceTotals,
+  before?: WorkspaceTotals | null,
+): WorkspaceTotals {
   const delta = emptyTotals();
-  for (const key of TOTAL_KEYS) delta[key] = Math.max(0, count(now[key]) - count(before?.[key]));
+  for (const key of TOTAL_KEYS)
+    delta[key] = Math.max(0, count(now[key]) - count(before?.[key]));
   return delta;
 }
 
 /** The totals to keep as the next "before": the larger of each field. A
  *  reading that lacks a field must not lower what was already counted, or
  *  the next delta would add the same spend a second time. */
-export function totalsMax(now: WorkspaceTotals, before?: WorkspaceTotals | null): WorkspaceTotals {
+export function totalsMax(
+  now: WorkspaceTotals,
+  before?: WorkspaceTotals | null,
+): WorkspaceTotals {
   const kept = emptyTotals();
-  for (const key of TOTAL_KEYS) kept[key] = Math.max(count(now[key]), count(before?.[key]));
+  for (const key of TOTAL_KEYS)
+    kept[key] = Math.max(count(now[key]), count(before?.[key]));
   return kept;
 }
 
@@ -97,7 +128,10 @@ export type WorkspaceBucket = WorkspaceTotals & {
    *  `list_cost_cents` (`limitCents`). Not a cost, and never shown as one. */
   limit_extra_cents: number;
 };
-type LedgerFile = { version: 1; days: Record<string, Record<string, WorkspaceBucket>> };
+type LedgerFile = {
+  version: 1;
+  days: Record<string, Record<string, WorkspaceBucket>>;
+};
 
 /** What one stretch of a session added. */
 export type LedgerEntry = {
@@ -130,11 +164,17 @@ const LINE_MAX_CHARS = 600;
 const NEW_SESSION_CENTS = 1;
 const day = (date: Date) => date.toISOString().slice(0, 10);
 const emptyBucket = (): WorkspaceBucket => ({
-  ...emptyTotals(), turns: 0, ultra_turns: 0, sessions: 0, unreported_turns: 0, ultra_list_cost_cents: 0,
+  ...emptyTotals(),
+  turns: 0,
+  ultra_turns: 0,
+  sessions: 0,
+  unreported_turns: 0,
+  ultra_list_cost_cents: 0,
   limit_extra_cents: 0,
 });
 function add(into: WorkspaceBucket, from: Partial<WorkspaceBucket>) {
-  for (const key of Object.keys(into) as (keyof WorkspaceBucket)[]) into[key] += count(from[key]);
+  for (const key of Object.keys(into) as (keyof WorkspaceBucket)[])
+    into[key] += count(from[key]);
 }
 const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
@@ -174,19 +214,29 @@ export class WorkspaceUsage {
     return this.merged;
   }
   async load() {
-    const stored = await readJson<LedgerFile>(this.path, { version: 1, days: {} });
+    const stored = await readJson<LedgerFile>(this.path, {
+      version: 1,
+      days: {},
+    });
     // Turns may finish before the file is read; keep both.
     for (const [date, models] of Object.entries(stored.days ?? {}))
       for (const [model, bucket] of Object.entries(models ?? {}))
-        add(((this.data.days[date] ??= {})[model] ??= emptyBucket()), bucket ?? {});
+        add(
+          ((this.data.days[date] ??= {})[model] ??= emptyBucket()),
+          bucket ?? {},
+        );
     this.merged = true;
     this.save();
   }
   record(entry: LedgerEntry) {
-    const bucket = ((this.data.days[day(this.now())] ??= {})[entry.model] ??= emptyBucket());
+    const bucket = ((this.data.days[day(this.now())] ??= {})[entry.model] ??=
+      emptyBucket());
     // An unreported cost is unknown. It is counted apart and never estimated:
     // the totals hold what was reported. Only the limits assume the most.
-    const delta = { ...totalsDelta(entry.delta), ...(entry.cost_reported ? {} : { list_cost_cents: 0 }) };
+    const delta = {
+      ...totalsDelta(entry.delta),
+      ...(entry.cost_reported ? {} : { list_cost_cents: 0 }),
+    };
     add(bucket, delta);
     if (entry.ultra) bucket.ultra_list_cost_cents += delta.list_cost_cents;
     if (entry.turn !== false) {
@@ -220,7 +270,9 @@ export class WorkspaceUsage {
   }
   private period(period: "day" | "month") {
     const today = day(this.now());
-    return this.total(period === "day" ? [today] : this.monthDays(today.slice(0, 7)));
+    return this.total(
+      period === "day" ? [today] : this.monthDays(today.slice(0, 7)),
+    );
   }
   /** The lines `/usage` shows apart from the request ledger's estimate, or
    *  nothing while the current month has no Workspace record. */
@@ -230,31 +282,45 @@ export class WorkspaceUsage {
     const monthDays = this.monthDays(month);
     if (!monthDays.length) return undefined;
     const whole = this.total(monthDays);
-    const turns = (b: WorkspaceBucket) => `${dollars(b.list_cost_cents)} / ${b.turns} ターン`;
-    const searches = whole.web_search_requests ? `、web search ${whole.web_search_requests} 回` : "";
+    const turns = (b: WorkspaceBucket) =>
+      `${dollars(b.list_cost_cents)} / ${b.turns} ターン`;
+    const searches = whole.web_search_requests
+      ? `、web search ${whole.web_search_requests} 回`
+      : "";
     const head = [
       "Anthropic Workspace（セッションの list_cost の合計。公開単価での額で、請求額とは一致しないことがあります。日付は UTC）",
       `今日: ${turns(this.total([today]))}`,
       `${month}: ${turns(whole)}（稼働 ${(whole.active_seconds / 3600).toFixed(1)} 時間${searches}）`,
     ];
     const tail = whole.unreported_turns
-      ? [`額の報告が無かったターン: ${whole.unreported_turns}（合計に入っていません）`]
+      ? [
+          `額の報告が無かったターン: ${whole.unreported_turns}（合計に入っていません）`,
+        ]
       : [];
     // Most expensive first. A model name is free text under a custom
     // LLM_MODEL, so the cheapest ones give way before the lines grow past
     // what the reply has room for.
     const models = Object.entries(this.byModel(monthDays))
-      .sort(([a, x], [b, y]) => y.list_cost_cents - x.list_cost_cents || a.localeCompare(b))
-      .map(([model, b]) => `  ${model}: ${turns(b)}` +
-        (b.ultra_turns || b.ultra_list_cost_cents
-          ? `（うち Ultra ${dollars(b.ultra_list_cost_cents)} / ${b.ultra_turns} ターン）`
-          : ""));
-    const text = (shown: number) => [
-      ...head,
-      ...models.slice(0, shown),
-      ...(shown < models.length ? [`  ほか ${models.length - shown} モデル`] : []),
-      ...tail,
-    ].join("\n");
+      .sort(
+        ([a, x], [b, y]) =>
+          y.list_cost_cents - x.list_cost_cents || a.localeCompare(b),
+      )
+      .map(
+        ([model, b]) =>
+          `  ${model}: ${turns(b)}` +
+          (b.ultra_turns || b.ultra_list_cost_cents
+            ? `（うち Ultra ${dollars(b.ultra_list_cost_cents)} / ${b.ultra_turns} ターン）`
+            : ""),
+      );
+    const text = (shown: number) =>
+      [
+        ...head,
+        ...models.slice(0, shown),
+        ...(shown < models.length
+          ? [`  ほか ${models.length - shown} モデル`]
+          : []),
+        ...tail,
+      ].join("\n");
     let shown = models.length;
     while (shown > 0 && text(shown).length > LINE_MAX_CHARS) shown--;
     return text(shown);
@@ -264,26 +330,33 @@ export class WorkspaceUsage {
   }
   private total(dates: string[]) {
     const sum = emptyBucket();
-    for (const d of dates) for (const b of Object.values(this.data.days[d] ?? {})) add(sum, b);
+    for (const d of dates)
+      for (const b of Object.values(this.data.days[d] ?? {})) add(sum, b);
     return sum;
   }
   private byModel(dates: string[]) {
     const models: Record<string, WorkspaceBucket> = {};
     for (const d of dates)
-      for (const [model, b] of Object.entries(this.data.days[d]!)) add((models[model] ??= emptyBucket()), b);
+      for (const [model, b] of Object.entries(this.data.days[d]!))
+        add((models[model] ??= emptyBucket()), b);
     return models;
   }
   private prune() {
-    const cutoff = day(new Date(this.now().getTime() - RETAIN_DAYS * 86_400_000));
-    for (const d of Object.keys(this.data.days)) if (d < cutoff) delete this.data.days[d];
+    const cutoff = day(
+      new Date(this.now().getTime() - RETAIN_DAYS * 86_400_000),
+    );
+    for (const d of Object.keys(this.data.days))
+      if (d < cutoff) delete this.data.days[d];
   }
   private save() {
     // Coalesce turns that finish together into one write of the latest state.
     if (!this.merged || this.queued) return;
     this.queued = true;
-    void this.serial.run(async () => {
-      this.queued = false;
-      await atomicJson(this.path, this.data);
-    }).catch(this.onError);
+    void this.serial
+      .run(async () => {
+        this.queued = false;
+        await atomicJson(this.path, this.data);
+      })
+      .catch(this.onError);
   }
 }

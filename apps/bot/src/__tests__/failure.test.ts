@@ -4,9 +4,9 @@ import { classifyFailure, httpStatusOf } from "../failure";
 
 describe("failure telemetry", () => {
   test("groups provider authentication, rate limit, HTTP, and response failures", () => {
-    expect(classifyFailure(new Error("Missing API key for deepseek"), "agent")).toBe(
-      "provider_auth",
-    );
+    expect(
+      classifyFailure(new Error("Missing API key for deepseek"), "agent"),
+    ).toBe("provider_auth");
     expect(classifyFailure(new Error("LLM deepseek: HTTP 429"), "agent")).toBe(
       "provider_rate_limit",
     );
@@ -14,7 +14,10 @@ describe("failure telemetry", () => {
       "provider_http",
     );
     expect(
-      classifyFailure(new Error("Provider returned no assistant message"), "agent"),
+      classifyFailure(
+        new Error("Provider returned no assistant message"),
+        "agent",
+      ),
     ).toBe("provider_response");
   });
 
@@ -25,12 +28,15 @@ describe("failure telemetry", () => {
     expect(classifyFailure(new Error("ENOSPC"), "checkpoint_save")).toBe(
       "checkpoint_io",
     );
-    expect(classifyFailure(new Error("Discord API rejected message"), "discord_send")).toBe(
-      "discord",
-    );
-    expect(classifyFailure(new Error("fetch failed"), "history_compaction")).toBe(
-      "provider_network",
-    );
+    expect(
+      classifyFailure(
+        new Error("Discord API rejected message"),
+        "discord_send",
+      ),
+    ).toBe("discord");
+    expect(
+      classifyFailure(new Error("fetch failed"), "history_compaction"),
+    ).toBe("provider_network");
     expect(classifyFailure(new Error("HTTP 403"), "discord_send")).toBe(
       "discord",
     );

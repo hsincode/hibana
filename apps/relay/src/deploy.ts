@@ -8,7 +8,10 @@ export interface RunResult {
   stdout: string;
   stderr: string;
 }
-export type Run = (cmd: string[], opts?: { cwd?: string; timeoutMs?: number }) => Promise<RunResult>;
+export type Run = (
+  cmd: string[],
+  opts?: { cwd?: string; timeoutMs?: number },
+) => Promise<RunResult>;
 
 export const runCommand: Run = async (cmd, opts = {}) => {
   let proc;
@@ -23,7 +26,11 @@ export const runCommand: Run = async (cmd, opts = {}) => {
   } catch (err) {
     // Spawn failures (missing executable, bad cwd) become a failed step with
     // the reason recorded, like a non-zero exit, instead of an opaque throw.
-    return { code: 127, stdout: "", stderr: err instanceof Error ? err.message : String(err) };
+    return {
+      code: 127,
+      stdout: "",
+      stderr: err instanceof Error ? err.message : String(err),
+    };
   }
   const timer = setTimeout(() => proc.kill(), opts.timeoutMs ?? 300_000);
   const [stdout, stderr, code] = await Promise.all([
@@ -39,7 +46,8 @@ export const runCommand: Run = async (cmd, opts = {}) => {
  * `superseded`: the sha is an ancestor of the remote head, i.e. a newer push
  * already exists and its own CI run will deploy it. Nothing was changed.
  */
-export type DeployStatus = "running" | "succeeded" | "failed" | "rolled_back" | "superseded";
+export type DeployStatus =
+  "running" | "succeeded" | "failed" | "rolled_back" | "superseded";
 
 export interface Deployment {
   id: string;
@@ -65,7 +73,8 @@ const RELAY_PATHS = ["apps/relay", "package.json", "bun.lock"];
 
 class StepError extends Error {}
 
-const tail = (text: string) => (text.length > OUTPUT_LIMIT ? `…${text.slice(-OUTPUT_LIMIT)}` : text);
+const tail = (text: string) =>
+  text.length > OUTPUT_LIMIT ? `…${text.slice(-OUTPUT_LIMIT)}` : text;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export interface DeployerOptions {
@@ -102,10 +111,14 @@ export class Deployer {
 
   async load() {
     try {
-      const data = JSON.parse(await readFile(this.statePath, "utf8")) as { deployments?: Deployment[] };
+      const data = JSON.parse(await readFile(this.statePath, "utf8")) as {
+        deployments?: Deployment[];
+      };
       this.history = (data.deployments ?? []).map((d) =>
         // A deploy that was running when the relay stopped never finished.
-        d.status === "running" ? { ...d, status: "failed", error: "relay restarted during deploy" } : d,
+        d.status === "running"
+          ? { ...d, status: "failed", error: "relay restarted during deploy" }
+          : d,
       );
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
@@ -127,7 +140,8 @@ export class Deployer {
 
   start(sha: string, keyName: string): StartResult {
     if (!SHA_RE.test(sha)) return { ok: false, reason: "invalid_sha" };
-    if (this.active) return { ok: false, reason: "busy", deployment: this.active };
+    if (this.active)
+      return { ok: false, reason: "busy", deployment: this.active };
     const deployment: Deployment = {
       id: `${this.now().toISOString().replace(/[-:.]/g, "").slice(0, 15)}-${randomBytes(3).toString("hex")}`,
       sha,
@@ -148,10 +162,19 @@ export class Deployer {
     return { ok: true, deployment };
   }
 
-  private async step(d: Deployment, name: string, cmd: string[], timeoutMs?: number): Promise<string> {
+  private async step(
+    d: Deployment,
+    name: string,
+    cmd: string[],
+    timeoutMs?: number,
+  ): Promise<string> {
     const result = await this.run(cmd, { cwd: this.env.appDir, timeoutMs });
     const ok = result.code === 0;
-    d.steps.push({ name, ok, output: tail((result.stdout + result.stderr).trim()) });
+    d.steps.push({
+      name,
+      ok,
+      output: tail((result.stdout + result.stderr).trim()),
+    });
     await this.persist();
     if (!ok) throw new StepError(`${name} failed (exit ${result.code})`);
     return result.stdout.trim();
@@ -161,10 +184,22 @@ export class Deployer {
     const { remote, branch } = this.env;
     let checkedOut = false;
     try {
-      await this.step(d, "fetch", ["git", "fetch", "--quiet", remote, branch], 120_000);
-      const head = await this.step(d, "resolve", ["git", "rev-parse", `${remote}/${branch}`]);
+      await this.step(
+        d,
+        "fetch",
+        ["git", "fetch", "--quiet", remote, branch],
+        120_000,
+      );
+      const head = await this.step(d, "resolve", [
+        "git",
+        "rev-parse",
+        `${remote}/${branch}`,
+      ]);
       if (head !== d.sha) {
-        const ancestor = await this.run(["git", "merge-base", "--is-ancestor", d.sha, head], { cwd: this.env.appDir });
+        const ancestor = await this.run(
+          ["git", "merge-base", "--is-ancestor", d.sha, head],
+          { cwd: this.env.appDir },
+        );
         if (ancestor.code === 0) {
           d.error = `${remote}/${branch} has moved on to ${head}`;
           return this.finish(d, "superseded");
@@ -177,8 +212,12 @@ export class Deployer {
         return this.finish(d, "succeeded");
       }
       const relayChanged =
-        (await this.run(["git", "diff", "--quiet", d.previous, d.sha, "--", ...RELAY_PATHS], { cwd: this.env.appDir }))
-          .code !== 0;
+        (
+          await this.run(
+            ["git", "diff", "--quiet", d.previous, d.sha, "--", ...RELAY_PATHS],
+            { cwd: this.env.appDir },
+          )
+        ).code !== 0;
       checkedOut = true;
       await this.activate(d, d.sha);
       this.finish(d, "succeeded");
@@ -203,8 +242,20 @@ export class Deployer {
    */
   private async activate(d: Deployment, sha: string, prefix = "") {
     const { bun, service } = this.env;
-    await this.step(d, `${prefix}checkout`, ["git", "checkout", "--quiet", "--force", "--detach", sha]);
-    await this.step(d, `${prefix}install`, [bun, "install", "--frozen-lockfile"], 600_000);
+    await this.step(d, `${prefix}checkout`, [
+      "git",
+      "checkout",
+      "--quiet",
+      "--force",
+      "--detach",
+      sha,
+    ]);
+    await this.step(
+      d,
+      `${prefix}install`,
+      [bun, "install", "--frozen-lockfile"],
+      600_000,
+    );
     const since = Math.floor(this.now().getTime() / 1000);
     await this.step(d, `${prefix}restart`, ["systemctl", "restart", service]);
     await this.waitReady(d, since, prefix);
@@ -214,16 +265,33 @@ export class Deployer {
     const deadline = Date.now() + this.env.readyTimeoutMs;
     while (Date.now() < deadline) {
       const log = await this.run(
-        ["journalctl", "-u", this.env.service, "--since", `@${since}`, "--no-pager", "-o", "cat"],
+        [
+          "journalctl",
+          "-u",
+          this.env.service,
+          "--since",
+          `@${since}`,
+          "--no-pager",
+          "-o",
+          "cat",
+        ],
         { timeoutMs: 15_000 },
       );
       if (log.stdout.includes(this.env.readyPattern)) {
-        d.steps.push({ name: `${prefix}ready`, ok: true, output: this.env.readyPattern });
+        d.steps.push({
+          name: `${prefix}ready`,
+          ok: true,
+          output: this.env.readyPattern,
+        });
         return;
       }
       await sleep(this.pollMs);
     }
-    d.steps.push({ name: `${prefix}ready`, ok: false, output: `no "${this.env.readyPattern}" within ${this.env.readyTimeoutMs}ms` });
+    d.steps.push({
+      name: `${prefix}ready`,
+      ok: false,
+      output: `no "${this.env.readyPattern}" within ${this.env.readyTimeoutMs}ms`,
+    });
     throw new StepError(`${prefix}service did not become ready`);
   }
 
@@ -235,7 +303,11 @@ export class Deployer {
   private async persist() {
     await mkdir(this.env.stateDir, { recursive: true, mode: 0o700 });
     const tmp = `${this.statePath}.${process.pid}.tmp`;
-    await writeFile(tmp, `${JSON.stringify({ deployments: this.history }, null, 2)}\n`, { mode: 0o600 });
+    await writeFile(
+      tmp,
+      `${JSON.stringify({ deployments: this.history }, null, 2)}\n`,
+      { mode: 0o600 },
+    );
     await rename(tmp, this.statePath);
   }
 }
@@ -245,9 +317,19 @@ export async function readLogs(
   opts: { lines: number; since?: number },
   run: Run = runCommand,
 ): Promise<string[]> {
-  const cmd = ["journalctl", "-u", env.service, "--no-pager", "-o", "short-iso", "-n", String(opts.lines)];
+  const cmd = [
+    "journalctl",
+    "-u",
+    env.service,
+    "--no-pager",
+    "-o",
+    "short-iso",
+    "-n",
+    String(opts.lines),
+  ];
   if (opts.since !== undefined) cmd.push("--since", `@${opts.since}`);
   const result = await run(cmd, { timeoutMs: 15_000 });
-  if (result.code !== 0) throw new Error(result.stderr.trim() || `journalctl exit ${result.code}`);
+  if (result.code !== 0)
+    throw new Error(result.stderr.trim() || `journalctl exit ${result.code}`);
   return result.stdout.split("\n").filter((line) => line.length > 0);
 }

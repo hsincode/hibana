@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { createApp } from "./create-app";
 import { loadTestEnv, type WebEnv } from "./env";
-import { applyUserOverridePatch, emptyUserOverride, guildPatchSchema, userOverridePatchSchema } from "./settings";
+import {
+  applyUserOverridePatch,
+  emptyUserOverride,
+  guildPatchSchema,
+  userOverridePatchSchema,
+} from "./settings";
 import { installPersonalDefaults, MemoryStore } from "./store";
 
 async function setup(envOverrides: Partial<WebEnv> = {}) {
@@ -64,7 +69,9 @@ describe("version", () => {
 
   test("reports null outside a deploy", async () => {
     const { app } = await setup();
-    expect(await (await app.handle(req("/version"))).json()).toEqual({ commit: null });
+    expect(await (await app.handle(req("/version"))).json()).toEqual({
+      commit: null,
+    });
   });
 });
 
@@ -107,7 +114,9 @@ describe("authz", () => {
     const restored = (await reset.json()) as {
       settings: { mcp_url: string | null; mcp_enabled: boolean };
     };
-    expect(restored.settings.mcp_url).toEqual("https://ww.hsincode.com/api/mcp");
+    expect(restored.settings.mcp_url).toEqual(
+      "https://ww.hsincode.com/api/mcp",
+    );
     expect(restored.settings.mcp_enabled).toBe(false);
     for (const mcp_url of [
       "invalid",
@@ -174,7 +183,9 @@ describe("authz", () => {
     );
     expect(fable?.min_role).toBe("premium");
     const catalogById = Object.fromEntries(
-      (body.presets as { id: string; model?: string; min_role?: string }[]).map((p) => [p.id, p]),
+      (body.presets as { id: string; model?: string; min_role?: string }[]).map(
+        (p) => [p.id, p],
+      ),
     );
     expect(catalogById["fable-5"]?.model).toBe("claude-fable-5-1");
     expect(catalogById["max-opus-5-5"]?.model).toBe("claude-opus-5-5");
@@ -209,7 +220,12 @@ describe("authz", () => {
     expect(freeIds).not.toContain("opus-5-1");
     expect(freeIds).not.toContain("opus-5-5");
     expect(freeIds).not.toContain("grok-4.7-heavy");
-    for (const id of ["anthropic-opus-5-6", "anthropic-fable-5-5", "anthropic-workspace-opus-5-6", "anthropic-workspace-fable-5-5"])
+    for (const id of [
+      "anthropic-opus-5-6",
+      "anthropic-fable-5-5",
+      "anthropic-workspace-opus-5-6",
+      "anthropic-workspace-fable-5-5",
+    ])
       expect(freeIds).not.toContain(id);
     expect(freeIds).not.toContain("gemini-3.8-flash");
     expect(freeIds).not.toContain("gemini-4-pro");
@@ -349,11 +365,19 @@ describe("authz", () => {
     expect(
       ((await snap0.json()) as { premium_presets: string[] }).premium_presets,
     ).toEqual([
-      "fable-5", "max-opus-5-5",
-      "anthropic-auto", "anthropic-haiku-5-5", "anthropic-sonnet-5-5", "anthropic-opus-5-5",
-      "anthropic-opus-5-6", "anthropic-fable-5-5",
-      "anthropic-workspace-haiku-5-5", "anthropic-workspace-sonnet-5-5", "anthropic-workspace-opus-5-5",
-      "anthropic-workspace-opus-5-6", "anthropic-workspace-fable-5-5",
+      "fable-5",
+      "max-opus-5-5",
+      "anthropic-auto",
+      "anthropic-haiku-5-5",
+      "anthropic-sonnet-5-5",
+      "anthropic-opus-5-5",
+      "anthropic-opus-5-6",
+      "anthropic-fable-5-5",
+      "anthropic-workspace-haiku-5-5",
+      "anthropic-workspace-sonnet-5-5",
+      "anthropic-workspace-opus-5-5",
+      "anthropic-workspace-opus-5-6",
+      "anthropic-workspace-fable-5-5",
     ]);
 
     const denied = await app.handle(
@@ -547,36 +571,94 @@ describe("anthropic workspace", () => {
   test("a published preset is an ordinary choice, and the guild list names the provider beside the model", async () => {
     const { app, store } = await setup();
     const patch = (path: string, body: unknown) =>
-      app.handle(req(path, { cookie: "sess-admin", method: "PATCH", body: JSON.stringify(body) }));
+      app.handle(
+        req(path, {
+          cookie: "sess-admin",
+          method: "PATCH",
+          body: JSON.stringify(body),
+        }),
+      );
     // The free member's list comes from the test hook, without Discord.
     const guilds = async () =>
-      ((await (await app.handle(req("/api/guilds", { cookie: "sess-free" }))).json()) as { guilds: unknown[] }).guilds;
+      (
+        (await (
+          await app.handle(req("/api/guilds", { cookie: "sess-free" }))
+        ).json()) as { guilds: unknown[] }
+      ).guilds;
     expect(await guilds()).toEqual([
-      { id: "g1", name: "One", icon: null, preset: "gpt-6-luna", provider: "codex_plus", bot_disabled: false, member: true },
+      {
+        id: "g1",
+        name: "One",
+        icon: null,
+        preset: "gpt-6-luna",
+        provider: "codex_plus",
+        bot_disabled: false,
+        member: true,
+      },
     ]);
 
-    const hidden = await patch("/api/guilds/g1/settings", { preset: "anthropic-workspace-haiku-5-5" });
+    const hidden = await patch("/api/guilds/g1/settings", {
+      preset: "anthropic-workspace-haiku-5-5",
+    });
     expect(hidden.status).toBe(403);
-    expect(((await hidden.json()) as { error: string }).error).toContain("unpublished");
-    expect((await patch("/api/catalog/presets/anthropic-workspace-haiku-5-5", { published: true })).status).toBe(200);
+    expect(((await hidden.json()) as { error: string }).error).toContain(
+      "unpublished",
+    );
+    expect(
+      (
+        await patch("/api/catalog/presets/anthropic-workspace-haiku-5-5", {
+          published: true,
+        })
+      ).status,
+    ).toBe(200);
     // Once published it is selected like any other preset.
-    expect((await patch("/api/guilds/g1/settings", { preset: "anthropic-workspace-haiku-5-5" })).status).toBe(200);
-    expect((await store.getGuild("g1")).selection)
-      .toEqual({ provider: "anthropic_workspace", model: "claude-haiku-5-5", effort: "high" });
+    expect(
+      (
+        await patch("/api/guilds/g1/settings", {
+          preset: "anthropic-workspace-haiku-5-5",
+        })
+      ).status,
+    ).toBe(200);
+    expect((await store.getGuild("g1")).selection).toEqual({
+      provider: "anthropic_workspace",
+      model: "claude-haiku-5-5",
+      effort: "high",
+    });
     // `claude-haiku-5-5` alone would read as the `anthropic` preset.
     expect(await guilds()).toEqual([
-      { id: "g1", name: "One", icon: null, preset: "claude-haiku-5-5", provider: "anthropic_workspace", bot_disabled: false, member: true },
+      {
+        id: "g1",
+        name: "One",
+        icon: null,
+        preset: "claude-haiku-5-5",
+        provider: "anthropic_workspace",
+        bot_disabled: false,
+        member: true,
+      },
     ]);
 
     // It is the main model only: never a subagent's or a role's.
     for (const path of ["/api/guilds/g1/settings", "/api/me/settings"]) {
       for (const body of [
-        { subagent_model: { mode: "fixed", preset: "anthropic-workspace-haiku-5-5" } },
-        { multi_agent_roles: { reviewer: { model: { mode: "fixed", preset: "anthropic-workspace-haiku-5-5" } } } },
+        {
+          subagent_model: {
+            mode: "fixed",
+            preset: "anthropic-workspace-haiku-5-5",
+          },
+        },
+        {
+          multi_agent_roles: {
+            reviewer: {
+              model: { mode: "fixed", preset: "anthropic-workspace-haiku-5-5" },
+            },
+          },
+        },
       ])
         expect((await patch(path, body)).status).toBe(400);
     }
-    expect((await store.getGuild("g1")).subagent_model).toEqual({ mode: "auto" });
+    expect((await store.getGuild("g1")).subagent_model).toEqual({
+      mode: "auto",
+    });
   });
 });
 describe("guild settings", () => {
@@ -585,23 +667,35 @@ describe("guild settings", () => {
     for (const key of ["jev_enabled", "jev_task_enabled"] as const) {
       const other = key === "jev_enabled" ? "jev_task_enabled" : "jev_enabled";
       for (const value of [false, true, null]) {
-        const guild = await app.handle(req("/api/guilds/g1/settings", {
-          method: "PATCH", cookie: "sess-admin", body: JSON.stringify({ [key]: value }),
-        }));
+        const guild = await app.handle(
+          req("/api/guilds/g1/settings", {
+            method: "PATCH",
+            cookie: "sess-admin",
+            body: JSON.stringify({ [key]: value }),
+          }),
+        );
         expect(guild.status).toBe(200);
-        expect((await store.getGuild("g1"))[key]).toBe(value ?? store.defaults[key]);
+        expect((await store.getGuild("g1"))[key]).toBe(
+          value ?? store.defaults[key],
+        );
         expect((await store.getGuild("g1"))[other]).toBe(store.defaults[other]);
         expect((await store.getGuild("g2"))[key]).toBe(store.defaults[key]);
-        const personal = await app.handle(req("/api/me/settings", {
-          method: "PATCH", cookie: "sess-free", body: JSON.stringify({ [key]: value }),
-        }));
+        const personal = await app.handle(
+          req("/api/me/settings", {
+            method: "PATCH",
+            cookie: "sess-free",
+            body: JSON.stringify({ [key]: value }),
+          }),
+        );
         expect(personal.status).toBe(200);
         expect((await store.getUserOverride("free-1"))[key]).toBe(value);
         expect((await store.getUserOverride("free-1"))[other]).toBeNull();
         expect((await store.getUserOverride("admin-1"))[key]).toBeNull();
-        const snapshot = await app.handle(req("/internal/snapshot", {
-          headers: { Authorization: "Bearer test-internal" },
-        }));
+        const snapshot = await app.handle(
+          req("/internal/snapshot", {
+            headers: { Authorization: "Bearer test-internal" },
+          }),
+        );
         expect(snapshot.status).toBe(200);
         const data = await snapshot.json();
         expect(data.guilds.g1[key]).toBe(value ?? store.defaults[key]);
@@ -609,9 +703,12 @@ describe("guild settings", () => {
         expect(data.user_overrides["free-1"][key]).toBe(value);
       }
     }
-    const rejected = await app.handle(req("/api/guilds/g1/settings", {
-      method: "PATCH", body: JSON.stringify({ jev_task_enabled: true }),
-    }));
+    const rejected = await app.handle(
+      req("/api/guilds/g1/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ jev_task_enabled: true }),
+      }),
+    );
     expect(rejected.status).toBe(401);
   });
   test("rejects unknown preset", () => {
@@ -625,11 +722,16 @@ describe("guild settings", () => {
       req("/api/guilds/g1/settings", {
         method: "PATCH",
         cookie: "sess-admin",
-        body: JSON.stringify({ subagent_model: { mode: "fixed", preset: "sol" } }),
+        body: JSON.stringify({
+          subagent_model: { mode: "fixed", preset: "sol" },
+        }),
       }),
     );
     expect(fixed.status).toBe(200);
-    expect((await store.getGuild("g1")).subagent_model).toEqual({ mode: "fixed", preset: "sol" });
+    expect((await store.getGuild("g1")).subagent_model).toEqual({
+      mode: "fixed",
+      preset: "sol",
+    });
 
     const automatic = await app.handle(
       req("/api/guilds/g1/settings", {
@@ -639,7 +741,9 @@ describe("guild settings", () => {
       }),
     );
     expect(automatic.status).toBe(200);
-    expect((await store.getGuild("g1")).subagent_model).toEqual({ mode: "auto" });
+    expect((await store.getGuild("g1")).subagent_model).toEqual({
+      mode: "auto",
+    });
   });
 
   test("stores URL preview suppression per guild and supports default reset", async () => {
@@ -1014,11 +1118,16 @@ describe("user overrides", () => {
       req("/api/me/settings", {
         method: "PATCH",
         cookie: "sess-free",
-        body: JSON.stringify({ subagent_model: { mode: "fixed", preset: "sol" } }),
+        body: JSON.stringify({
+          subagent_model: { mode: "fixed", preset: "sol" },
+        }),
       }),
     );
     expect(fixed.status).toBe(200);
-    expect((await store.getUserOverride("free-1")).subagent_model).toEqual({ mode: "fixed", preset: "sol" });
+    expect((await store.getUserOverride("free-1")).subagent_model).toEqual({
+      mode: "fixed",
+      preset: "sol",
+    });
     expect((await store.getUserOverride("admin-1")).subagent_model).toBeNull();
 
     const reset = await app.handle(
@@ -1413,19 +1522,53 @@ describe("audit logs", () => {
   // #42: where a provider request failed, kept only as fixed vocabulary.
   test("POST /internal/logs keeps the provider failure detail and drops anything else", async () => {
     const { app, store } = await setup({ logsEnabled: true });
-    const post = (fields: Record<string, unknown>) => app.handle(
-      req("/internal/logs", {
-        method: "POST",
-        headers: { authorization: "Bearer test-internal" },
-        body: JSON.stringify({ entries: [{ ...entry, reply: null, ...fields }] }),
-      }),
-    );
-    await post({ failure_stage: "stream", failure_reason: "provider_error", error_type: "overloaded_error", retries: 5, effort: "medium" });
-    await post({ failure_stage: "upload", failure_reason: "Secret text", error_type: "Overloaded Error!", retries: -1, effort: "x".repeat(40) });
-    const query = { limit: 10, before: null, guild_id: null, user_id: null, scope: "all" as const, q: null };
+    const post = (fields: Record<string, unknown>) =>
+      app.handle(
+        req("/internal/logs", {
+          method: "POST",
+          headers: { authorization: "Bearer test-internal" },
+          body: JSON.stringify({
+            entries: [{ ...entry, reply: null, ...fields }],
+          }),
+        }),
+      );
+    await post({
+      failure_stage: "stream",
+      failure_reason: "provider_error",
+      error_type: "overloaded_error",
+      retries: 5,
+      effort: "medium",
+    });
+    await post({
+      failure_stage: "upload",
+      failure_reason: "Secret text",
+      error_type: "Overloaded Error!",
+      retries: -1,
+      effort: "x".repeat(40),
+    });
+    const query = {
+      limit: 10,
+      before: null,
+      guild_id: null,
+      user_id: null,
+      scope: "all" as const,
+      q: null,
+    };
     const [bad, good] = await store.listLogs(query);
-    expect(good).toMatchObject({ failure_stage: "stream", failure_reason: "provider_error", error_type: "overloaded_error", retries: 5, effort: "medium" });
-    expect(bad).toMatchObject({ failure_stage: null, failure_reason: null, error_type: null, retries: null, effort: null });
+    expect(good).toMatchObject({
+      failure_stage: "stream",
+      failure_reason: "provider_error",
+      error_type: "overloaded_error",
+      retries: 5,
+      effort: "medium",
+    });
+    expect(bad).toMatchObject({
+      failure_stage: null,
+      failure_reason: null,
+      error_type: null,
+      retries: null,
+      effort: null,
+    });
   });
 
   test("GET /api/logs is empty and flagged off by default", async () => {
@@ -1567,28 +1710,67 @@ describe("artifacts", () => {
 test("subagent policies validate fixed values and preserve independent user/guild choices in the snapshot", async () => {
   const { app, store } = await setup();
   for (const path of ["/api/guilds/g1/settings", "/api/me/settings"]) {
-    const patch = (body: unknown) => app.handle(req(path, { method: "PATCH", cookie: "sess-free", body: JSON.stringify(body) }));
-    expect((await patch({ subagent_model: { mode: "fixed", preset: "fable-5" } })).status).toBe(403);
-    expect((await patch({ subagent_model: { mode: "fixed" } })).status).toBe(400);
-    expect((await patch({ subagent_effort: { mode: "fixed", effort: "invalid" } })).status).toBe(400);
-    expect((await patch({ subagent_model: { mode: "same" }, subagent_effort: { mode: "fixed", effort: "high" } })).status).toBe(200);
-    expect((await patch({ subagent_model: { mode: "auto" } })).status).toBe(200);
+    const patch = (body: unknown) =>
+      app.handle(
+        req(path, {
+          method: "PATCH",
+          cookie: "sess-free",
+          body: JSON.stringify(body),
+        }),
+      );
+    expect(
+      (await patch({ subagent_model: { mode: "fixed", preset: "fable-5" } }))
+        .status,
+    ).toBe(403);
+    expect((await patch({ subagent_model: { mode: "fixed" } })).status).toBe(
+      400,
+    );
+    expect(
+      (await patch({ subagent_effort: { mode: "fixed", effort: "invalid" } }))
+        .status,
+    ).toBe(400);
+    expect(
+      (
+        await patch({
+          subagent_model: { mode: "same" },
+          subagent_effort: { mode: "fixed", effort: "high" },
+        })
+      ).status,
+    ).toBe(200);
+    expect((await patch({ subagent_model: { mode: "auto" } })).status).toBe(
+      200,
+    );
   }
-  expect((await store.getGuild("g1")).subagent_effort).toEqual({ mode: "fixed", effort: "high" });
-  expect((await store.getUserOverride("free-1")).subagent_model).toEqual({ mode: "auto" });
+  expect((await store.getGuild("g1")).subagent_effort).toEqual({
+    mode: "fixed",
+    effort: "high",
+  });
+  expect((await store.getUserOverride("free-1")).subagent_model).toEqual({
+    mode: "auto",
+  });
   expect((await store.getUserOverride("admin-1")).subagent_effort).toBeNull();
-  const snapshot = await app.handle(req("/internal/snapshot", { headers: { authorization: "Bearer test-internal" } }));
-  const data = await snapshot.json() as { guilds: Record<string, { subagent_model: unknown }>; user_overrides: Record<string, { subagent_effort: unknown }> };
+  const snapshot = await app.handle(
+    req("/internal/snapshot", {
+      headers: { authorization: "Bearer test-internal" },
+    }),
+  );
+  const data = (await snapshot.json()) as {
+    guilds: Record<string, { subagent_model: unknown }>;
+    user_overrides: Record<string, { subagent_effort: unknown }>;
+  };
   expect(data.guilds.g1.subagent_model).toEqual({ mode: "auto" });
-  expect(data.user_overrides["free-1"].subagent_effort).toEqual({ mode: "fixed", effort: "high" });
+  expect(data.user_overrides["free-1"].subagent_effort).toEqual({
+    mode: "fixed",
+    effort: "high",
+  });
 });
 
 test("initial settings reads save concrete defaults once and reset never restores a live dependency", async () => {
   const { store } = await setup();
   const guild = await store.getGuild("new-guild");
   const user = await store.getUserOverride("new-user");
-  expect(Object.values(guild).every(value => value !== null)).toBe(true);
-  expect(Object.values(user).every(value => value === null)).toBe(true);
+  expect(Object.values(guild).every((value) => value !== null)).toBe(true);
+  expect(Object.values(user).every((value) => value === null)).toBe(true);
   expect((await store.allGuilds())["new-guild"]).toEqual(guild);
   expect((await store.allUserOverrides())["new-user"]).toEqual(user);
   const version = await store.version();
@@ -1604,38 +1786,86 @@ test("initial settings reads save concrete defaults once and reset never restore
 test("Ultra mode and effort-only overrides persist independently in guild and personal settings", async () => {
   const { app, store } = await setup();
   for (const path of ["/api/guilds/g1/settings", "/api/me/settings"]) {
-    const patch = (body: unknown) => app.handle(req(path, { method: "PATCH", cookie: "sess-free", body: JSON.stringify(body) }));
+    const patch = (body: unknown) =>
+      app.handle(
+        req(path, {
+          method: "PATCH",
+          cookie: "sess-free",
+          body: JSON.stringify(body),
+        }),
+      );
     expect((await patch({ ultra_mode: "on" })).status).toBe(400);
     expect((await patch({ ultra_mode: true, effort: "low" })).status).toBe(200);
     const response = await patch({ ultra_mode: false });
     expect(response.status).toBe(200);
-    const { settings } = await response.json() as { settings: { selection: { model?: string; effort?: string } | null; ultra_mode: boolean; effort: string } };
+    const { settings } = (await response.json()) as {
+      settings: {
+        selection: { model?: string; effort?: string } | null;
+        ultra_mode: boolean;
+        effort: string;
+      };
+    };
     if (path.startsWith("/api/me/")) expect(settings.selection).toBeNull();
-    else expect(settings.selection).toEqual({ ...store.defaults.selection, effort: "low" });
+    else
+      expect(settings.selection).toEqual({
+        ...store.defaults.selection,
+        effort: "low",
+      });
     expect(settings.effort).toBe("low");
     expect(settings.ultra_mode).toBe(false);
   }
   expect((await store.getGuild("g1")).ultra_mode).toBe(false);
   expect((await store.getUserOverride("free-1")).effort).toBe("low");
   expect((await store.getUserOverride("admin-1")).ultra_mode).toBeNull();
-  const snapshot = await app.handle(req("/internal/snapshot", { headers: { authorization: "Bearer test-internal" } }));
-  const data = await snapshot.json() as { user_overrides: Record<string, { ultra_mode: boolean; effort: string }> };
-  expect(data.user_overrides["free-1"]).toMatchObject({ ultra_mode: false, effort: "low" });
+  const snapshot = await app.handle(
+    req("/internal/snapshot", {
+      headers: { authorization: "Bearer test-internal" },
+    }),
+  );
+  const data = (await snapshot.json()) as {
+    user_overrides: Record<string, { ultra_mode: boolean; effort: string }>;
+  };
+  expect(data.user_overrides["free-1"]).toMatchObject({
+    ultra_mode: false,
+    effort: "low",
+  });
 });
 
 test("subagent off/on/ultra persist through API and bot snapshot without crossing scopes", async () => {
   const { app, store } = await setup();
   for (const path of ["/api/guilds/g1/settings", "/api/me/settings"]) {
-    for (const [enabled, ultra] of [[false, false], [true, false], [true, true], [false, false]]) {
-      const response = await app.handle(req(path, { method: "PATCH", cookie: "sess-free",
-        body: JSON.stringify({ subagent_enabled: enabled, ultra_mode: ultra, service_tier: "priority" }) }));
+    for (const [enabled, ultra] of [
+      [false, false],
+      [true, false],
+      [true, true],
+      [false, false],
+    ]) {
+      const response = await app.handle(
+        req(path, {
+          method: "PATCH",
+          cookie: "sess-free",
+          body: JSON.stringify({
+            subagent_enabled: enabled,
+            ultra_mode: ultra,
+            service_tier: "priority",
+          }),
+        }),
+      );
       expect(response.status).toBe(200);
-      expect((await response.json()).settings).toMatchObject({ subagent_enabled: enabled, ultra_mode: ultra, service_tier: "priority" });
+      expect((await response.json()).settings).toMatchObject({
+        subagent_enabled: enabled,
+        ultra_mode: ultra,
+        service_tier: "priority",
+      });
     }
   }
   expect((await store.getGuild("g2")).subagent_enabled).toBe(true);
   expect((await store.getUserOverride("admin-1")).subagent_enabled).toBeNull();
-  const snapshot = await app.handle(req("/internal/snapshot", { headers: { authorization: "Bearer test-internal" } }));
+  const snapshot = await app.handle(
+    req("/internal/snapshot", {
+      headers: { authorization: "Bearer test-internal" },
+    }),
+  );
   expect(snapshot.status).toBe(200);
   const data = await snapshot.json();
   expect(data.guilds.g1.service_tier).toBe("priority");
@@ -1648,64 +1878,148 @@ test("subagent off/on/ultra persist through API and bot snapshot without crossin
 test("Multi-Agent persists as a fourth subagent mode for guild and personal settings", async () => {
   const { app, store } = await setup();
   for (const path of ["/api/guilds/g1/settings", "/api/me/settings"]) {
-    const patch = (body: unknown) => app.handle(req(path, { method: "PATCH", cookie: "sess-free", body: JSON.stringify(body) }));
+    const patch = (body: unknown) =>
+      app.handle(
+        req(path, {
+          method: "PATCH",
+          cookie: "sess-free",
+          body: JSON.stringify(body),
+        }),
+      );
     expect((await patch({ multi_agent: "on" })).status).toBe(400);
-    const multi = await patch({ subagent_enabled: true, ultra_mode: true, multi_agent: true });
+    const multi = await patch({
+      subagent_enabled: true,
+      ultra_mode: true,
+      multi_agent: true,
+    });
     expect(multi.status).toBe(200);
-    expect((await multi.json()).settings).toMatchObject({ subagent_enabled: true, ultra_mode: true, multi_agent: true });
+    expect((await multi.json()).settings).toMatchObject({
+      subagent_enabled: true,
+      ultra_mode: true,
+      multi_agent: true,
+    });
     // An ultra-only client leaving Ultra must also leave its Multi-Agent superset.
     const left = await patch({ ultra_mode: false });
-    expect((await left.json()).settings).toMatchObject({ ultra_mode: false, multi_agent: false });
+    expect((await left.json()).settings).toMatchObject({
+      ultra_mode: false,
+      multi_agent: false,
+    });
     expect((await patch({ multi_agent: true })).status).toBe(200);
   }
   expect((await store.getGuild("g1")).multi_agent).toBe(true);
   expect((await store.getUserOverride("free-1")).multi_agent).toBe(true);
   expect((await store.getGuild("g2")).multi_agent).toBe(false);
   expect((await store.getUserOverride("admin-1")).multi_agent).toBeNull();
-  const snapshot = await app.handle(req("/internal/snapshot", { headers: { authorization: "Bearer test-internal" } }));
+  const snapshot = await app.handle(
+    req("/internal/snapshot", {
+      headers: { authorization: "Bearer test-internal" },
+    }),
+  );
   const data = await snapshot.json();
   expect(data.guilds.g1).toMatchObject({ ultra_mode: true, multi_agent: true });
-  expect(data.user_overrides["free-1"]).toMatchObject({ ultra_mode: true, multi_agent: true });
+  expect(data.user_overrides["free-1"]).toMatchObject({
+    ultra_mode: true,
+    multi_agent: true,
+  });
 });
 
 test("Multi-Agent role overrides merge per role and enforce plan and visibility for their presets", async () => {
   const { app, store } = await setup();
   for (const path of ["/api/guilds/g1/settings", "/api/me/settings"]) {
-    const patch = (body: unknown) => app.handle(req(path, { method: "PATCH", cookie: "sess-free", body: JSON.stringify(body) }));
+    const patch = (body: unknown) =>
+      app.handle(
+        req(path, {
+          method: "PATCH",
+          cookie: "sess-free",
+          body: JSON.stringify(body),
+        }),
+      );
     // A role preset gets the same checks as the main and common presets.
-    expect((await patch({ multi_agent_roles: { reviewer: { model: { mode: "fixed", preset: "fable-5" } } } })).status).toBe(403);
-    const hidden = await patch({ multi_agent_roles: { reviewer: { model: { mode: "fixed", preset: "plus-astra" } } } });
+    expect(
+      (
+        await patch({
+          multi_agent_roles: {
+            reviewer: { model: { mode: "fixed", preset: "fable-5" } },
+          },
+        })
+      ).status,
+    ).toBe(403);
+    const hidden = await patch({
+      multi_agent_roles: {
+        reviewer: { model: { mode: "fixed", preset: "plus-astra" } },
+      },
+    });
     expect(hidden.status).toBe(403);
     expect(await hidden.text()).toContain("unpublished");
-    expect((await patch({ multi_agent_roles: { planner: { model: { mode: "same" } } } })).status).toBe(400);
-    expect((await patch({ multi_agent_roles: { reviewer: { model: { mode: "fixed", preset: "sol" } } } })).status).toBe(200);
-    const res = await patch({ multi_agent_roles: { explorer: { effort: { mode: "fixed", effort: "low" } } } });
+    expect(
+      (
+        await patch({
+          multi_agent_roles: { planner: { model: { mode: "same" } } },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await patch({
+          multi_agent_roles: {
+            reviewer: { model: { mode: "fixed", preset: "sol" } },
+          },
+        })
+      ).status,
+    ).toBe(200);
+    const res = await patch({
+      multi_agent_roles: {
+        explorer: { effort: { mode: "fixed", effort: "low" } },
+      },
+    });
     expect(res.status).toBe(200);
-    const { settings } = await res.json() as { settings: { multi_agent_roles: Record<string, unknown> } };
+    const { settings } = (await res.json()) as {
+      settings: { multi_agent_roles: Record<string, unknown> };
+    };
     expect(settings.multi_agent_roles).toEqual({
-      explorer: { model: { mode: "default" }, effort: { mode: "fixed", effort: "low" } },
+      explorer: {
+        model: { mode: "default" },
+        effort: { mode: "fixed", effort: "low" },
+      },
       worker: { model: { mode: "default" }, effort: { mode: "default" } },
-      reviewer: { model: { mode: "fixed", preset: "sol" }, effort: { mode: "default" } },
+      reviewer: {
+        model: { mode: "fixed", preset: "sol" },
+        effort: { mode: "default" },
+      },
     });
   }
-  expect((await store.getGuild("g2")).multi_agent_roles?.reviewer.model).toEqual({ mode: "default" });
-  const snapshot = await app.handle(req("/internal/snapshot", { headers: { authorization: "Bearer test-internal" } }));
+  expect(
+    (await store.getGuild("g2")).multi_agent_roles?.reviewer.model,
+  ).toEqual({ mode: "default" });
+  const snapshot = await app.handle(
+    req("/internal/snapshot", {
+      headers: { authorization: "Bearer test-internal" },
+    }),
+  );
   const data = await snapshot.json();
-  expect(data.user_overrides["free-1"].multi_agent_roles.reviewer.model).toEqual({ mode: "fixed", preset: "sol" });
+  expect(
+    data.user_overrides["free-1"].multi_agent_roles.reviewer.model,
+  ).toEqual({ mode: "fixed", preset: "sol" });
 });
 
 test("personal defaults are installed once and later overrides stay", async () => {
   const store = new MemoryStore();
   await store.upsertUser({ discord_id: "a", username: "a", avatar: null });
-  await store.putUserOverride("b", applyUserOverridePatch(emptyUserOverride(), {
-    multi_agent: false,
-    subagent_model: { mode: "same" },
-  }));
+  await store.putUserOverride(
+    "b",
+    applyUserOverridePatch(emptyUserOverride(), {
+      multi_agent: false,
+      subagent_model: { mode: "same" },
+    }),
+  );
   await installPersonalDefaults(store);
   expect((await store.getUserOverride("a")).selection).toBeNull();
   expect((await store.getUserOverride("b")).multi_agent).toBeNull();
   expect((await store.getUserOverride("b")).subagent_model).toBeNull();
-  await store.putUserOverride("b", applyUserOverridePatch(emptyUserOverride(), { effort: "low" }));
+  await store.putUserOverride(
+    "b",
+    applyUserOverridePatch(emptyUserOverride(), { effort: "low" }),
+  );
   await installPersonalDefaults(store);
   expect((await store.getUserOverride("b")).effort).toBe("low");
   expect((await store.getUserOverride("a")).multi_agent).toBeNull();

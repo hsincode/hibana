@@ -15,7 +15,9 @@ export function offline() {
       const url = input instanceof Request ? input.url : String(input);
       const { hostname } = new URL(url);
       if (hostname !== "127.0.0.1" && hostname !== "localhost")
-        throw new TypeError(`A test reached for ${url} through the global fetch. Nothing was sent.`);
+        throw new TypeError(
+          `A test reached for ${url} through the global fetch. Nothing was sent.`,
+        );
       return real(input, init);
     }) as typeof fetch;
   });

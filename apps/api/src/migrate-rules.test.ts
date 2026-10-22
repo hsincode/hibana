@@ -20,18 +20,27 @@ async function migrationStatements(): Promise<string[]> {
   const source = await Bun.file(join(import.meta.dir, "store.ts")).text();
   const start = source.lastIndexOf("  async migrate() {");
   const end = source.indexOf("\n  }\n", start);
-  if (start < 0 || end < 0) throw new Error("PostgresStore.migrate() not found");
+  if (start < 0 || end < 0)
+    throw new Error("PostgresStore.migrate() not found");
   const body = source.slice(start, end);
-  return [...body.matchAll(/\.sql`([^`]*)`/g)].map((match) => match[1]!.replace(/\s+/g, " ").trim());
+  return [...body.matchAll(/\.sql`([^`]*)`/g)].map((match) =>
+    match[1]!.replace(/\s+/g, " ").trim(),
+  );
 }
 
 test("the boot migration only adds to the schema", async () => {
   const statements = await migrationStatements();
   expect(statements.length).toBeGreaterThan(10);
-  expect(statements.filter((sql) => !ADDITIVE.some((allowed) => allowed.test(sql)))).toEqual([]);
+  expect(
+    statements.filter((sql) => !ADDITIVE.some((allowed) => allowed.test(sql))),
+  ).toEqual([]);
 });
 
 test("a column added to an existing table is nullable or has a default", async () => {
-  const added = (await migrationStatements()).filter((sql) => sql.startsWith("ALTER TABLE"));
-  expect(added.filter((sql) => /\bNOT NULL\b/.test(sql) && !/\bDEFAULT\b/.test(sql))).toEqual([]);
+  const added = (await migrationStatements()).filter((sql) =>
+    sql.startsWith("ALTER TABLE"),
+  );
+  expect(
+    added.filter((sql) => /\bNOT NULL\b/.test(sql) && !/\bDEFAULT\b/.test(sql)),
+  ).toEqual([]);
 });

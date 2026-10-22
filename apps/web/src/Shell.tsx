@@ -63,7 +63,8 @@ export function useCurrentGuild(guilds: GuildSummary[]): {
     }
   }, [routeId]);
   const id =
-    routeId ?? (guilds.some((g) => g.id === last) ? (last ?? undefined) : guilds[0]?.id);
+    routeId ??
+    (guilds.some((g) => g.id === last) ? (last ?? undefined) : guilds[0]?.id);
   return { id, guild: guilds.find((g) => g.id === id), routeId };
 }
 
@@ -107,7 +108,10 @@ export function Shell({
     navigation.current?.querySelector<HTMLElement>("button, a")?.focus();
     const dismiss = (event: PointerEvent) => {
       const target = event.target as Node;
-      if (!side.current?.contains(target) && !navToggle.current?.contains(target))
+      if (
+        !side.current?.contains(target) &&
+        !navToggle.current?.contains(target)
+      )
         setNavOpen(false);
     };
     const escape = (event: KeyboardEvent) => {
@@ -126,7 +130,11 @@ export function Shell({
   /* ---------- コマンドパレット ---------- */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "k") {
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        !event.altKey &&
+        event.key.toLowerCase() === "k"
+      ) {
         event.preventDefault();
         setPaletteOpen((open) => !open);
       }
@@ -146,7 +154,9 @@ export function Shell({
     const box = navigation.current;
     const line = indicator.current;
     if (!box || !line) return;
-    const link = box.querySelector<HTMLElement>('.nav-link[aria-current="page"]');
+    const link = box.querySelector<HTMLElement>(
+      '.nav-link[aria-current="page"]',
+    );
     if (!link || link.offsetParent === null) {
       line.classList.remove("is-on", "is-moving");
       return;
@@ -160,7 +170,13 @@ export function Shell({
     line.style.transform = `translateY(${y}px)`;
     line.classList.add("is-on");
   };
-  useLayoutEffect(placeIndicator, [location.pathname, guilds, current.id, navOpen, me]);
+  useLayoutEffect(placeIndicator, [
+    location.pathname,
+    guilds,
+    current.id,
+    navOpen,
+    me,
+  ]);
   useEffect(() => {
     window.addEventListener("resize", placeIndicator);
     return () => window.removeEventListener("resize", placeIndicator);
@@ -206,7 +222,9 @@ export function Shell({
           ref={navToggle}
           type="button"
           className="icon-btn nav-toggle"
-          aria-label={navOpen ? "ナビゲーションを閉じる" : "ナビゲーションを開く"}
+          aria-label={
+            navOpen ? "ナビゲーションを閉じる" : "ナビゲーションを開く"
+          }
           aria-expanded={navOpen}
           aria-controls="main-navigation"
           onClick={() => setNavOpen(!navOpen)}
@@ -236,7 +254,10 @@ export function Shell({
         <SaveStatus state={save} />
         <ThemeMenu />
         <Dropdown.Root>
-          <Dropdown.Trigger className="account-btn" aria-label="アカウントメニュー">
+          <Dropdown.Trigger
+            className="account-btn"
+            aria-label="アカウントメニュー"
+          >
             <Avatar
               small
               round
@@ -301,7 +322,12 @@ export function Shell({
                 />
                 <div className="nav-group">
                   {GUILD_PAGES.map((p) =>
-                    link(guildPath(current.id!, p.path), GUILD_PAGE_ICON[p.path], p.label, true),
+                    link(
+                      guildPath(current.id!, p.path),
+                      GUILD_PAGE_ICON[p.path],
+                      p.label,
+                      true,
+                    ),
                   )}
                 </div>
                 <div className="nav-label">全体</div>
@@ -312,7 +338,8 @@ export function Shell({
               {link("/me", <Icon.user />, "マイ設定")}
               {link("/artifacts", <Icon.box />, "すべての成果物")}
               {/* 利用料は全ユーザーが見られる（#85）。古い API はフラグを返さないことがある。 */}
-              {me.can_view_analytics && link("/analytics", <Icon.gauge />, "利用料")}
+              {me.can_view_analytics &&
+                link("/analytics", <Icon.gauge />, "利用料")}
             </div>
             {me.can_manage_users && (
               <>
@@ -371,7 +398,9 @@ function GuildSwitcher({
   const needle = query.trim().toLowerCase();
   // ID でも探せるようにする（同名サーバーの区別に要る）
   const shown = needle
-    ? guilds.filter((g) => g.name.toLowerCase().includes(needle) || g.id.includes(needle))
+    ? guilds.filter(
+        (g) => g.name.toLowerCase().includes(needle) || g.id.includes(needle),
+      )
     : guilds;
   const active = Math.min(index, Math.max(shown.length - 1, 0));
 
@@ -382,7 +411,12 @@ function GuildSwitcher({
   useEffect(() => {
     if (!open) return;
     setQuery("");
-    setIndex(Math.max(guilds.findIndex((g) => g.id === currentId), 0));
+    setIndex(
+      Math.max(
+        guilds.findIndex((g) => g.id === currentId),
+        0,
+      ),
+    );
     const dismiss = (event: PointerEvent) => {
       if (!root.current?.contains(event.target as Node)) setOpen(false);
     };
@@ -414,7 +448,12 @@ function GuildSwitcher({
         aria-label={`サーバーを切り替える（今は ${name}）`}
         onClick={() => setOpen(!open)}
       >
-        <Avatar key={currentId} small src={cdnUrl("icons", currentId, icon)} name={name} />
+        <Avatar
+          key={currentId}
+          small
+          src={cdnUrl("icons", currentId, icon)}
+          name={name}
+        />
         <span className="name">{name}</span>
         <Icon.updown />
       </button>
@@ -440,7 +479,9 @@ function GuildSwitcher({
               aria-expanded="true"
               aria-controls={listId}
               aria-autocomplete="list"
-              aria-activedescendant={shown.length ? `${listId}-${active}` : undefined}
+              aria-activedescendant={
+                shown.length ? `${listId}-${active}` : undefined
+              }
               placeholder="名前 / ID で絞り込み"
               autoComplete="off"
               autoFocus
@@ -453,7 +494,12 @@ function GuildSwitcher({
                 if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                   e.preventDefault();
                   if (shown.length)
-                    setIndex((active + (e.key === "ArrowDown" ? 1 : -1) + shown.length) % shown.length);
+                    setIndex(
+                      (active +
+                        (e.key === "ArrowDown" ? 1 : -1) +
+                        shown.length) %
+                        shown.length,
+                    );
                 } else if (e.key === "Enter" && !e.nativeEvent.isComposing) {
                   e.preventDefault();
                   pick(shown[active]);
@@ -463,7 +509,13 @@ function GuildSwitcher({
               }}
             />
           </label>
-          <div className="switch-list" id={listId} ref={list} role="listbox" aria-label="サーバー">
+          <div
+            className="switch-list"
+            id={listId}
+            ref={list}
+            role="listbox"
+            aria-label="サーバー"
+          >
             {shown.map((g, i) => (
               <button
                 key={g.id}
@@ -475,7 +527,11 @@ function GuildSwitcher({
                 tabIndex={-1}
                 onClick={() => pick(g)}
               >
-                <Avatar small src={cdnUrl("icons", g.id, g.icon)} name={g.name} />
+                <Avatar
+                  small
+                  src={cdnUrl("icons", g.id, g.icon)}
+                  name={g.name}
+                />
                 <span className="grow">{g.name}</span>
                 {g.id === currentId && (
                   <span className="end">
@@ -485,7 +541,9 @@ function GuildSwitcher({
                 )}
               </button>
             ))}
-            {shown.length === 0 && <div className="pop-label">一致するサーバーがない</div>}
+            {shown.length === 0 && (
+              <div className="pop-label">一致するサーバーがない</div>
+            )}
           </div>
         </div>
       )}

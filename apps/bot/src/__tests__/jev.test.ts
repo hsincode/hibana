@@ -202,7 +202,11 @@ test("Jev opt-out is enforced at execution, resolves independent user/guild/DM s
   try {
     const selected = runtime.resolve(ctx.guildId, ctx.userId).selection;
     expect(exposed()).toBe(true);
-    await runtime.patch("100", { subagent_model: { mode: "fixed", preset: "sol" } }, ctx.userId);
+    await runtime.patch(
+      "100",
+      { subagent_model: { mode: "fixed", preset: "sol" } },
+      ctx.userId,
+    );
     await registry.execute("mcp__agent__run_jev", input, ctx);
     expect(runtime.resolve(ctx.guildId, ctx.userId).selection).toEqual(
       selected,
@@ -240,7 +244,8 @@ test("Jev opt-out is enforced at execution, resolves independent user/guild/DM s
     // Saved settings stay stable when process defaults change.
     expect(exposed()).toBe(true);
     runtime.snapshot.user_overrides[ctx.userId] = applyUserOverridePatch(
-      emptyUserOverride(), { jev_enabled: false },
+      emptyUserOverride(),
+      { jev_enabled: false },
     );
     expect(exposed()).toBe(false);
     expect(

@@ -60,7 +60,10 @@ function interplay(s: OverlaySettings) {
   // ここでも保存値は残る。effort は ultra でも保存値のまま。
   const workspace = selection?.provider === WORKSPACE_PROVIDER;
   const workspaceMode = workspace
-    ? effectiveSubagentMode(s, { provider: WORKSPACE_PROVIDER, model: selection?.model ?? "" })
+    ? effectiveSubagentMode(s, {
+        provider: WORKSPACE_PROVIDER,
+        model: selection?.model ?? "",
+      })
     : mode;
   return {
     auto,
@@ -81,8 +84,16 @@ function interplay(s: OverlaySettings) {
  * bot の環境変数や接続の状態までは分からないので、見出しの説明でそう断る。
  */
 export function guildEffective(s: OverlaySettings): EffectiveItem[] {
-  const { auto, noSubagents, workspace, workspaceUltra, workspaceReduced, mode, ultraActive, multiActive } =
-    interplay(s);
+  const {
+    auto,
+    noSubagents,
+    workspace,
+    workspaceUltra,
+    workspaceReduced,
+    mode,
+    ultraActive,
+    multiActive,
+  } = interplay(s);
   const selection = s.selection;
   const savedEffort = s.effort ?? selection?.effort ?? "max";
   const jev = s.jev_enabled === true;
@@ -109,7 +120,11 @@ export function guildEffective(s: OverlaySettings): EffectiveItem[] {
       note: providerMeta(selection.provider).label,
     });
   } else {
-    items.push({ label: "モデル", value: "env 既定", note: "bot の環境変数の既定" });
+    items.push({
+      label: "モデル",
+      value: "env 既定",
+      note: "bot の環境変数の既定",
+    });
   }
 
   if (auto) {
@@ -184,15 +199,33 @@ export function guildEffective(s: OverlaySettings): EffectiveItem[] {
 
 const SUBAGENT_MODES: { mode: SubagentMode; body: string }[] = [
   { mode: "off", body: "サブエージェントを使わず、親だけで処理します。" },
-  { mode: "on", body: "ユーザーや指示で求められたときだけ委譲します。「ultracode」と書いた依頼はその回だけワークフローで実行します。" },
-  { mode: "ultra", body: "Claude Code の Ultracode です。推論を xhigh にし、実質的な依頼ごとにワークフロー（複数エージェントを編成するスクリプト）を実行します。" },
-  { mode: "multi", body: "統括役が調査・作成・検証に分担し、納品前に検証します。" },
+  {
+    mode: "on",
+    body: "ユーザーや指示で求められたときだけ委譲します。「ultracode」と書いた依頼はその回だけワークフローで実行します。",
+  },
+  {
+    mode: "ultra",
+    body: "Claude Code の Ultracode です。推論を xhigh にし、実質的な依頼ごとにワークフロー（複数エージェントを編成するスクリプト）を実行します。",
+  },
+  {
+    mode: "multi",
+    body: "統括役が調査・作成・検証に分担し、納品前に検証します。",
+  },
 ];
 
 const ROLE_META: Record<MultiAgentRole, { label: string; body: string }> = {
-  explorer: { label: "調査", body: "検索・Web・ファイルを読むだけで根拠を集めます。" },
-  worker: { label: "作成", body: "ファイル・コードなどの成果物を作ります。送信や公開はしません。" },
-  reviewer: { label: "検証", body: "回答案や成果物を独立に確認します。納品前のレビューも担当します。" },
+  explorer: {
+    label: "調査",
+    body: "検索・Web・ファイルを読むだけで根拠を集めます。",
+  },
+  worker: {
+    label: "作成",
+    body: "ファイル・コードなどの成果物を作ります。送信や公開はしません。",
+  },
+  reviewer: {
+    label: "検証",
+    body: "回答案や成果物を独立に確認します。納品前のレビューも担当します。",
+  },
 };
 
 const ANTHROPIC_NO_SUBAGENTS =
@@ -209,7 +242,8 @@ const WORKSPACE_MODES =
 // Workspace の ultra は Hibana の Ultracode ではないので、カードの説明を差し替える。上限の値は bot の環境変数で決まる。
 const WORKSPACE_ULTRA_BODY =
   "Anthropic Workspace では、Managed Agents の dynamic workflows で複数のエージェントを編成します。効くのは Claude Haiku 5.5 のときだけで、effort は変えません。1 回の応答ごとに、費用と時間の上限があります。";
-const WORKSPACE_NO_JEV_TASK = "Anthropic Workspace では、保存した値を保ったまま実行しません。";
+const WORKSPACE_NO_JEV_TASK =
+  "Anthropic Workspace では、保存した値を保ったまま実行しません。";
 const WORKSPACE_MODEL =
   "作業領域（ファイルとコマンドの実行環境）は Anthropic のクラウドにあり、チャンネルごとに別です。bot のサンドボックスのファイルは引き継ぎません。サブエージェント・スキル・サイトの公開など、一部のツールは使えません。トークンのほかに、稼働時間にも料金がかかります。";
 const SERVER_DEFAULT = "デフォルト（サーバー設定）";
@@ -250,37 +284,72 @@ export function AgentSections({
   const pickable = c.presets.filter((p) => p.published !== false);
   // サブエージェントと役割の「固定」には Workspace のプリセットを出さない。Hibana が動かす子は
   // Workspace のセッションでは動かず、API も断る（#76）。
-  const childPickable = pickable.filter((p) => p.provider !== WORKSPACE_PROVIDER);
-  const current = c.presets.find((p) => matchesSelection(p, s.selection)) ?? null;
-  const { auto, noSubagents, workspace, workspaceReduced, ultraActive, multiActive } = interplay(s);
+  const childPickable = pickable.filter(
+    (p) => p.provider !== WORKSPACE_PROVIDER,
+  );
+  const current =
+    c.presets.find((p) => matchesSelection(p, s.selection)) ?? null;
+  const {
+    auto,
+    noSubagents,
+    workspace,
+    workspaceReduced,
+    ultraActive,
+    multiActive,
+  } = interplay(s);
 
   // All three switches null is デフォルト. subagentMode() would otherwise
   // read that as "on", because a missing Ultra flag is not Ultra.
   const modeDefault =
-    inherit && s.subagent_enabled == null && s.ultra_mode == null && s.multi_agent == null;
-  const mode: SubagentMode | "default" = modeDefault ? "default" : subagentMode(s);
+    inherit &&
+    s.subagent_enabled == null &&
+    s.ultra_mode == null &&
+    s.multi_agent == null;
+  const mode: SubagentMode | "default" = modeDefault
+    ? "default"
+    : subagentMode(s);
   const modes = workspace
-    ? SUBAGENT_MODES.map((o) => (o.mode === "ultra" ? { ...o, body: WORKSPACE_ULTRA_BODY } : o))
+    ? SUBAGENT_MODES.map((o) =>
+        o.mode === "ultra" ? { ...o, body: WORKSPACE_ULTRA_BODY } : o,
+      )
     : SUBAGENT_MODES;
-  const modeChoices: { mode: SubagentMode | "default"; body: string }[] = inherit
-    ? [{ mode: "default", body: "サーバー設定に従います。ここを変えると、このモードだけ上書きします。" }, ...modes]
-    : modes;
+  const modeChoices: { mode: SubagentMode | "default"; body: string }[] =
+    inherit
+      ? [
+          {
+            mode: "default",
+            body: "サーバー設定に従います。ここを変えると、このモードだけ上書きします。",
+          },
+          ...modes,
+        ]
+      : modes;
 
   const efforts = c.efforts.filter((e) => e !== "ultra");
   const firstPreset = () =>
-    childPickable.find((p) => roleAllows(role, p.min_role, c.roles) &&
-      (!c.available_presets || c.available_presets.includes(p.id)))?.id;
+    childPickable.find(
+      (p) =>
+        roleAllows(role, p.min_role, c.roles) &&
+        (!c.available_presets || c.available_presets.includes(p.id)),
+    )?.id;
   const roles = s.multi_agent_roles ?? defaultMultiAgentRoles();
   const rolesRow = `${px}-roles`;
   // Send the whole role map so the optimistic overlay never shows a partial one.
-  const patchRole = (r: MultiAgentRole, change: Partial<MultiAgentRoles[MultiAgentRole]>) =>
-    patch({ multi_agent_roles: { ...roles, [r]: { ...roles[r], ...change } } }, rolesRow);
+  const patchRole = (
+    r: MultiAgentRole,
+    change: Partial<MultiAgentRoles[MultiAgentRole]>,
+  ) =>
+    patch(
+      { multi_agent_roles: { ...roles, [r]: { ...roles[r], ...change } } },
+      rolesRow,
+    );
   const presetName = (id: string) => {
     const p = c.presets.find((x) => x.id === id);
     return p?.model ?? p?.label ?? id;
   };
-  const parentModel = s.selection?.model ?? (inherit ? "サーバー設定" : "既定のモデル");
-  const parentEffort = s.effort ?? s.selection?.effort ?? (inherit ? "サーバー設定" : "既定");
+  const parentModel =
+    s.selection?.model ?? (inherit ? "サーバー設定" : "既定のモデル");
+  const parentEffort =
+    s.effort ?? s.selection?.effort ?? (inherit ? "サーバー設定" : "既定");
   const common = {
     model: s.subagent_model ?? (inherit ? null : { mode: "auto" as const }),
     effort: s.subagent_effort ?? (inherit ? null : { mode: "auto" as const }),
@@ -304,11 +373,18 @@ export function AgentSections({
 
   // サーバー設定は、使われない値をその行に印で示す。マイ設定は、サーバー側の値が
   // 分からないと言い切れないので、今までどおり説明文に書き添える。
-  const effortUnused = inherit ? undefined : auto ? EFFORT_UNDER_AUTO : ultraActive ? EFFORT_UNDER_ULTRA : undefined;
+  const effortUnused = inherit
+    ? undefined
+    : auto
+      ? EFFORT_UNDER_AUTO
+      : ultraActive
+        ? EFFORT_UNDER_ULTRA
+        : undefined;
   const effortHint = inherit
     ? `デフォルトはサーバーの effort です。モデルを変えるとそのモデルの推奨値になります。${mode === "ultra" && !workspace ? ` ${EFFORT_UNDER_ULTRA}` : ""}${auto ? ` ${EFFORT_UNDER_AUTO}` : ""}`
     : "推論の深さ。モデルを変えるとそのモデルの推奨値になります。";
-  const jevMulti = s.multi_agent === true || (!inherit && subagentMode(s) === "multi");
+  const jevMulti =
+    s.multi_agent === true || (!inherit && subagentMode(s) === "multi");
   const serverDefault = inherit ? " デフォルトはサーバー設定です。" : "";
 
   return (
@@ -349,9 +425,13 @@ export function AgentSections({
                     —
                   </span>
                   <div className="model-meta">
-                    <div className="model-id is-text">{inherit ? "デフォルト" : "env 既定"}</div>
+                    <div className="model-id is-text">
+                      {inherit ? "デフォルト" : "env 既定"}
+                    </div>
                     <div className="model-sub">
-                      {inherit ? "サーバー設定に従います" : "bot の環境変数の既定"}
+                      {inherit
+                        ? "サーバー設定に従います"
+                        : "bot の環境変数の既定"}
                     </div>
                   </div>
                 </>
@@ -387,15 +467,19 @@ export function AgentSections({
               isSelected={(p) => matchesSelection(p, s.selection)}
               role={role}
               roles={c.roles}
-              special={inherit ? {
-                label: "デフォルト",
-                sub: "サーバー設定に従う",
-                active: !s.selection,
-                onSelect: () => {
-                  patch({ preset: "reset" }, `${px}-preset`);
-                  setPicking(false);
-                },
-              } : undefined}
+              special={
+                inherit
+                  ? {
+                      label: "デフォルト",
+                      sub: "サーバー設定に従う",
+                      active: !s.selection,
+                      onSelect: () => {
+                        patch({ preset: "reset" }, `${px}-preset`);
+                        setPicking(false);
+                      },
+                    }
+                  : undefined
+              }
               onPick={(id) => {
                 patch({ preset: id }, `${px}-preset`);
                 setPicking(false);
@@ -414,8 +498,14 @@ export function AgentSections({
           >
             <Select
               id={`${px}-effort-sel`}
-              value={inherit ? (s.effort ?? "") : (s.effort ?? s.selection?.effort ?? "max")}
-              onValueChange={(e) => patch({ effort: e || null }, `${px}-effort`)}
+              value={
+                inherit
+                  ? (s.effort ?? "")
+                  : (s.effort ?? s.selection?.effort ?? "max")
+              }
+              onValueChange={(e) =>
+                patch({ effort: e || null }, `${px}-effort`)
+              }
             >
               {inherit && <option value="">{SERVER_DEFAULT}</option>}
               {efforts.map((e) => (
@@ -437,8 +527,12 @@ export function AgentSections({
             <Select
               id={`${px}-tier-sel`}
               aria-label="Service Tier"
-              value={inherit ? (s.service_tier ?? "") : (s.service_tier ?? "auto")}
-              onValueChange={(tier) => patch({ service_tier: tier || null }, `${px}-tier`)}
+              value={
+                inherit ? (s.service_tier ?? "") : (s.service_tier ?? "auto")
+              }
+              onValueChange={(tier) =>
+                patch({ service_tier: tier || null }, `${px}-tier`)
+              }
             >
               {inherit && <option value="">{SERVER_DEFAULT}</option>}
               {SERVICE_TIERS.map((tier) => (
@@ -452,7 +546,8 @@ export function AgentSections({
         {!inherit && (
           <div className="sec-foot">
             <span>
-              現在: <span className="mono">{s.selection?.model ?? "env 既定"}</span>
+              現在:{" "}
+              <span className="mono">{s.selection?.model ?? "env 既定"}</span>
             </span>
             <button
               type="button"
@@ -476,10 +571,22 @@ export function AgentSections({
             k={`${px}-mode`}
             name="モード"
             block
-            unused={inherit ? undefined : noSubagents && mode !== "off" ? ANTHROPIC_NO_SUBAGENTS : workspaceReduced ? WORKSPACE_MODES : undefined}
+            unused={
+              inherit
+                ? undefined
+                : noSubagents && mode !== "off"
+                  ? ANTHROPIC_NO_SUBAGENTS
+                  : workspaceReduced
+                    ? WORKSPACE_MODES
+                    : undefined
+            }
             overridden={inherit && !modeDefault}
           >
-            <div className={`modes${inherit ? " has-default" : ""}`} role="radiogroup" aria-label="サブエージェント">
+            <div
+              className={`modes${inherit ? " has-default" : ""}`}
+              role="radiogroup"
+              aria-label="サブエージェント"
+            >
               {modeChoices.map((o) => (
                 <button
                   key={o.mode}
@@ -489,12 +596,21 @@ export function AgentSections({
                   className="mode"
                   onClick={() => {
                     if (mode === o.mode) return;
-                    patch(o.mode === "default"
-                      ? { subagent_enabled: null, ultra_mode: null, multi_agent: null }
-                      : subagentModePatch(o.mode), `${px}-mode`);
+                    patch(
+                      o.mode === "default"
+                        ? {
+                            subagent_enabled: null,
+                            ultra_mode: null,
+                            multi_agent: null,
+                          }
+                        : subagentModePatch(o.mode),
+                      `${px}-mode`,
+                    );
                   }}
                 >
-                  <span className={`mode-name${o.mode === "default" ? " is-text" : ""}`}>
+                  <span
+                    className={`mode-name${o.mode === "default" ? " is-text" : ""}`}
+                  >
                     {o.mode === "default" ? "デフォルト" : o.mode}
                   </span>
                   <span className="mode-body">{o.body}</span>
@@ -508,21 +624,36 @@ export function AgentSections({
           <>
             <div className="subhead">
               <h3>共通のモデルと effort</h3>
-              <p>{mode === "multi" ? "役割ごとの設定が「共通設定に従う」のときに使います。" : "すべてのサブエージェントに適用します。"}</p>
+              <p>
+                {mode === "multi"
+                  ? "役割ごとの設定が「共通設定に従う」のときに使います。"
+                  : "すべてのサブエージェントに適用します。"}
+              </p>
             </div>
             <div className="rows">
               <Row
                 k={`${px}-sub-model`}
                 name="モデル"
                 overridden={inherit && s.subagent_model != null}
-                after={s.subagent_model?.mode === "fixed" && (
-                  <FixedModelButton
-                    label="固定モデル" title="サブエージェントの固定モデル"
-                    presets={childPickable} available={c.available_presets}
-                    value={s.subagent_model.preset} role={role} roles={c.roles}
-                    onChange={(preset) => patch({ subagent_model: { mode: "fixed", preset } }, `${px}-sub-model`)}
-                  />
-                )}
+                after={
+                  s.subagent_model?.mode === "fixed" && (
+                    <FixedModelButton
+                      label="固定モデル"
+                      title="サブエージェントの固定モデル"
+                      presets={childPickable}
+                      available={c.available_presets}
+                      value={s.subagent_model.preset}
+                      role={role}
+                      roles={c.roles}
+                      onChange={(preset) =>
+                        patch(
+                          { subagent_model: { mode: "fixed", preset } },
+                          `${px}-sub-model`,
+                        )
+                      }
+                    />
+                  )
+                }
               >
                 <Select
                   aria-label="サブエージェントのモデル選択方式"
@@ -534,9 +665,21 @@ export function AgentSections({
                     }
                     const preset = firstPreset();
                     if (next === "fixed" && !preset) return;
-                    patch({ subagent_model: next === "fixed"
-                      ? { mode: next, preset: s.subagent_model?.mode === "fixed" ? s.subagent_model.preset : preset }
-                      : { mode: next } }, `${px}-sub-model`);
+                    patch(
+                      {
+                        subagent_model:
+                          next === "fixed"
+                            ? {
+                                mode: next,
+                                preset:
+                                  s.subagent_model?.mode === "fixed"
+                                    ? s.subagent_model.preset
+                                    : preset,
+                              }
+                            : { mode: next },
+                      },
+                      `${px}-sub-model`,
+                    );
                   }}
                 >
                   {inherit && <option value="">{SERVER_DEFAULT}</option>}
@@ -550,15 +693,26 @@ export function AgentSections({
                 name="effort"
                 mono
                 overridden={inherit && s.subagent_effort != null}
-                after={s.subagent_effort?.mode === "fixed" && (
-                  <Select
-                    aria-label="サブエージェントの固定 effort"
-                    value={s.subagent_effort.effort}
-                    onValueChange={(effort) => patch({ subagent_effort: { mode: "fixed", effort } }, `${px}-sub-effort`)}
-                  >
-                    {efforts.map((e) => <option key={e} value={e}>{e}</option>)}
-                  </Select>
-                )}
+                after={
+                  s.subagent_effort?.mode === "fixed" && (
+                    <Select
+                      aria-label="サブエージェントの固定 effort"
+                      value={s.subagent_effort.effort}
+                      onValueChange={(effort) =>
+                        patch(
+                          { subagent_effort: { mode: "fixed", effort } },
+                          `${px}-sub-effort`,
+                        )
+                      }
+                    >
+                      {efforts.map((e) => (
+                        <option key={e} value={e}>
+                          {e}
+                        </option>
+                      ))}
+                    </Select>
+                  )
+                }
               >
                 <Select
                   aria-label="サブエージェントの effort 選択方式"
@@ -568,9 +722,21 @@ export function AgentSections({
                       patch({ subagent_effort: null }, `${px}-sub-effort`);
                       return;
                     }
-                    patch({ subagent_effort: next === "fixed"
-                      ? { mode: next, effort: s.subagent_effort?.mode === "fixed" ? s.subagent_effort.effort : "max" }
-                      : { mode: next } }, `${px}-sub-effort`);
+                    patch(
+                      {
+                        subagent_effort:
+                          next === "fixed"
+                            ? {
+                                mode: next,
+                                effort:
+                                  s.subagent_effort?.mode === "fixed"
+                                    ? s.subagent_effort.effort
+                                    : "max",
+                              }
+                            : { mode: next },
+                      },
+                      `${px}-sub-effort`,
+                    );
                   }}
                 >
                   {inherit && <option value="">{SERVER_DEFAULT}</option>}
@@ -581,7 +747,10 @@ export function AgentSections({
               </Row>
             </div>
             <p className="note pad">
-              任意ではエージェントがモデルや effort を指定でき、省略すると親を引き継ぎます。別モデルに変えた場合の effort はそのモデルの推奨値です。役割ごとの表示の「（任意）」は、エージェントが変更できる値です。
+              任意ではエージェントがモデルや effort
+              を指定でき、省略すると親を引き継ぎます。別モデルに変えた場合の
+              effort
+              はそのモデルの推奨値です。役割ごとの表示の「（任意）」は、エージェントが変更できる値です。
             </p>
           </>
         )}
@@ -590,8 +759,16 @@ export function AgentSections({
           <div className="sec-foot">
             <span>役割ごとの設定はサーバーに従っています。</span>
             <span className="cell-actions">
-              <button type="button" className="btn btn-sm"
-                onClick={() => patch({ multi_agent_roles: defaultMultiAgentRoles() }, rolesRow)}>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() =>
+                  patch(
+                    { multi_agent_roles: defaultMultiAgentRoles() },
+                    rolesRow,
+                  )
+                }
+              >
                 役割を個別に設定
               </button>
               <RowMark k={rolesRow} />
@@ -602,7 +779,11 @@ export function AgentSections({
           <>
             <div className="subhead">
               <h3>役割ごとの設定</h3>
-              <p>{inherit ? "変えた役割だけを保存します。デフォルトに戻すとサーバーの役割設定に従います。" : "役割ごとにモデルと effort を上書きできます。"}</p>
+              <p>
+                {inherit
+                  ? "変えた役割だけを保存します。デフォルトに戻すとサーバーの役割設定に従います。"
+                  : "役割ごとにモデルと effort を上書きできます。"}
+              </p>
               <RowMark k={rolesRow} />
             </div>
             <div data-row={rolesRow}>
@@ -620,8 +801,12 @@ export function AgentSections({
                     <tbody>
                       <tr>
                         <td className="full">
-                          <div className="role-name">統括役 <span className="mono muted">root</span></div>
-                          <div className="role-body">分担・統合・納品を担当します。</div>
+                          <div className="role-name">
+                            統括役 <span className="mono muted">root</span>
+                          </div>
+                          <div className="role-body">
+                            分担・統合・納品を担当します。
+                          </div>
                         </td>
                         <td className="full muted" colSpan={2}>
                           モデルと effort は「/switch モデル」で変更します。
@@ -639,55 +824,114 @@ export function AgentSections({
                         return (
                           <tr key={r}>
                             <td className="full">
-                              <div className="role-name">{meta.label} <span className="mono muted">{r}</span></div>
+                              <div className="role-name">
+                                {meta.label}{" "}
+                                <span className="mono muted">{r}</span>
+                              </div>
                               <div className="role-body">{meta.body}</div>
                             </td>
                             <td data-label="モデル">
                               <div className="stack-fields">
-                                <Select aria-label={`${meta.label}のモデル`}
+                                <Select
+                                  aria-label={`${meta.label}のモデル`}
                                   value={policy.model.mode}
                                   onValueChange={(next) => {
                                     if (next === "fixed") {
-                                      const preset = policy.model.mode === "fixed" ? policy.model.preset : firstPreset();
-                                      if (preset) patchRole(r, { model: { mode: "fixed", preset } });
-                                    } else patchRole(r, { model: { mode: next as "default" | "same" } });
-                                  }}>
-                                  <option value="default">共通設定に従う</option>
+                                      const preset =
+                                        policy.model.mode === "fixed"
+                                          ? policy.model.preset
+                                          : firstPreset();
+                                      if (preset)
+                                        patchRole(r, {
+                                          model: { mode: "fixed", preset },
+                                        });
+                                    } else
+                                      patchRole(r, {
+                                        model: {
+                                          mode: next as "default" | "same",
+                                        },
+                                      });
+                                  }}
+                                >
+                                  <option value="default">
+                                    共通設定に従う
+                                  </option>
                                   <option value="same">親と同じ</option>
                                   <option value="fixed">固定</option>
                                 </Select>
                                 {policy.model.mode === "fixed" && (
                                   <FixedModelButton
-                                    label={`${meta.label}の固定モデル`} title={`${meta.label}の固定モデル`}
-                                    presets={childPickable} available={c.available_presets}
-                                    value={policy.model.preset} role={role} roles={c.roles}
-                                    onChange={(preset) => patchRole(r, { model: { mode: "fixed", preset } })}
+                                    label={`${meta.label}の固定モデル`}
+                                    title={`${meta.label}の固定モデル`}
+                                    presets={childPickable}
+                                    available={c.available_presets}
+                                    value={policy.model.preset}
+                                    role={role}
+                                    roles={c.roles}
+                                    onChange={(preset) =>
+                                      patchRole(r, {
+                                        model: { mode: "fixed", preset },
+                                      })
+                                    }
                                   />
                                 )}
                               </div>
                             </td>
                             <td data-label="effort">
                               <div className="stack-fields">
-                                <Select aria-label={`${meta.label}の effort`}
+                                <Select
+                                  aria-label={`${meta.label}の effort`}
                                   value={policy.effort.mode}
-                                  onValueChange={(next) => patchRole(r, { effort: next === "fixed"
-                                    ? { mode: "fixed", effort: policy.effort.mode === "fixed" ? policy.effort.effort : "high" }
-                                    : { mode: next as "default" | "same" } })}>
-                                  <option value="default">共通設定に従う</option>
+                                  onValueChange={(next) =>
+                                    patchRole(r, {
+                                      effort:
+                                        next === "fixed"
+                                          ? {
+                                              mode: "fixed",
+                                              effort:
+                                                policy.effort.mode === "fixed"
+                                                  ? policy.effort.effort
+                                                  : "high",
+                                            }
+                                          : {
+                                              mode: next as "default" | "same",
+                                            },
+                                    })
+                                  }
+                                >
+                                  <option value="default">
+                                    共通設定に従う
+                                  </option>
                                   <option value="same">親と同じ</option>
                                   <option value="fixed">固定</option>
                                 </Select>
                                 {policy.effort.mode === "fixed" && (
-                                  <Select aria-label={`${meta.label}の固定 effort`}
+                                  <Select
+                                    aria-label={`${meta.label}の固定 effort`}
                                     value={policy.effort.effort}
-                                    onValueChange={(effort) => patchRole(r, { effort: { mode: "fixed", effort: effort as FixedEffort } })}>
-                                    {efforts.map((e) => <option key={e} value={e}>{e}</option>)}
+                                    onValueChange={(effort) =>
+                                      patchRole(r, {
+                                        effort: {
+                                          mode: "fixed",
+                                          effort: effort as FixedEffort,
+                                        },
+                                      })
+                                    }
+                                  >
+                                    {efforts.map((e) => (
+                                      <option key={e} value={e}>
+                                        {e}
+                                      </option>
+                                    ))}
                                   </Select>
                                 )}
                               </div>
                             </td>
                             <td data-label="実際の設定">
-                              <div className="eff" aria-label={`${meta.label}の実際の設定`}>
+                              <div
+                                className="eff"
+                                aria-label={`${meta.label}の実際の設定`}
+                              >
                                 <span>{effectiveModel(policy.model)}</span>
                                 <span>{effectiveEffort(r, policy.effort)}</span>
                               </div>
@@ -703,8 +947,11 @@ export function AgentSections({
             {inherit && (
               <div className="sec-foot">
                 <span />
-                <button type="button" className="btn btn-ghost btn-sm"
-                  onClick={() => patch({ multi_agent_roles: null }, rolesRow)}>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => patch({ multi_agent_roles: null }, rolesRow)}
+                >
                   <Icon.reset size={14} />
                   デフォルトに戻す
                 </button>
@@ -726,22 +973,32 @@ export function AgentSections({
             inline
             hint={`根拠の照合・分類に使います。${jevMulti ? "multi では依頼の開始時に分担も判定し、調査が必要なら調査役を先に起動します。" : ""}${serverDefault}`}
             overridden={inherit && s.jev_enabled != null}
-            after={!inherit && auto && s.jev_enabled !== true && (
-              <p className="row-unused">
-                <Icon.alert size={13} />
-                <span>
-                  <strong>Anthropic / Auto を選択中です。</strong>
-                  Jev 判定が OFF の間は、毎回 {AUTO_ROUTE_FALLBACK.model} / {AUTO_ROUTE_FALLBACK.effort} で応答します。
-                </span>
-              </p>
-            )}
+            after={
+              !inherit &&
+              auto &&
+              s.jev_enabled !== true && (
+                <p className="row-unused">
+                  <Icon.alert size={13} />
+                  <span>
+                    <strong>Anthropic / Auto を選択中です。</strong>
+                    Jev 判定が OFF の間は、毎回 {
+                      AUTO_ROUTE_FALLBACK.model
+                    } / {AUTO_ROUTE_FALLBACK.effort} で応答します。
+                  </span>
+                </p>
+              )
+            }
           >
             {(nameId) => (
               <BoolSeg
                 labelledBy={nameId}
                 value={s.jev_enabled}
                 onChange={(v) => patch({ jev_enabled: v }, `${px}-jev`)}
-                onDefault={inherit ? () => patch({ jev_enabled: null }, `${px}-jev`) : undefined}
+                onDefault={
+                  inherit
+                    ? () => patch({ jev_enabled: null }, `${px}-jev`)
+                    : undefined
+                }
               />
             )}
           </Row>
@@ -751,9 +1008,13 @@ export function AgentSections({
             inline
             hint={`親が操作候補を用意し、Jev が各操作を選んで実行します。Jev 判定とは独立しています。${jevMulti ? JEV_TASK_UNDER_MULTI : "既定は OFF です。"}${serverDefault}`}
             unused={
-              inherit || s.jev_task_enabled !== true ? undefined
-                : workspace ? WORKSPACE_NO_JEV_TASK
-                : multiActive ? "multi の間は、保存した値を保ったまま実行しません。" : undefined
+              inherit || s.jev_task_enabled !== true
+                ? undefined
+                : workspace
+                  ? WORKSPACE_NO_JEV_TASK
+                  : multiActive
+                    ? "multi の間は、保存した値を保ったまま実行しません。"
+                    : undefined
             }
             overridden={inherit && s.jev_task_enabled != null}
           >
@@ -761,8 +1022,14 @@ export function AgentSections({
               <BoolSeg
                 labelledBy={nameId}
                 value={s.jev_task_enabled}
-                onChange={(v) => patch({ jev_task_enabled: v }, `${px}-jev-task`)}
-                onDefault={inherit ? () => patch({ jev_task_enabled: null }, `${px}-jev-task`) : undefined}
+                onChange={(v) =>
+                  patch({ jev_task_enabled: v }, `${px}-jev-task`)
+                }
+                onDefault={
+                  inherit
+                    ? () => patch({ jev_task_enabled: null }, `${px}-jev-task`)
+                    : undefined
+                }
               />
             )}
           </Row>

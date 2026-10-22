@@ -1,12 +1,27 @@
 import type { ServiceTier } from "@hibana/shared/settings";
 import type { Config, Selection } from "./config";
 import { recommendedEffort } from "./config";
-import { addUsage, type Json, type Message, type ToolCall, type ToolDef, type Usage } from "./types";
+import {
+  addUsage,
+  type Json,
+  type Message,
+  type ToolCall,
+  type ToolDef,
+  type Usage,
+} from "./types";
 import { apiFailure, ProviderError } from "./llm-errors";
 import { concreteSelection, routedEffort } from "./auto-route";
 import { readCompletion } from "./llm-stream";
-import { requestCompletion, type RequestHooks, type RetryNotice } from "./llm-request";
-import { PrefixAudit, type PrefixReport, type RequestTrace } from "./prefix-audit";
+import {
+  requestCompletion,
+  type RequestHooks,
+  type RetryNotice,
+} from "./llm-request";
+import {
+  PrefixAudit,
+  type PrefixReport,
+  type RequestTrace,
+} from "./prefix-audit";
 export { retryDelay } from "./llm-request";
 
 // Claude Opus 5.5, Sonnet 5.5 and the Fable / Mythos 5 line reject a fixed
@@ -47,7 +62,8 @@ export function protocolFor(
   selection: Selection,
   nativeSearch = false,
 ): "chat" | "responses" | "anthropic" {
-  if (["claude_max", "anthropic"].includes(selection.provider)) return "anthropic";
+  if (["claude_max", "anthropic"].includes(selection.provider))
+    return "anthropic";
   if (selection.provider === "deepseek" && nativeSearch) return "responses";
   if (selection.provider === "chatgpt") return "responses";
   if (selection.provider === "openai" && /^gpt-6/.test(selection.model))
@@ -58,7 +74,9 @@ export function protocolFor(
 // else Exa; on = Exa only; off = no web search at all. Claude Max stays on Exa
 // under auto: its gateway is not verified to pass server tools.
 export function nativeSearchFor(s: Selection, mode: string, enabled: boolean) {
-  return enabled && mode === "auto" && ["deepseek", "anthropic"].includes(s.provider);
+  return (
+    enabled && mode === "auto" && ["deepseek", "anthropic"].includes(s.provider)
+  );
 }
 // Anthropic server tools: the `_20260209` variants (dynamic filtering) need
 // Opus/Sonnet 4.6+; other models get the basic variants. Each is capped at 10
@@ -66,9 +84,17 @@ export function nativeSearchFor(s: Selection, mode: string, enabled: boolean) {
 export function anthropicWebTools(model: string, taken: Set<string>): Json[] {
   const dynamic = /claude-(opus|sonnet|fable|mythos)-(5|4-[6-9])/.test(model);
   return [
-    { type: dynamic ? "web_search_20260209" : "web_search_20250305", name: "web_search", max_uses: 10 },
-    { type: dynamic ? "web_fetch_20260209" : "web_fetch_20250910", name: "web_fetch", max_uses: 10 },
-  ].filter(t => !taken.has(t.name)); // A same-named client tool would be a 400.
+    {
+      type: dynamic ? "web_search_20260209" : "web_search_20250305",
+      name: "web_search",
+      max_uses: 10,
+    },
+    {
+      type: dynamic ? "web_fetch_20260209" : "web_fetch_20250910",
+      name: "web_fetch",
+      max_uses: 10,
+    },
+  ].filter((t) => !taken.has(t.name)); // A same-named client tool would be a 400.
 }
 // The server-side tool loop stops after a fixed number of iterations with
 // `pause_turn`; resending the paused turn continues it. Bounded so a stuck
@@ -121,15 +147,24 @@ export function toChat(m: Message, supportsDeveloper = false): Json {
     delete out.tool_calls;
   return out;
 }
-export function toChatMessages(messages: Message[], supportsDeveloper = false): Json[] {
-  if (supportsDeveloper) return messages.map(m => toChat(m, true));
+export function toChatMessages(
+  messages: Message[],
+  supportsDeveloper = false,
+): Json[] {
+  if (supportsDeveloper) return messages.map((m) => toChat(m, true));
   // Agent mode policy is appended at planning boundaries. Consolidate it in
   // the system prefix for compatible APIs without a native developer role,
   // preserving user/tool adjacency when a checkpoint is resumed.
-  const policy = messages.filter(m => m.role === "system" || m.role === "developer");
+  const policy = messages.filter(
+    (m) => m.role === "system" || m.role === "developer",
+  );
   return [
-    ...(policy.length ? [{ role: "system", content: policy.map(m => m.content).join("\n\n") }] : []),
-    ...messages.filter(m => m.role !== "system" && m.role !== "developer").map(m => toChat(m)),
+    ...(policy.length
+      ? [{ role: "system", content: policy.map((m) => m.content).join("\n\n") }]
+      : []),
+    ...messages
+      .filter((m) => m.role !== "system" && m.role !== "developer")
+      .map((m) => toChat(m)),
   ];
 }
 export function toResponses(messages: Message[]): {
@@ -183,7 +218,10 @@ export function toResponses(messages: Message[]): {
 // top-level `system` as before.
 export const midConversationSystem = (model: string) =>
   /claude-(opus-5|opus-4-8|fable-5|mythos-5|sonnet-5-5)/.test(model);
-export function toAnthropic(messages: Message[], midSystem = true): {
+export function toAnthropic(
+  messages: Message[],
+  midSystem = true,
+): {
   system: string;
   messages: { role: string; content: Json[] }[];
 } {
@@ -202,7 +240,8 @@ export function toAnthropic(messages: Message[], midSystem = true): {
       // was appended: hoisting it rewrote `system` mid-session, which drops the
       // cached prefix and invalidates every earlier thinking block (Opus 5.5 /
       // Fable 5.1 preserved thinking).
-      if (midSystem && out.length) push("system", [{ type: "text", text: m.content || "" }]);
+      if (midSystem && out.length)
+        push("system", [{ type: "text", text: m.content || "" }]);
       else system.push(m.content || "");
       continue;
     }
@@ -244,11 +283,14 @@ export function toAnthropic(messages: Message[], midSystem = true): {
   // followed by an assistant turn; otherwise keep its text in the user turn.
   const turns: typeof out = [];
   out.forEach((m, i) => {
-    const valid = m.role !== "system" ||
-      (turns.at(-1)?.role === "user" && (out[i + 1]?.role ?? "assistant") === "assistant");
+    const valid =
+      m.role !== "system" ||
+      (turns.at(-1)?.role === "user" &&
+        (out[i + 1]?.role ?? "assistant") === "assistant");
     const role = valid ? m.role : "user";
     const last = turns.at(-1);
-    if (last?.role === role && role !== "system") last.content.push(...m.content);
+    if (last?.role === role && role !== "system")
+      last.content.push(...m.content);
     else turns.push({ role, content: [...m.content] });
   });
   return { system: system.join("\n\n"), messages: turns };
@@ -311,8 +353,14 @@ export function parseCompletion(
   protocol: "chat" | "responses" | "anthropic",
 ): Completion {
   if (data.error) throw apiFailure(data.error);
-  if (protocol === "responses" && data.status === "failed") throw apiFailure(data.error);
-  if (protocol === "responses" && (!Array.isArray(data.output) || (data.status && !["completed", "incomplete"].includes(String(data.status)))))
+  if (protocol === "responses" && data.status === "failed")
+    throw apiFailure(data.error);
+  if (
+    protocol === "responses" &&
+    (!Array.isArray(data.output) ||
+      (data.status &&
+        !["completed", "incomplete"].includes(String(data.status))))
+  )
     throw new ProviderError("transient", true);
   if (protocol === "anthropic" && !Array.isArray(data.content))
     throw new ProviderError("transient", true);
@@ -340,7 +388,8 @@ export function parseCompletion(
   if (protocol === "anthropic") {
     // HTTP 200 with stop_reason "refusal" is a classifier decline, not an
     // empty answer. Retrying the same request would decline again.
-    if (data.stop_reason === "refusal") throw new ProviderError("refusal", false);
+    if (data.stop_reason === "refusal")
+      throw new ProviderError("refusal", false);
     const content = (data.content ?? []) as Json[];
     return {
       message: {
@@ -362,8 +411,7 @@ export function parseCompletion(
     };
   }
   const choice = (data.choices as Json[])?.[0];
-  if (!choice?.message)
-    throw new ProviderError("transient", true);
+  if (!choice?.message) throw new ProviderError("transient", true);
   const m = choice.message as Json;
   return {
     message: {
@@ -382,7 +430,10 @@ export function parseCompletion(
 /** One key per channel: a child agent's requests stay on the machines that
  *  hold its root's prefix. A digest keeps Discord ids out of provider requests. */
 export const promptCacheKey = (channel: string) =>
-  new Bun.CryptoHasher("sha256").update(`hibana:${channel}`).digest("hex").slice(0, 32);
+  new Bun.CryptoHasher("sha256")
+    .update(`hibana:${channel}`)
+    .digest("hex")
+    .slice(0, 32);
 /** One completed provider request. It carries counts and sizes only, so it
  *  can be logged without exposing prompts. */
 export type RequestRecord = {
@@ -432,20 +483,29 @@ export class LlmClient {
     } = {},
   ): Promise<Completion> {
     selection = concreteSelection(selection);
-    if (this.hooks.budgetSelection) selection = this.hooks.budgetSelection(selection);
+    if (this.hooks.budgetSelection)
+      selection = this.hooks.budgetSelection(selection);
     const isChatgpt = selection.provider === "chatgpt";
     // This provider only uses registered master credentials. Never reuse an
     // environment API key or a configurable endpoint for ChatGPT OAuth tokens.
     const endpoint = isChatgpt
-      ? { baseUrl: "https://chatgpt.com/backend-api/codex", apiKey: "master-account" }
+      ? {
+          baseUrl: "https://chatgpt.com/backend-api/codex",
+          apiKey: "master-account",
+        }
       : this.config.endpoints[selection.provider];
     if (!endpoint?.apiKey)
       throw new Error(`Missing API key for ${selection.provider}`);
     const protocol = protocolFor(selection, options.nativeSearch);
-    const stored = selection.effort ?? recommendedEffort(selection.model, selection.provider);
+    const stored =
+      selection.effort ??
+      recommendedEffort(selection.model, selection.provider);
     // Auto routing forbids max, also for a child that inherited the route and
     // was given max by a subagent effort policy.
-    const effort = wireEffort(selection.model, selection.routed ? routedEffort(stored) : stored);
+    const effort = wireEffort(
+      selection.model,
+      selection.routed ? routedEffort(stored) : stored,
+    );
     let max = outputBudget(selection.model, effort, this.config.maxTokens);
     const temperature = selection.model.startsWith("stealth/ox-alpha")
       ? Math.round(
@@ -502,7 +562,11 @@ export class LlmClient {
         // survives history trimming that moves the rolling breakpoint below.
         ...(system && {
           system: [
-            { type: "text", text: system, cache_control: { type: "ephemeral", ttl: "1h" } },
+            {
+              type: "text",
+              text: system,
+              cache_control: { type: "ephemeral", ttl: "1h" },
+            },
           ],
         }),
         messages: turns,
@@ -520,7 +584,12 @@ export class LlmClient {
       // Claude Max accepts either header.
       if (selection.provider === "anthropic") delete headers.Authorization;
       if (options.nativeSearch && selection.provider === "anthropic")
-        (body.tools as Json[]).push(...anthropicWebTools(selection.model, new Set(tools.map(t => t.function.name))));
+        (body.tools as Json[]).push(
+          ...anthropicWebTools(
+            selection.model,
+            new Set(tools.map((t) => t.function.name)),
+          ),
+        );
       // Claude Max serves only 4.7+ models, which reject `budget_tokens` and
       // sampling parameters; adaptive thinking plus effort is the only shape.
       if (effort === "none") body.thinking = { type: "disabled" };
@@ -541,7 +610,8 @@ export class LlmClient {
         ...(!claude5(selection.model) && { temperature }),
         stream: true,
       };
-      if (selection.provider !== "custom") body.stream_options = { include_usage: true };
+      if (selection.provider !== "custom")
+        body.stream_options = { include_usage: true };
       if (tools.length) {
         body.tools = tools;
         body.parallel_tool_calls = true;
@@ -566,12 +636,20 @@ export class LlmClient {
     // Other compatible providers can reject OpenAI-specific scheduling fields.
     // Omit auto to preserve existing endpoint/project defaults. Never silently
     // retry a requested tier as a different one: that can change billing.
-    if (options.serviceTier && options.serviceTier !== "auto" &&
-        ["openai", "codex_plus", "codex_pro", "chatgpt"].includes(selection.provider)) {
+    if (
+      options.serviceTier &&
+      options.serviceTier !== "auto" &&
+      ["openai", "codex_plus", "codex_pro", "chatgpt"].includes(
+        selection.provider,
+      )
+    ) {
       body.service_tier = options.serviceTier;
     }
     const started = Date.now();
-    const audit = this.hooks.onCompletion && options.trace ? this.audit.observe(options.trace, body) : undefined;
+    const audit =
+      this.hooks.onCompletion && options.trace
+        ? this.audit.observe(options.trace, body)
+        : undefined;
     let usageReported = false;
     let completion: Completion;
     try {
@@ -581,32 +659,62 @@ export class LlmClient {
           if (isChatgpt) {
             if (!this.config.webApiUrl || !this.config.internalToken)
               throw new Error("ChatGPT requires the settings API");
-            const auth = await this.fetcher(this.config.webApiUrl + "/internal/chatgpt/credential", {
-              method: "POST", headers: { Authorization: `Bearer ${this.config.internalToken}` },
-              signal, redirect: "error",
-            });
-            if (!auth.ok) throw new Error(`ChatGPT master account unavailable (HTTP ${auth.status})`);
-            const credential = await auth.json() as { access_token: string; account_id: string };
-            if (!credential.access_token || !credential.account_id) throw new Error("Invalid ChatGPT credentials");
+            const auth = await this.fetcher(
+              this.config.webApiUrl + "/internal/chatgpt/credential",
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${this.config.internalToken}`,
+                },
+                signal,
+                redirect: "error",
+              },
+            );
+            if (!auth.ok)
+              throw new Error(
+                `ChatGPT master account unavailable (HTTP ${auth.status})`,
+              );
+            const credential = (await auth.json()) as {
+              access_token: string;
+              account_id: string;
+            };
+            if (!credential.access_token || !credential.account_id)
+              throw new Error("Invalid ChatGPT credentials");
             requestHeaders.Authorization = `Bearer ${credential.access_token}`;
             requestHeaders["ChatGPT-Account-ID"] = credential.account_id;
             requestHeaders.originator = "codex_cli_rs";
           }
           const response = await this.fetcher(endpoint.baseUrl + path, {
-            method: "POST", headers: requestHeaders, body: JSON.stringify(body), signal, redirect: "error",
+            method: "POST",
+            headers: requestHeaders,
+            body: JSON.stringify(body),
+            signal,
+            redirect: "error",
           });
           if (response.ok) audit?.commit();
           // The subscription endpoint may omit Content-Type despite returning
           // SSE. We explicitly requested streaming; preserve error envelopes.
-          if (isChatgpt && response.ok && !response.headers.get("content-type")) {
+          if (
+            isChatgpt &&
+            response.ok &&
+            !response.headers.get("content-type")
+          ) {
             const headers = new Headers(response.headers);
             headers.set("content-type", "text/event-stream");
-            return new Response(response.body, { status: response.status, headers });
+            return new Response(response.body, {
+              status: response.status,
+              headers,
+            });
           }
           return response;
         },
         read: async (response, signal, activity) => {
-          const data = await readCompletion(response, protocol, signal, activity);
+          const data = await readCompletion(
+            response,
+            protocol,
+            signal,
+            activity,
+          );
           usageReported = Object.keys((data.usage ?? {}) as Json).length > 0;
           return parseCompletion(data, protocol);
         },
@@ -614,16 +722,28 @@ export class LlmClient {
         requestRetries: this.config.llmRequestRetries,
         streamRetries: this.config.llmStreamRetries,
         idleMs: this.config.llmStreamIdleMs,
-        hooks: { ...this.hooks, onRetry: notice => this.hooks.onRetry?.({
-          ...notice, provider: selection.provider, model: selection.model,
-        }) },
+        hooks: {
+          ...this.hooks,
+          onRetry: (notice) =>
+            this.hooks.onRetry?.({
+              ...notice,
+              provider: selection.provider,
+              model: selection.model,
+            }),
+        },
         onRetry: options.onRetry,
       });
       try {
         this.hooks.onCompletion?.({
-          provider: selection.provider, model: selection.model, protocol,
-          channel: options.trace?.channel, agent: options.trace?.agent, round: options.trace?.round,
-          usage: completion.usage, usage_reported: usageReported, latency_ms: Date.now() - started,
+          provider: selection.provider,
+          model: selection.model,
+          protocol,
+          channel: options.trace?.channel,
+          agent: options.trace?.agent,
+          round: options.trace?.round,
+          usage: completion.usage,
+          usage_reported: usageReported,
+          latency_ms: Date.now() - started,
           prefix: audit?.report,
         });
       } catch {
@@ -631,7 +751,11 @@ export class LlmClient {
       }
     } catch (error) {
       if (error instanceof ProviderError) {
-        error.diagnostics = { ...error.diagnostics, provider: selection.provider, model: selection.model };
+        error.diagnostics = {
+          ...error.diagnostics,
+          provider: selection.provider,
+          model: selection.model,
+        };
         error.message = `LLM ${selection.provider}: ${error.message}`;
       }
       throw error;
@@ -639,9 +763,15 @@ export class LlmClient {
     if (completion.paused && (options.resumes ?? 0) < MAX_PAUSE_RESUMES) {
       // Resend with the paused assistant blocks last; the API sees the
       // trailing server tool use and continues the same turn.
-      const next = await this.complete(selection, [...messages, completion.message], tools, {
-        ...options, resumes: (options.resumes ?? 0) + 1,
-      });
+      const next = await this.complete(
+        selection,
+        [...messages, completion.message],
+        tools,
+        {
+          ...options,
+          resumes: (options.resumes ?? 0) + 1,
+        },
+      );
       const usage = { ...completion.usage };
       addUsage(usage, next.usage);
       return {
@@ -649,8 +779,13 @@ export class LlmClient {
         usage,
         message: {
           ...next.message,
-          content: [completion.message.content, next.message.content].filter(Boolean).join("\n"),
-          providerBlocks: [...(completion.message.providerBlocks ?? []), ...(next.message.providerBlocks ?? [])],
+          content: [completion.message.content, next.message.content]
+            .filter(Boolean)
+            .join("\n"),
+          providerBlocks: [
+            ...(completion.message.providerBlocks ?? []),
+            ...(next.message.providerBlocks ?? []),
+          ],
         },
       };
     }

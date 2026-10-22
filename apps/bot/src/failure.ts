@@ -30,9 +30,12 @@ export function classifyFailure(
   // alone would mislabel provider outages as generic agent failures.
   if (providerPhase && error instanceof ProviderError) {
     if (error.kind === "authentication") return "provider_auth";
-    if (error.kind === "quota" || error.status === 429) return "provider_rate_limit";
+    if (error.kind === "quota" || error.status === 429)
+      return "provider_rate_limit";
     if (error.status !== undefined) return "provider_http";
-    return error.kind === "transient" ? "provider_network" : "provider_response";
+    return error.kind === "transient"
+      ? "provider_network"
+      : "provider_response";
   }
 
   if (/settings api\b/i.test(message)) return "settings_api";
@@ -54,9 +57,7 @@ export function classifyFailure(
     return "provider_response";
   if (
     providerPhase &&
-    /abort|timeout|fetch failed|network|socket|econn|enotfound|dns/i.test(
-      lower,
-    )
+    /abort|timeout|fetch failed|network|socket|econn|enotfound|dns/i.test(lower)
   )
     return "provider_network";
 

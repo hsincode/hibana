@@ -45,7 +45,12 @@ export async function processRun(
     maxOutput?: number;
     cwd?: string;
     env?: NodeJS.ProcessEnv;
-    onExit?: (details: { elapsed_ms: number; exit_code: number | null; termination: string; signal: string | null }) => void;
+    onExit?: (details: {
+      elapsed_ms: number;
+      exit_code: number | null;
+      termination: string;
+      signal: string | null;
+    }) => void;
   } = {},
 ) {
   return new Promise<{
@@ -55,14 +60,30 @@ export async function processRun(
     truncated: boolean;
   }>((resolveResult, reject) => {
     const started = performance.now();
-    let timedOut = false, reported = false;
-    const report = (code: number | null, signal: string | null, failed = false) => {
+    let timedOut = false,
+      reported = false;
+    const report = (
+      code: number | null,
+      signal: string | null,
+      failed = false,
+    ) => {
       if (reported) return;
       reported = true;
       // Preserve the actual cause: signal exits also map to 124 in the legacy result.
-      options.onExit?.({ elapsed_ms: Math.round(performance.now() - started), exit_code: code,
-        termination: timedOut ? "command_timeout" : options.signal?.aborted ? "parent_abort"
-          : failed ? "process_error" : signal ? "signal" : "exit", signal });
+      options.onExit?.({
+        elapsed_ms: Math.round(performance.now() - started),
+        exit_code: code,
+        termination: timedOut
+          ? "command_timeout"
+          : options.signal?.aborted
+            ? "parent_abort"
+            : failed
+              ? "process_error"
+              : signal
+                ? "signal"
+                : "exit",
+        signal,
+      });
     };
     const child = spawn(command, args, {
       cwd: options.cwd,
@@ -83,10 +104,10 @@ export async function processRun(
     };
     child.stdout.on("data", (b) => add("stdout", b));
     child.stderr.on("data", (b) => add("stderr", b));
-    const timer = setTimeout(
-      () => { timedOut = true; child.kill("SIGKILL"); },
-      options.timeout ?? 120000,
-    );
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, options.timeout ?? 120000);
     child.on("error", (e) => {
       clearTimeout(timer);
       report(null, null, true);

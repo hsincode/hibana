@@ -2,12 +2,12 @@
 
 Discord AI bot・設定API・WebダッシュボードをまとめたBun / TypeScriptモノレポ。
 
-| パス | 内容 |
-| --- | --- |
-| `apps/bot` | Discord gateway、LLM / ツールループ、履歴・再開、Docker sandbox、スキル、通話 |
-| `apps/api` | Elysia、Discord OAuth、ロール管理、Postgres（本番は Supabase。[docs/database.md](docs/database.md)）、botとの設定同期 |
-| `apps/web` | React / Viteの設定ダッシュボード |
-| `packages/shared` | 設定スキーマ・モデルカタログ・トリガー |
+| パス              | 内容                                                                                                                  |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `apps/bot`        | Discord gateway、LLM / ツールループ、履歴・再開、Docker sandbox、スキル、通話                                         |
+| `apps/api`        | Elysia、Discord OAuth、ロール管理、Postgres（本番は Supabase。[docs/database.md](docs/database.md)）、botとの設定同期 |
+| `apps/web`        | React / Viteの設定ダッシュボード                                                                                      |
+| `packages/shared` | 設定スキーマ・モデルカタログ・トリガー                                                                                |
 
 Advisor、旧来の自動モデルRouter、品質検証（verify）、速度優先（fast）は削除済みです。モデルは明示的な選択（ユーザー → サーバー → 移行済み既定値 / 環境変数）で決まります。例外は Anthropic プロバイダーの「Anthropic / Auto (Jev)」プリセットで、これを選んだときだけ Jev が難易度に応じて Haiku 5.5 / Sonnet 5.5 / Opus 5.5 と effort を決めます（[docs/jev.md](docs/jev.md#anthropic-の-auto-routing)）。OpenRouterプロバイダー、サブエージェント、Reactの画面遷移は引き続き利用できます。
 
@@ -15,7 +15,7 @@ Advisor、旧来の自動モデルRouter、品質検証（verify）、速度優�
 
 ## 開発
 
-Bun 1.4以降、Docker（sandboxを使う場合）が必要です。
+Bun 1.4.4以降、Docker（sandboxを使う場合）が必要です。
 
 ```sh
 bun install --frozen-lockfile
@@ -33,7 +33,8 @@ botだけなら `WEB_API_URL` を空にして起動できます。APIの `DATABA
 Discord Developer PortalでMessage Content Intentを有効にしてください。メンバー検索にはServer Members Intent、通話にはVoice関連のBot権限も必要です。
 
 ```sh
-make ci                  # 型検査・テスト・bot / Webビルド
+make fmt                 # bun fmt で整形（プロンプトとスキルは .prettierignore で除外）
+make ci                  # 整形の検査・型検査・テスト・bot / Webビルド
 bun run test:ui          # Chromiumによる画面テスト
 make sandbox-image      # amd64。言語処理系・ブラウザ・メディア処理を含む大きなイメージ
 make sandbox-smoke      # Docker隔離・ファイル操作の確認

@@ -24,9 +24,10 @@ const TOKEN = /^[a-f0-9]{16,64}$/;
 // Splits STATIC_SITE_ORIGIN_TEMPLATE around {token}; the host must be matched
 // as text because "{token}" itself is not a valid URL host.
 function parseOrigin(template: string) {
-  const m = /^(https?):\/\/([a-z0-9.-]*)\{token\}([a-z0-9.-]*(?::\d+)?)\/?$/i.exec(
-    template.trim(),
-  );
+  const m =
+    /^(https?):\/\/([a-z0-9.-]*)\{token\}([a-z0-9.-]*(?::\d+)?)\/?$/i.exec(
+      template.trim(),
+    );
   if (!m)
     throw new Error(
       "STATIC_SITE_ORIGIN_TEMPLATE must look like https://{token}.example.com",
@@ -134,10 +135,7 @@ export class Sites {
       });
     try {
       const root = join(this.root, site.directory ?? site.token);
-      let file = await safePath(
-        root,
-        decodeURIComponent(rest || "index.html"),
-      );
+      let file = await safePath(root, decodeURIComponent(rest || "index.html"));
       const st = await lstat(file);
       if (st.isDirectory()) file = await safePath(root, `${rest}/index.html`);
       const data = Bun.file(file);

@@ -79,7 +79,8 @@ export function loadEnv(): WebEnv {
     adminIds,
     botControlUrl: opt("BOT_CONTROL_URL", ""),
     logsEnabled: optBool("WEB_LOGS_ENABLED", false),
-    anthropicAdminKey: (process.env.ANTHROPIC_ADMIN_API_KEY ?? "").trim() || null,
+    anthropicAdminKey:
+      (process.env.ANTHROPIC_ADMIN_API_KEY ?? "").trim() || null,
     commit: (process.env.HIBANA_COMMIT ?? "").trim() || null,
   };
 }

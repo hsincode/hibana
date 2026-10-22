@@ -23,8 +23,9 @@ const PROACTIVE_MULTI_AGENT_MODE =
 export function multiAgentModeMessage(proactive: boolean): Message {
   // Emit the explicit branch too, so leaving Multi authoritatively resets the
   // prior proactive policy just like HsinCLI's per-turn Multi-Agent V2 state.
-  const instruction =
-    proactive ? PROACTIVE_MULTI_AGENT_MODE : EXPLICIT_MULTI_AGENT_MODE;
+  const instruction = proactive
+    ? PROACTIVE_MULTI_AGENT_MODE
+    : EXPLICIT_MULTI_AGENT_MODE;
   return {
     role: "developer",
     content: `<multi_agent_mode>${instruction}</multi_agent_mode>`,
@@ -287,15 +288,17 @@ export async function assemblePrompt(
     join(import.meta.dir, "../prompts/harness/codex.md"),
   );
   const delegation =
-    runtime.config.toolsEnabled && runtime.config.subagentEnabled && settings.subagent_enabled;
-  const multiAgentMode =
-    delegation
-      ? multiAgentModeMessage(subagentMode(settings) === "multi")
-      : {
-          role: "developer" as const,
-          // Supersede any Ultra instructions retained in conversation history.
-          content: "<multi_agent_mode>Subagents are disabled for this turn. Complete the task yourself without spawning or contacting agents.</multi_agent_mode>",
-        };
+    runtime.config.toolsEnabled &&
+    runtime.config.subagentEnabled &&
+    settings.subagent_enabled;
+  const multiAgentMode = delegation
+    ? multiAgentModeMessage(subagentMode(settings) === "multi")
+    : {
+        role: "developer" as const,
+        // Supersede any Ultra instructions retained in conversation history.
+        content:
+          "<multi_agent_mode>Subagents are disabled for this turn. Complete the task yourself without spawning or contacting agents.</multi_agent_mode>",
+      };
   return [
     {
       role: "system",
@@ -307,7 +310,8 @@ export async function assemblePrompt(
     ...(delegation && ctx.depth === 0 && subagentMode(settings) === "multi"
       ? [multiAgentTeamMessage(runtime.config.subagentConcurrency)]
       : []),
-    ...(ctx.depth === 0 && runtime.config.toolsEnabled &&
+    ...(ctx.depth === 0 &&
+    runtime.config.toolsEnabled &&
     runtime.config.subagentEnabled &&
     runtime.config.jevApiKey &&
     settings.jev_enabled

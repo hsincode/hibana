@@ -63,7 +63,10 @@ test("VPN_PROVIDER selects vpngate defaults and rejects unknown values", () => {
     }).vpnServer,
   ).toBe("us");
   expect(() =>
-    loadConfig({ HIBANA_DATA_DIR: "/tmp/hibana-tests", VPN_PROVIDER: "wireguard" }),
+    loadConfig({
+      HIBANA_DATA_DIR: "/tmp/hibana-tests",
+      VPN_PROVIDER: "wireguard",
+    }),
   ).toThrow(/VPN_PROVIDER/);
 });
 
@@ -155,8 +158,7 @@ test("vpngate omits Surfshark login command and rejects vpn_login_code", async (
         VPN_ENABLED: "true",
         VPN_PROVIDER: "surfshark",
       }),
-    } as Runtime)
-      .map((c) => c.name),
+    } as Runtime).map((c) => c.name),
   ).toContain("login-vpn");
   const vpn = new Vpn(config, new Sandbox(config));
   const ctx: Context = {
@@ -168,5 +170,7 @@ test("vpngate omits Surfshark login command and rejects vpn_login_code", async (
     depth: 0,
     delivered: false,
   };
-  await expect(vpn.execute("vpn_login_code", {}, ctx)).rejects.toThrow(/VPN Gate/);
+  await expect(vpn.execute("vpn_login_code", {}, ctx)).rejects.toThrow(
+    /VPN Gate/,
+  );
 });

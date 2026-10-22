@@ -5,16 +5,32 @@ import type { Json } from "./types";
 // batch. Unknown tools, shell commands and browser sessions stay exclusive.
 export const MAX_PARALLEL_TOOLS = 6;
 const parallelTools = new Set([
-  "websearch", "web_fetch", "web_fetch_exa", "web_search_advanced_exa",
-  "read_file", "Read", "list_files", "grep_files", "Grep", "Glob",
-  "run_jev", "tool_search", "ToolSearch", "search_tool",
+  "websearch",
+  "web_fetch",
+  "web_fetch_exa",
+  "web_search_advanced_exa",
+  "read_file",
+  "Read",
+  "list_files",
+  "grep_files",
+  "Grep",
+  "Glob",
+  "run_jev",
+  "tool_search",
+  "ToolSearch",
+  "search_tool",
 ]);
 
 export function supportsParallelTool(name: string, args: Json = {}): boolean {
   const normalized = normalizeTool(name, args);
   // Read can attach pixels instead of text. Visual observations need a parent
   // review boundary before Jev can choose anything based on that image.
-  if (normalized.name === "Read" && /\.(png|jpe?g|gif|webp)$/i.test(String(normalized.args.path ?? normalized.args.file_path)))
+  if (
+    normalized.name === "Read" &&
+    /\.(png|jpe?g|gif|webp)$/i.test(
+      String(normalized.args.path ?? normalized.args.file_path),
+    )
+  )
     return false;
   return parallelTools.has(normalized.name);
 }
@@ -26,7 +42,9 @@ export async function runToolBatch<T>(
 ) {
   const pending = new Set<Promise<void>>();
   let failure: { error: unknown } | undefined;
-  const checkFailure = () => { if (failure) throw failure.error; };
+  const checkFailure = () => {
+    if (failure) throw failure.error;
+  };
   const drain = async () => {
     await Promise.all(pending);
     checkFailure();
@@ -43,9 +61,14 @@ export async function runToolBatch<T>(
       }
       if (pending.size >= MAX_PARALLEL_TOOLS) await Promise.race(pending);
       checkFailure();
-      const task = Promise.resolve().then(() => execute(call))
-        .catch(error => { failure ??= { error }; })
-        .finally(() => { pending.delete(task); });
+      const task = Promise.resolve()
+        .then(() => execute(call))
+        .catch((error) => {
+          failure ??= { error };
+        })
+        .finally(() => {
+          pending.delete(task);
+        });
       pending.add(task);
     }
     await drain();

@@ -36,12 +36,21 @@ describe("touches", () => {
 describe("touchesBot", () => {
   test("tests under the bot's paths do not count", () => {
     expect(touchesBot(["apps/relay/src/relay.test.ts"])).toBe(false);
-    expect(touchesBot(["apps/bot/src/__tests__/core.test.ts", "apps/bot/src/__tests__/helpers.ts"])).toBe(false);
-    expect(touchesBot(["packages/shared/src/__tests__/settings.test.ts"])).toBe(false);
+    expect(
+      touchesBot([
+        "apps/bot/src/__tests__/core.test.ts",
+        "apps/bot/src/__tests__/helpers.ts",
+      ]),
+    ).toBe(false);
+    expect(touchesBot(["packages/shared/src/__tests__/settings.test.ts"])).toBe(
+      false,
+    );
   });
 
   test("a source file next to a changed test still counts", () => {
-    expect(touchesBot(["apps/relay/src/relay.test.ts", "apps/relay/src/keys.ts"])).toBe(true);
+    expect(
+      touchesBot(["apps/relay/src/relay.test.ts", "apps/relay/src/keys.ts"]),
+    ).toBe(true);
   });
 
   test("a name that only resembles a test counts", () => {
@@ -55,31 +64,60 @@ describe("decide", () => {
   const bot = { deployed: "b".repeat(40), changed: ["docs/relay.md"] };
 
   test("a docs-only change deploys nothing", () => {
-    expect(decide({ event: "push", vercel, bot })).toEqual({ api: false, web: false, bot: false, base: vercel.base });
+    expect(decide({ event: "push", vercel, bot })).toEqual({
+      api: false,
+      web: false,
+      bot: false,
+      base: vercel.base,
+    });
   });
 
   test("each target follows its own diff", () => {
     const result = decide({
       event: "push",
       vercel: { base: vercel.base, changed: ["apps/web/src/App.tsx"] },
-      bot: { deployed: bot.deployed, changed: ["apps/web/src/App.tsx", "apps/bot/src/llm.ts"] },
+      bot: {
+        deployed: bot.deployed,
+        changed: ["apps/web/src/App.tsx", "apps/bot/src/llm.ts"],
+      },
     });
-    expect(result).toEqual({ api: false, web: true, bot: true, base: vercel.base });
+    expect(result).toEqual({
+      api: false,
+      web: true,
+      bot: true,
+      base: vercel.base,
+    });
   });
 
   test("a test-only change under the bot's paths does not deploy the bot", () => {
     const changed = ["apps/relay/src/relay.test.ts"];
-    expect(decide({ event: "push", vercel: { base: vercel.base, changed }, bot: { deployed: bot.deployed, changed } }).bot).toBe(false);
+    expect(
+      decide({
+        event: "push",
+        vercel: { base: vercel.base, changed },
+        bot: { deployed: bot.deployed, changed },
+      }).bot,
+    ).toBe(false);
   });
 
   test("the shared workspace deploys every target", () => {
     const changed = ["packages/shared/src/settings.ts"];
-    const result = decide({ event: "push", vercel: { base: vercel.base, changed }, bot: { deployed: bot.deployed, changed } });
+    const result = decide({
+      event: "push",
+      vercel: { base: vercel.base, changed },
+      bot: { deployed: bot.deployed, changed },
+    });
     expect(result).toMatchObject({ api: true, web: true, bot: true });
   });
 
   test("the bot is current when the relay already runs the commit", () => {
-    expect(decide({ event: "push", vercel, bot: { deployed: bot.deployed, changed: [] } }).bot).toBe(false);
+    expect(
+      decide({
+        event: "push",
+        vercel,
+        bot: { deployed: bot.deployed, changed: [] },
+      }).bot,
+    ).toBe(false);
   });
 
   test("an unknown production commit deploys the bot", () => {
@@ -87,11 +125,21 @@ describe("decide", () => {
   });
 
   test("a missing base deploys both Vercel apps and reports no base", () => {
-    expect(decide({ event: "push", vercel: null, bot })).toEqual({ api: true, web: true, bot: false, base: "" });
+    expect(decide({ event: "push", vercel: null, bot })).toEqual({
+      api: true,
+      web: true,
+      bot: false,
+      base: "",
+    });
   });
 
   test("workflow_dispatch deploys everything", () => {
-    expect(decide({ event: "workflow_dispatch", vercel, bot })).toEqual({ api: true, web: true, bot: true, base: "" });
+    expect(decide({ event: "workflow_dispatch", vercel, bot })).toEqual({
+      api: true,
+      web: true,
+      bot: true,
+      base: "",
+    });
   });
 });
 
@@ -109,8 +157,19 @@ describe("deploy-changes.ts", () => {
   const sha: Record<string, string> = {};
 
   const git = (...args: string[]) => {
-    const proc = Bun.spawnSync(["git", "-c", "user.name=test", "-c", "user.email=test@example.com", ...args], { cwd: repo });
-    if (proc.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${proc.stderr.toString()}`);
+    const proc = Bun.spawnSync(
+      [
+        "git",
+        "-c",
+        "user.name=test",
+        "-c",
+        "user.email=test@example.com",
+        ...args,
+      ],
+      { cwd: repo },
+    );
+    if (proc.exitCode !== 0)
+      throw new Error(`git ${args.join(" ")}: ${proc.stderr.toString()}`);
     return proc.stdout.toString().trim();
   };
   const commit = async (name: string, file: string) => {
@@ -167,13 +226,19 @@ describe("deploy-changes.ts", () => {
     await commit("foreign", "apps/bot/src/other.ts");
     git("switch", "-q", "main");
     // The last successful main run built the first commit.
-    await writeFile(join(bin, "gh"), `#!/bin/sh\necho '[{"headSha":"${sha.bot}","event":"push"}]'\n`);
+    await writeFile(
+      join(bin, "gh"),
+      `#!/bin/sh\necho '[{"headSha":"${sha.bot}","event":"push"}]'\n`,
+    );
     await chmod(join(bin, "gh"), 0o755);
     relay = Bun.serve({
       port: 0,
       fetch(request) {
         seenAuthorization = request.headers.get("authorization");
-        return Response.json({ commit: relayCommit, latest: null }, { status: relayStatus });
+        return Response.json(
+          { commit: relayCommit, latest: null },
+          { status: relayStatus },
+        );
       },
     });
   });
@@ -186,7 +251,12 @@ describe("deploy-changes.ts", () => {
   test("a docs-only commit on top of the running commit deploys nothing", async () => {
     relayCommit = sha.bot;
     relayStatus = 200;
-    expect(await decideFor(sha.docs)).toEqual({ api: "false", web: "false", bot: "false", base: sha.bot });
+    expect(await decideFor(sha.docs)).toEqual({
+      api: "false",
+      web: "false",
+      bot: "false",
+      base: sha.bot,
+    });
     expect(seenAuthorization).toBe("Bearer hbr_test");
   });
 
@@ -196,23 +266,41 @@ describe("deploy-changes.ts", () => {
     git("switch", "-q", "-c", "ahead");
     await commit("bot2", "apps/bot/src/llm.ts");
     await commit("docs2", "docs/relay.md");
-    await writeFile(join(bin, "gh"), `#!/bin/sh\necho '[{"headSha":"${sha.bot2}","event":"push"}]'\n`);
+    await writeFile(
+      join(bin, "gh"),
+      `#!/bin/sh\necho '[{"headSha":"${sha.bot2}","event":"push"}]'\n`,
+    );
     relayCommit = sha.web;
-    expect(await decideFor(sha.docs2)).toEqual({ api: "false", web: "false", bot: "true", base: sha.bot2 });
-    await writeFile(join(bin, "gh"), `#!/bin/sh\necho '[{"headSha":"${sha.bot}","event":"push"}]'\n`);
+    expect(await decideFor(sha.docs2)).toEqual({
+      api: "false",
+      web: "false",
+      bot: "true",
+      base: sha.bot2,
+    });
+    await writeFile(
+      join(bin, "gh"),
+      `#!/bin/sh\necho '[{"headSha":"${sha.bot}","event":"push"}]'\n`,
+    );
     git("switch", "-q", "main");
   });
 
   test("the web app deploys when only it changed", async () => {
     relayCommit = sha.bot;
-    expect(await decideFor(sha.web)).toEqual({ api: "false", web: "true", bot: "false", base: sha.bot });
+    expect(await decideFor(sha.web)).toEqual({
+      api: "false",
+      web: "true",
+      bot: "false",
+      base: sha.bot,
+    });
   });
 
   test("the bot deploys when the relay cannot be asked", async () => {
     relayStatus = 503;
     expect((await decideFor(sha.docs)).bot).toBe("true");
     relayStatus = 200;
-    expect((await decideFor(sha.docs, { RELAY_URL: "http://127.0.0.1:1" })).bot).toBe("true");
+    expect(
+      (await decideFor(sha.docs, { RELAY_URL: "http://127.0.0.1:1" })).bot,
+    ).toBe("true");
     expect((await decideFor(sha.docs, { RELAY_URL: "" })).bot).toBe("true");
   });
 
@@ -228,7 +316,9 @@ describe("deploy-changes.ts", () => {
 
   test("workflow_dispatch deploys everything without asking", async () => {
     relayCommit = sha.docs;
-    expect(await decideFor(sha.docs, { GITHUB_EVENT_NAME: "workflow_dispatch" })).toEqual({
+    expect(
+      await decideFor(sha.docs, { GITHUB_EVENT_NAME: "workflow_dispatch" }),
+    ).toEqual({
       api: "true",
       web: "true",
       bot: "true",

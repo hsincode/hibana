@@ -1,13 +1,17 @@
-.PHONY: install check test build ci
+.PHONY: install fmt fmt-check check test build ci
 install:
 	bun install --frozen-lockfile
+fmt:
+	bun fmt
+fmt-check:
+	bun fmt --check
 check:
 	bun run typecheck
 test:
 	bun run test
 build:
 	bun run build
-ci: check test build
+ci: fmt-check check test build
 
 .PHONY: sandbox-image sandbox-smoke video-image vpn-image
 sandbox-image:

@@ -1,4 +1,11 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import * as Dialog from "@radix-ui/react-dialog";
 import type { GuildSummary, Me } from "./api";
@@ -66,17 +73,59 @@ export function Palette({
     }
     if (current) {
       for (const p of GUILD_PAGES)
-        items.push({ group: "ページ", icon: GUILD_PAGE_ICON[p.path], label: p.label, where: current.name, to: guildPath(current.id, p.path) });
+        items.push({
+          group: "ページ",
+          icon: GUILD_PAGE_ICON[p.path],
+          label: p.label,
+          where: current.name,
+          to: guildPath(current.id, p.path),
+        });
     }
-    items.push({ group: "ページ", icon: <Icon.grid />, label: "サーバー一覧", where: "全体", to: "/" });
-    items.push({ group: "ページ", icon: <Icon.user />, label: "マイ設定", where: "全体", to: "/me" });
-    items.push({ group: "ページ", icon: <Icon.box />, label: "すべての成果物", where: "全体", to: "/artifacts" });
+    items.push({
+      group: "ページ",
+      icon: <Icon.grid />,
+      label: "サーバー一覧",
+      where: "全体",
+      to: "/",
+    });
+    items.push({
+      group: "ページ",
+      icon: <Icon.user />,
+      label: "マイ設定",
+      where: "全体",
+      to: "/me",
+    });
+    items.push({
+      group: "ページ",
+      icon: <Icon.box />,
+      label: "すべての成果物",
+      where: "全体",
+      to: "/artifacts",
+    });
     if (me.can_manage_users) {
-      items.push({ group: "ページ", icon: <Icon.users />, label: "ユーザー", where: "管理", to: "/users" });
-      items.push({ group: "ページ", icon: <Icon.cpu />, label: "モデル", where: "管理", to: "/models" });
+      items.push({
+        group: "ページ",
+        icon: <Icon.users />,
+        label: "ユーザー",
+        where: "管理",
+        to: "/users",
+      });
+      items.push({
+        group: "ページ",
+        icon: <Icon.cpu />,
+        label: "モデル",
+        where: "管理",
+        to: "/models",
+      });
     }
     if (me.can_view_analytics)
-      items.push({ group: "ページ", icon: <Icon.gauge />, label: "利用料", where: "全体", to: "/analytics" });
+      items.push({
+        group: "ページ",
+        icon: <Icon.gauge />,
+        label: "利用料",
+        where: "全体",
+        to: "/analytics",
+      });
     if (current) {
       for (const s of GUILD_SETTINGS) {
         const page = GUILD_PAGES.find((p) => p.path === s.page);
@@ -95,7 +144,9 @@ export function Palette({
 
   const needle = query.trim().toLowerCase();
   const items = needle
-    ? all.filter((it) => `${it.label} ${it.where}`.toLowerCase().includes(needle))
+    ? all.filter((it) =>
+        `${it.label} ${it.where}`.toLowerCase().includes(needle),
+      )
     : all;
   const active = Math.min(index, Math.max(items.length - 1, 0));
 
@@ -109,7 +160,9 @@ export function Palette({
     if (!item) return;
     picked.current = true;
     onClose();
-    const state: PaletteNavState = item.row ? { row: item.row } : { focusMain: true };
+    const state: PaletteNavState = item.row
+      ? { row: item.row }
+      : { focusMain: true };
     navigate(item.to, { state });
   }
 
@@ -142,7 +195,9 @@ export function Palette({
                 aria-expanded="true"
                 aria-controls={listId}
                 aria-autocomplete="list"
-                aria-activedescendant={items.length ? `${listId}-${active}` : undefined}
+                aria-activedescendant={
+                  items.length ? `${listId}-${active}` : undefined
+                }
                 aria-label="サーバー・ページ・設定項目を検索"
                 placeholder="サーバー・ページ・設定項目を検索"
                 autoComplete="off"
@@ -156,7 +211,12 @@ export function Palette({
                   if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                     e.preventDefault();
                     if (items.length)
-                      setIndex((active + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length);
+                      setIndex(
+                        (active +
+                          (e.key === "ArrowDown" ? 1 : -1) +
+                          items.length) %
+                          items.length,
+                      );
                   } else if (e.key === "Enter" && !e.nativeEvent.isComposing) {
                     // 日本語の変換を確定する Enter では開かない。
                     e.preventDefault();
@@ -165,9 +225,18 @@ export function Palette({
                 }}
               />
             </div>
-            <div className="palette-list" id={listId} ref={list} role="listbox" aria-label="候補">
+            <div
+              className="palette-list"
+              id={listId}
+              ref={list}
+              role="listbox"
+              aria-label="候補"
+            >
               {items.map((it, i) => (
-                <div key={`${it.group}:${it.to}:${it.row ?? ""}`} role="presentation">
+                <div
+                  key={`${it.group}:${it.to}:${it.row ?? ""}`}
+                  role="presentation"
+                >
                   {it.group !== items[i - 1]?.group && (
                     <div className="palette-group" role="presentation">
                       {it.group}

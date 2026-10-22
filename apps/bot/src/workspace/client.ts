@@ -25,7 +25,11 @@ export function workspaceBaseUrl(baseUrl: string): string {
  */
 export function createWorkspaceClient(
   config: Pick<Config, "endpoints">,
-  options: { fetch?: typeof fetch; maxRetries?: number; timeoutMs?: number } = {},
+  options: {
+    fetch?: typeof fetch;
+    maxRetries?: number;
+    timeoutMs?: number;
+  } = {},
 ): Anthropic {
   const endpoint = config.endpoints[WORKSPACE_PROVIDER];
   if (!endpoint?.apiKey) throw new ProviderError("authentication", false);
@@ -62,7 +66,10 @@ export function createWorkspaceClient(
  * included. Other headers of that variable are still sent (#76).
  */
 function withOwnKey(send: typeof fetch, apiKey: string) {
-  return (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+  return (
+    input: string | URL | Request,
+    init?: RequestInit,
+  ): Promise<Response> => {
     // The SDK passes its headers in `init`, never in a Request, whose own
     // headers these replace.
     const headers = new Headers(init?.headers);
@@ -73,7 +80,8 @@ function withOwnKey(send: typeof fetch, apiKey: string) {
 }
 
 /** Why a session can no longer take a turn. */
-export type SessionGoneReason = "not_found" | "terminated" | "archived" | "deleted" | "no_budget";
+export type SessionGoneReason =
+  "not_found" | "terminated" | "archived" | "deleted" | "no_budget";
 
 /**
  * The session a turn was meant for cannot be used any more. `sent` tells the
@@ -92,14 +100,30 @@ export class SessionGone extends ProviderError {
 
 /** What an SDK error says, for deciding what to do next. The message is the
  *  provider's own text: it may be matched here, never logged or shown. */
-export type ApiErrorInfo = { status?: number; type?: string; code?: string; message: string };
+export type ApiErrorInfo = {
+  status?: number;
+  type?: string;
+  code?: string;
+  message: string;
+};
 export function apiErrorInfo(error: unknown): ApiErrorInfo {
   if (!(error instanceof APIError)) return { message: "" };
   // `APIError.error` is the whole response body, `{type: "error", error, request_id}`.
   // `details.error_code` is in the public documentation (`workflow_run_open`)
   // but not in SDK 0.133.0's types, hence the untyped read.
-  const inner = (error.error as { error?: { type?: unknown; message?: unknown; details?: { error_code?: unknown } } } | undefined)?.error;
-  const text = (value: unknown) => (typeof value === "string" ? value : undefined);
+  const inner = (
+    error.error as
+      | {
+          error?: {
+            type?: unknown;
+            message?: unknown;
+            details?: { error_code?: unknown };
+          };
+        }
+      | undefined
+  )?.error;
+  const text = (value: unknown) =>
+    typeof value === "string" ? value : undefined;
   return {
     status: error.status,
     type: text(inner?.type) ?? error.type ?? undefined,
@@ -109,7 +133,8 @@ export function apiErrorInfo(error: unknown): ApiErrorInfo {
 }
 
 // Only an id-shaped value is kept, never an arbitrary header.
-const requestId = (id: string | null | undefined) => (id && /^[A-Za-z0-9_.:-]{1,128}$/.test(id) ? id : undefined);
+const requestId = (id: string | null | undefined) =>
+  id && /^[A-Za-z0-9_.:-]{1,128}$/.test(id) ? id : undefined;
 
 /**
  * An SDK error as the fixed classification the rest of the bot shows and logs.
@@ -119,27 +144,49 @@ const requestId = (id: string | null | undefined) => (id && /^[A-Za-z0-9_.:-]{1,
  * (`if (signal.aborted) throw signal.reason`); the SDK reports one as
  * `APIUserAbortError`, which carries no reason.
  */
-export function toProviderError(error: unknown, phase: "request" | "stream", model?: string): ProviderError {
+export function toProviderError(
+  error: unknown,
+  phase: "request" | "stream",
+  model?: string,
+): ProviderError {
   if (error instanceof ProviderError) return error;
   if (!(error instanceof AnthropicError)) throw error;
-  const diagnostics = { phase, provider: WORKSPACE_PROVIDER, ...(model && { model }) };
+  const diagnostics = {
+    phase,
+    provider: WORKSPACE_PROVIDER,
+    ...(model && { model }),
+  };
   let failure: ProviderError;
-  if (error instanceof APIUserAbortError || error instanceof APIConnectionError) {
+  if (
+    error instanceof APIUserAbortError ||
+    error instanceof APIConnectionError
+  ) {
     failure = new ProviderError("transient", true);
     failure.diagnostics = { reason: "transport_error", ...diagnostics };
   } else if (error instanceof APIError && typeof error.status === "number") {
     const info = apiErrorInfo(error);
     const fallback = httpFailure(error.status);
-    const classified = apiFailure({ type: info.type, code: info.code, message: info.message });
+    const classified = apiFailure({
+      type: info.type,
+      code: info.code,
+      message: info.message,
+    });
     // The same merge as `readHttpFailure`: the body decides unless it is
     // unknown, and it never turns a final status into a retryable one.
-    failure = info.type === "billing_error" || error.status === 402
-      ? new ProviderError("quota", false, error.status)
-      : classified.kind === "protocol" || (!fallback.retryable && classified.retryable)
-        ? fallback
-        : new ProviderError(classified.kind, classified.retryable, error.status);
+    failure =
+      info.type === "billing_error" || error.status === 402
+        ? new ProviderError("quota", false, error.status)
+        : classified.kind === "protocol" ||
+            (!fallback.retryable && classified.retryable)
+          ? fallback
+          : new ProviderError(
+              classified.kind,
+              classified.retryable,
+              error.status,
+            );
     failure.diagnostics = {
-      ...classified.diagnostics, ...diagnostics,
+      ...classified.diagnostics,
+      ...diagnostics,
       response_status: error.status,
       request_id: requestId(error.requestID),
     };

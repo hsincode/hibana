@@ -45,13 +45,15 @@ export function commands(runtime: Runtime) {
     command("switch", "このサーバーのモデルを切り替え", [
       { ...string("preset", "モデルのプリセット"), autocomplete: true },
       string("effort", "推論の深さ", [...REASONING_EFFORTS, "default"]),
-      string("ultra", "Ultracode（xhigh・ワークフロー）。Workspace は Haiku 5.5 だけ Ultra", ["on", "off"]),
+      string(
+        "ultra",
+        "Ultracode（xhigh・ワークフロー）。Workspace は Haiku 5.5 だけ Ultra",
+        ["on", "off"],
+      ),
       string("multi", "Multi-Agent（役割分担・並列）", ["on", "off"]),
     ]),
     ...flags.map(([name, desc]) =>
-      command(name, desc, [
-        string("mode", "on / off", ["on", "off"], true),
-      ]),
+      command(name, desc, [string("mode", "on / off", ["on", "off"], true)]),
     ),
     command("temperature", "生成温度を変更", [
       {
@@ -180,7 +182,8 @@ export async function handleCommand(
         const settings = runtime.resolve(ctx.guildId, ctx.userId);
         result = settings;
         if (settings.selection.provider === WORKSPACE_PROVIDER)
-          note = "Anthropic Workspace: 会話と作業領域は Anthropic のクラウドにあります（チャンネルごと）。";
+          note =
+            "Anthropic Workspace: 会話と作業領域は Anthropic のクラウドにあります（チャンネルごと）。";
         break;
       }
       case "context": {
@@ -188,7 +191,9 @@ export async function handleCommand(
         // conversation, also for a Workspace channel, whose conversation
         // itself is in the cloud session named here.
         const cloud = workspace?.info(ctx.channelId);
-        result = cloud ? { ...history.info(ctx.channelId), workspace: cloud } : history.info(ctx.channelId);
+        result = cloud
+          ? { ...history.info(ctx.channelId), workspace: cloud }
+          : history.info(ctx.channelId);
         break;
       }
       case "usage":
@@ -203,7 +208,10 @@ export async function handleCommand(
         const cloud = workspace?.info(ctx.channelId);
         history.clear(ctx.channelId);
         result = cloud
-          ? { ok: true, workspace: "クラウドのセッションと作業ファイルの削除を始めました" }
+          ? {
+              ok: true,
+              workspace: "クラウドのセッションと作業ファイルの削除を始めました",
+            }
           : { ok: true };
         break;
       }
@@ -322,9 +330,15 @@ export async function handleCommand(
       // The switch is stored either way; on Anthropic Workspace it only
       // takes effect as Haiku Ultra (#76), and the person is told when the
       // turns they will get are not that.
-      if (i.commandName === "switch" && (patch.ultra_mode === true || patch.multi_agent === true)) {
+      if (
+        i.commandName === "switch" &&
+        (patch.ultra_mode === true || patch.multi_agent === true)
+      ) {
         const settings = runtime.resolve(ctx.guildId, ctx.userId);
-        if (settings.selection.provider === WORKSPACE_PROVIDER && !settings.workspace_ultra)
+        if (
+          settings.selection.provider === WORKSPACE_PROVIDER &&
+          !settings.workspace_ultra
+        )
           note = ultraSupported(settings.selection)
             ? "Anthropic Workspace の Ultra は、いまの設定では働きません（Multi-Agent が on か、ワークフローが無効です）。設定は保存しました。"
             : "Anthropic Workspace の Ultra は Haiku 5.5 だけで働きます。設定は保存しました。";

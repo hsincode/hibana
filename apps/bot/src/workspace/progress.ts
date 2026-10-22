@@ -20,29 +20,54 @@ type Fields = Record<string, unknown>;
  *  kept from forming a mention even where the message is posted without
  *  `allowed_mentions`. */
 const text = (value: unknown, limit = 120) =>
-  String(value ?? "").replace(/\s+/g, " ").trim().slice(0, limit).replace(/@/g, "@\u200b");
-const labelled = (label: string, value: unknown) => (text(value) ? `${label}: ${text(value)}` : label);
+  String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, limit)
+    .replace(/@/g, "@\u200b");
+const labelled = (label: string, value: unknown) =>
+  text(value) ? `${label}: ${text(value)}` : label;
 const host = (url: unknown) => {
-  try { return new URL(String(url)).host; } catch { return ""; }
+  try {
+    return new URL(String(url)).host;
+  } catch {
+    return "";
+  }
 };
 
 /** Shown while a turn waits for one of the bot's Workspace slots: the limit
  *  on turns running at once is the bot's own, across every server. */
-export const waitingLine = "ほかの作業が終わるのを待っています（Anthropic Workspace の同時実行の上限）。";
+export const waitingLine =
+  "ほかの作業が終わるのを待っています（Anthropic Workspace の同時実行の上限）。";
 
 /** What one tool call of the primary thread is doing, built-in or custom.
  *  `more` is how many further calls are running beside it. */
 export function toolLine(name: string, input: Fields = {}, more = 0): string {
   const line =
-    name === "bash" ? (input.restart === true ? "シェルを再起動しています" : "コマンドを実行しています")
-    : name === "read" ? labelled("読み込み", input.file_path)
-    : name === "write" || name === "edit" ? labelled("編集", input.file_path)
-    : name === "glob" || name === "grep" ? labelled("検索", input.pattern)
-    : name === "web_search" ? labelled("web 検索", input.query)
-    : name === "web_fetch" ? labelled("web 取得", host(input.url))
-    : name === "send_file" ? labelled("送信", typeof input.path === "string" ? basename(input.path) : "")
-    : name === "AskUserQuestion" ? "質問の回答を待っています"
-    : labelled("ツール", name);
+    name === "bash"
+      ? input.restart === true
+        ? "シェルを再起動しています"
+        : "コマンドを実行しています"
+      : name === "read"
+        ? labelled("読み込み", input.file_path)
+        : name === "write" || name === "edit"
+          ? labelled("編集", input.file_path)
+          : name === "glob" || name === "grep"
+            ? labelled("検索", input.pattern)
+            : name === "web_search"
+              ? labelled("web 検索", input.query)
+              : name === "web_fetch"
+                ? labelled("web 取得", host(input.url))
+                : name === "send_file"
+                  ? labelled(
+                      "送信",
+                      typeof input.path === "string"
+                        ? basename(input.path)
+                        : "",
+                    )
+                  : name === "AskUserQuestion"
+                    ? "質問の回答を待っています"
+                    : labelled("ツール", name);
   return more > 0 ? `${line}（ほか ${more} 件）` : line;
 }
 
@@ -61,17 +86,26 @@ export function eventLine(event: SessionEvent): string | undefined {
     case "agent.mcp_tool_use":
     case "agent.custom_tool_use":
       if (e.session_thread_id || typeof e.name !== "string") return undefined;
-      return toolLine(e.name, e.input && typeof e.input === "object" ? e.input as Fields : {});
+      return toolLine(
+        e.name,
+        e.input && typeof e.input === "object" ? (e.input as Fields) : {},
+      );
     case "session.status_rescheduled":
       return "再試行しています";
     case "session.error": {
-      const error = (e.error ?? {}) as { type?: unknown; retry_status?: { type?: unknown } };
+      const error = (e.error ?? {}) as {
+        type?: unknown;
+        retry_status?: { type?: unknown };
+      };
       if (error.retry_status?.type !== "retrying") return undefined;
       return RETRYING[String(error.type)] ?? "エラーのため再試行しています";
     }
     case "workflow_run.error":
       // The API writes this message itself; it holds nothing from the run.
-      return labelled("ワークフローのエラー", (e.error as { message?: unknown } | undefined)?.message);
+      return labelled(
+        "ワークフローのエラー",
+        (e.error as { message?: unknown } | undefined)?.message,
+      );
     default:
       return undefined;
   }
@@ -105,18 +139,27 @@ export function applyRunEvent(
   now = Date.now(),
 ): RunView | undefined {
   const e = event as RawEvent;
-  const id = typeof e.workflow_run_id === "string" ? e.workflow_run_id : undefined;
-  const thread = typeof e.session_thread_id === "string" ? e.session_thread_id : undefined;
+  const id =
+    typeof e.workflow_run_id === "string" ? e.workflow_run_id : undefined;
+  const thread =
+    typeof e.session_thread_id === "string" ? e.session_thread_id : undefined;
   if (e.type === "workflow_run.created") {
     if (!id) return undefined;
     // Seen again after a reconnect: the view it already has stands.
     const known = runs.get(id);
     if (known) return known;
-    const phases = (Array.isArray(e.phases) ? e.phases as Fields[] : [])
+    const phases = (Array.isArray(e.phases) ? (e.phases as Fields[]) : [])
       .filter((p) => p && typeof p.id === "string")
       .map((p) => ({ id: p.id as string, name: String(p.name ?? p.id) }));
     const run: RunView = {
-      id, name: String(e.name ?? id), phases, open: new Map(), threads: 0, finished: 0, state: "running", startedAt: now,
+      id,
+      name: String(e.name ?? id),
+      phases,
+      open: new Map(),
+      threads: 0,
+      finished: 0,
+      state: "running",
+      startedAt: now,
     };
     runs.set(id, run);
     return run;
@@ -144,7 +187,8 @@ export function applyRunEvent(
       run.state = e.type === "workflow_run.status_running" ? "running" : "idle";
       return run;
     case "workflow_run.phase_started":
-      if (!e.id || typeof e.workflow_run_phase_id !== "string") return undefined;
+      if (!e.id || typeof e.workflow_run_phase_id !== "string")
+        return undefined;
       run.open.set(e.id, e.workflow_run_phase_id);
       return run;
     case "workflow_run.phase_ended":
@@ -164,22 +208,34 @@ export function applyRunEvent(
 
 const duration = (ms: number) => {
   const s = Math.max(0, Math.round(ms / 1000));
-  return s < 60 ? `${s}秒` : `${Math.floor(s / 60)}分${s % 60 ? `${s % 60}秒` : ""}`;
+  return s < 60
+    ? `${s}秒`
+    : `${Math.floor(s / 60)}分${s % 60 ? `${s % 60}秒` : ""}`;
 };
-const ENDED: Record<string, string> = { completed: "完了", stopped: "停止", error: "失敗" };
+const ENDED: Record<string, string> = {
+  completed: "完了",
+  stopped: "停止",
+  error: "失敗",
+};
 const MAX_PHASES = 3;
 
 /** The one status line of a run, in the form the local workflow engine uses
  *  for its own. The run's threads are called agents: a "thread" in a Discord
  *  channel is something else. Names are the model's and are shown flattened. */
 export function runLine(run: RunView, now = Date.now()): string {
-  const state = run.state === "running" ? "実行中"
-    : run.state === "idle" ? "一時停止"
-    : ENDED[run.result ?? ""] ?? "終了";
-  const open = [...new Set(run.open.values())].map((id) => text(run.phases.find((p) => p.id === id)?.name ?? id, 40));
-  const phases = open.length > MAX_PHASES
-    ? `${open.slice(0, MAX_PHASES).join("、")} ほか ${open.length - MAX_PHASES}`
-    : open.join("、");
+  const state =
+    run.state === "running"
+      ? "実行中"
+      : run.state === "idle"
+        ? "一時停止"
+        : (ENDED[run.result ?? ""] ?? "終了");
+  const open = [...new Set(run.open.values())].map((id) =>
+    text(run.phases.find((p) => p.id === id)?.name ?? id, 40),
+  );
+  const phases =
+    open.length > MAX_PHASES
+      ? `${open.slice(0, MAX_PHASES).join("、")} ほか ${open.length - MAX_PHASES}`
+      : open.join("、");
   const parts = [
     state,
     ...(phases ? [phases] : []),
@@ -194,8 +250,13 @@ export function runLine(run: RunView, now = Date.now()): string {
  *  of events becomes a few edits instead of a queue of them behind Discord's
  *  rate limit. The last text given is always written. A failed write is
  *  dropped: a status line must never stop the turn. */
-export function coalesce(write: (text: string) => Promise<void>, minMs = 1500): (text: string) => void {
-  let latest: string | undefined, written: string | undefined, busy = false;
+export function coalesce(
+  write: (text: string) => Promise<void>,
+  minMs = 1500,
+): (text: string) => void {
+  let latest: string | undefined,
+    written: string | undefined,
+    busy = false;
   const drain = async () => {
     busy = true;
     try {
@@ -204,7 +265,9 @@ export function coalesce(write: (text: string) => Promise<void>, minMs = 1500): 
         latest = undefined;
         if (next === written) continue;
         written = next;
-        await Promise.resolve().then(() => write(next)).catch(() => {});
+        await Promise.resolve()
+          .then(() => write(next))
+          .catch(() => {});
         await new Promise<void>((resolve) => {
           // A pending status edit must not keep a stopping process alive.
           (setTimeout(resolve, minMs) as { unref?: () => void }).unref?.();

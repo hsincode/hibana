@@ -22,8 +22,7 @@ export function migrateState(input: unknown) {
   const defaults: Partial<GuildRow> = {};
   // Copy legacy global values before materializing each independent server row.
   for (const [key, value] of Object.entries(emptyGuild())) {
-    if (old[key] != null)
-      Object.assign(defaults, { [key]: old[key] });
+    if (old[key] != null) Object.assign(defaults, { [key]: old[key] });
   }
   if (typeof old.provider === "string" && typeof old.model === "string")
     defaults.selection = selectionSchema.parse({
@@ -34,7 +33,10 @@ export function migrateState(input: unknown) {
   return {
     defaults,
     guilds: Object.fromEntries(
-      entries(old.guilds).map(([id, row]) => [id, normalizeGuild(record(row), normalizeGuild(defaults))]),
+      entries(old.guilds).map(([id, row]) => [
+        id,
+        normalizeGuild(record(row), normalizeGuild(defaults)),
+      ]),
     ),
     user_overrides: Object.fromEntries(
       entries(old.user_overrides).map(([id, row]) => [

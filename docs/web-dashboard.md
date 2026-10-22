@@ -33,20 +33,20 @@ flowchart LR
   servers -- "カードを選ぶ" --> agent
 ```
 
-| URL | ページ | 中身 | 開ける人 |
-|---|---|---|---|
-| `/login` | ログイン | Discord でログイン | 未ログイン |
-| `/` | サーバー一覧 | 管理できるサーバーのカード、名前と ID の絞り込み | ログイン済み |
-| `/g/:id` | エージェント | 「実際の動作」、`/switch` モデル（モデル・effort・Service Tier）、サブエージェント（モード・共通の設定・役割ごとの設定）、Jev | そのサーバーを管理できる人（API が判定） |
-| `/g/:id/tools` | ツールと挙動 | temperature・exa・スレッド履歴、MCP、挙動、トリガーワード | 同上 |
-| `/g/:id/context` | コンテキスト | サーバーコンテキスト、persona override | 同上 |
-| `/g/:id/skills` | スキル | 一覧、作成、他サーバーからのインポート、有効・無効、削除、ダウンロード | 同上 |
-| `/g/:id/artifacts` | 成果物 | このサーバーの公開サイト、延命・永久化・解除 | 同上 |
-| `/me` | マイ設定 | 「あなたの上書き」、モデル・サブエージェント・Jev の上書き、ユーザーコンテキスト | ログイン済み |
-| `/artifacts` | すべての成果物 | 管理できるサーバー全部の公開サイト | ログイン済み |
-| `/users` | ユーザー | ロールの変更 | `can_manage_users` |
-| `/models` | モデル | ChatGPT マスターアカウント、プリセットの公開とプレミアム | `can_manage_users` |
-| `/analytics` | 利用料 | Anthropic の cost report と、今日の推計（usage report）、予算が少ないときのモデルと閾値（#89、#95） | ログイン済み（`can_view_analytics`、#85）。モデルと閾値の変更は Administrator だけ（`canManageBudget`、#95） |
+| URL                | ページ         | 中身                                                                                                                          | 開ける人                                                                                                     |
+| ------------------ | -------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `/login`           | ログイン       | Discord でログイン                                                                                                            | 未ログイン                                                                                                   |
+| `/`                | サーバー一覧   | 管理できるサーバーのカード、名前と ID の絞り込み                                                                              | ログイン済み                                                                                                 |
+| `/g/:id`           | エージェント   | 「実際の動作」、`/switch` モデル（モデル・effort・Service Tier）、サブエージェント（モード・共通の設定・役割ごとの設定）、Jev | そのサーバーを管理できる人（API が判定）                                                                     |
+| `/g/:id/tools`     | ツールと挙動   | temperature・exa・スレッド履歴、MCP、挙動、トリガーワード                                                                     | 同上                                                                                                         |
+| `/g/:id/context`   | コンテキスト   | サーバーコンテキスト、persona override                                                                                        | 同上                                                                                                         |
+| `/g/:id/skills`    | スキル         | 一覧、作成、他サーバーからのインポート、有効・無効、削除、ダウンロード                                                        | 同上                                                                                                         |
+| `/g/:id/artifacts` | 成果物         | このサーバーの公開サイト、延命・永久化・解除                                                                                  | 同上                                                                                                         |
+| `/me`              | マイ設定       | 「あなたの上書き」、モデル・サブエージェント・Jev の上書き、ユーザーコンテキスト                                              | ログイン済み                                                                                                 |
+| `/artifacts`       | すべての成果物 | 管理できるサーバー全部の公開サイト                                                                                            | ログイン済み                                                                                                 |
+| `/users`           | ユーザー       | ロールの変更                                                                                                                  | `can_manage_users`                                                                                           |
+| `/models`          | モデル         | ChatGPT マスターアカウント、プリセットの公開とプレミアム                                                                      | `can_manage_users`                                                                                           |
+| `/analytics`       | 利用料         | Anthropic の cost report と、今日の推計（usage report）、予算が少ないときのモデルと閾値（#89、#95）                           | ログイン済み（`can_view_analytics`、#85）。モデルと閾値の変更は Administrator だけ（`canManageBudget`、#95） |
 
 ページの一覧は `apps/web/src/nav.ts` にあり、サイドバー・タブ帯・コマンドパレットが同じ一覧を使います。
 
@@ -91,15 +91,15 @@ stateDiagram-v2
 
 エージェントのページの先頭に、保存した値ではなく、設定の組み合わせから決まる値を出します（`apps/web/src/Agent.tsx` の `guildEffective`）。bot の環境変数や接続の状態までは Web から分からないので、見出しの横でそう断っています。
 
-| 条件 | 表示 | 根拠 |
-|---|---|---|
-| モデルが Anthropic / Auto で、Jev 判定が ON | モデルは「Jev が会話ごとに選ぶ」、effort は「Jev が決める」 | [Anthropic の auto routing](jev.md#anthropic-の-auto-routing) |
-| モデルが Anthropic / Auto で、Jev 判定が OFF | `AUTO_ROUTE_FALLBACK` のモデルと effort | 同上（「Jev が使えないとき」） |
-| モデルが Anthropic（Auto と固定の 3 モデル） | サブエージェントは off | 同上（「サブエージェントは off です」） |
-| モデルが Anthropic Workspace の Haiku 5.5 で、サブエージェントが ultra | サブエージェントは `ultra`（「Managed Agents の dynamic workflows」と添える）。effort は保存値のまま（xhigh にしない） | [Anthropic Workspace](anthropic-workspace.md#haiku-ultra)（#76）。bot の `WORKFLOWS_ENABLED` などで Haiku Ultra が止まっていても、`ultra` と出ます（画面からは分かりません） |
-| モデルが Anthropic Workspace で、上以外 | サブエージェントは `off`。保存値が on / ultra / multi のときは「Anthropic Workspace では委譲なしで動きます。…」と添える。Jev 行動選択が ON のときは「使わない」 | 同上 |
-| サブエージェントが ultra（`anthropic`・`anthropic_workspace` 以外） | effort は xhigh | [Ultracode](ultracode.md) |
-| サブエージェントが multi（`anthropic`・`anthropic_workspace` 以外）で、Jev 行動選択モードが ON | Jev 行動選択は「使わない」 | [Jev 判定と行動選択モード](jev.md) |
+| 条件                                                                                           | 表示                                                                                                                                                            | 根拠                                                                                                                                                                         |
+| ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| モデルが Anthropic / Auto で、Jev 判定が ON                                                    | モデルは「Jev が会話ごとに選ぶ」、effort は「Jev が決める」                                                                                                     | [Anthropic の auto routing](jev.md#anthropic-の-auto-routing)                                                                                                                |
+| モデルが Anthropic / Auto で、Jev 判定が OFF                                                   | `AUTO_ROUTE_FALLBACK` のモデルと effort                                                                                                                         | 同上（「Jev が使えないとき」）                                                                                                                                               |
+| モデルが Anthropic（Auto と固定の 3 モデル）                                                   | サブエージェントは off                                                                                                                                          | 同上（「サブエージェントは off です」）                                                                                                                                      |
+| モデルが Anthropic Workspace の Haiku 5.5 で、サブエージェントが ultra                         | サブエージェントは `ultra`（「Managed Agents の dynamic workflows」と添える）。effort は保存値のまま（xhigh にしない）                                          | [Anthropic Workspace](anthropic-workspace.md#haiku-ultra)（#76）。bot の `WORKFLOWS_ENABLED` などで Haiku Ultra が止まっていても、`ultra` と出ます（画面からは分かりません） |
+| モデルが Anthropic Workspace で、上以外                                                        | サブエージェントは `off`。保存値が on / ultra / multi のときは「Anthropic Workspace では委譲なしで動きます。…」と添える。Jev 行動選択が ON のときは「使わない」 | 同上                                                                                                                                                                         |
+| サブエージェントが ultra（`anthropic`・`anthropic_workspace` 以外）                            | effort は xhigh                                                                                                                                                 | [Ultracode](ultracode.md)                                                                                                                                                    |
+| サブエージェントが multi（`anthropic`・`anthropic_workspace` 以外）で、Jev 行動選択モードが ON | Jev 行動選択は「使わない」                                                                                                                                      | [Jev 判定と行動選択モード](jev.md)                                                                                                                                           |
 
 Anthropic Workspace を選んでいるときは、ほかにも次の表示が変わります（#76）。
 
@@ -114,13 +114,13 @@ Anthropic Workspace を選んでいるときは、ほかにも次の表示が変
 
 配色は黒曜石（ダーク）と真珠（ライト）の面に、淡い 5 色の箔（水色・藤・桃・杏・薄緑）です。箔は線・縁・光にだけ使い、塗りは単色にしています（主ボタンはダークで白、ライトで墨。ロゴは色を付けない）。プロバイダの印も文字と同じ色です。
 
-| ファイル（`apps/web/src/styles/`） | 中身 |
-|---|---|
-| `tokens.css` | 書体、色・寸法のトークン（ライト / ダーク）、基本の要素、動きを減らす設定 |
-| `controls.css` | ボタン・入力・セグメント・印・面・ダイアログ・メニュー・トースト・表 |
-| `shell.css` | 上部バー・保存状態・サイドバー・ページの枠・コマンドパレット・ログイン |
-| `settings.css` | 節・設定行・「実際の動作」・モデル・サブエージェント・トリガー・スキル |
-| `pages.css` | サーバー一覧・モデル管理・利用料 |
+| ファイル（`apps/web/src/styles/`） | 中身                                                                      |
+| ---------------------------------- | ------------------------------------------------------------------------- |
+| `tokens.css`                       | 書体、色・寸法のトークン（ライト / ダーク）、基本の要素、動きを減らす設定 |
+| `controls.css`                     | ボタン・入力・セグメント・印・面・ダイアログ・メニュー・トースト・表      |
+| `shell.css`                        | 上部バー・保存状態・サイドバー・ページの枠・コマンドパレット・ログイン    |
+| `settings.css`                     | 節・設定行・「実際の動作」・モデル・サブエージェント・トリガー・スキル    |
+| `pages.css`                        | サーバー一覧・モデル管理・利用料                                          |
 
 - **テーマ。** 外観メニューの選択は `localStorage` の `hibana-theme` に保存し、`<html data-theme>` に反映します。「システム」のときは OS の設定に従います。ダークのトークンは `tokens.css` に 2 か所（「ダーク」を選んだとき用と、「システム」で OS がダークのとき用）あり、同じ内容に保ちます。
 - **書体。** 欧文と数字は Outfit と Red Hat Mono で、ファイルを同梱しています（出所・ライセンス・生成方法は `apps/web/src/fonts/README.md`）。日本語は端末の書体です。

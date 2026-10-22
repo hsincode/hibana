@@ -7,8 +7,10 @@ test("the API still offers everything in contract.json, and contract.json lists 
   const removed: string[] = [];
   const added: string[] = [];
   for (const key of Object.keys(recorded) as (keyof Contract)[]) {
-    for (const entry of recorded[key]) if (!current[key].includes(entry)) removed.push(`${key}: ${entry}`);
-    for (const entry of current[key]) if (!recorded[key].includes(entry)) added.push(`${key}: ${entry}`);
+    for (const entry of recorded[key])
+      if (!current[key].includes(entry)) removed.push(`${key}: ${entry}`);
+    for (const entry of current[key])
+      if (!recorded[key].includes(entry)) added.push(`${key}: ${entry}`);
   }
   // Removed: the previous bot or dashboard may still use it (docs/adr/0006).
   // Deploy the clients without it first; then delete it from contract.json in

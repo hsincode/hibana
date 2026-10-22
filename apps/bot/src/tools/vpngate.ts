@@ -113,7 +113,10 @@ export function parseVpnGateCsv(text: string): VpnGateRelay[] {
     const last = line.lastIndexOf(",");
     if (last < 0) continue;
     const b64 = line.slice(last + 1).trim();
-    const cols = line.slice(0, last).split(",").map((c) => c.trim());
+    const cols = line
+      .slice(0, last)
+      .split(",")
+      .map((c) => c.trim());
     if (cols.length < 7) continue;
     const host = cols[0]!;
     const ip = cols[1]!;
@@ -161,7 +164,9 @@ export function selectVpnGateRelay(
     ? relays.filter((r) => r.country === country)
     : relays.slice();
   if (!pool.length) {
-    const available = [...new Set(relays.map((r) => r.country))].sort().join(", ");
+    const available = [...new Set(relays.map((r) => r.country))]
+      .sort()
+      .join(", ");
     throw new Error(
       `No VPN Gate relays for ${country ?? "auto"}${available ? ` (available: ${available})` : ""}`,
     );
@@ -208,7 +213,8 @@ export function sanitizeOpenVpnConfig(ovpn: string): string {
       const parts = trimmed.split(/\s+/);
       const host = parts[1];
       const port = Number(parts[2] || 1194);
-      if (!host || !Number.isInteger(port) || port < 1 || port > 65535) continue;
+      if (!host || !Number.isInteger(port) || port < 1 || port > 65535)
+        continue;
       if (isIP(host) ? !isPublicAddress(host) : !isSafeRemoteHostname(host))
         continue;
       remotes++;

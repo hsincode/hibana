@@ -26,12 +26,21 @@ export class Media {
   private lock = new Serial();
   private home: HomeSession;
   private homeTimer: ReturnType<typeof setInterval>;
-  constructor(private sandbox: Sandbox, private log?: Logger) {
+  constructor(
+    private sandbox: Sandbox,
+    private log?: Logger,
+  ) {
     this.home = new HomeSession(sandbox.config);
     this.homeTimer = setInterval(() => {
-      void this.lock.run(async () => {
-        if (this.home.expired) await this.closeBrowserUnlocked();
-      }).catch(() => console.error("Home browser cleanup failed; relay expiry remains enforced"));
+      void this.lock
+        .run(async () => {
+          if (this.home.expired) await this.closeBrowserUnlocked();
+        })
+        .catch(() =>
+          console.error(
+            "Home browser cleanup failed; relay expiry remains enforced",
+          ),
+        );
     }, 5000);
     this.homeTimer.unref();
   }
@@ -61,12 +70,19 @@ export class Media {
   }
   async homeCommand(name: string, ctx: Context) {
     return this.lock.run(async () => {
-      if (!this.sandbox.config.browserProxyUrl) throw new Error("Home route is not configured");
+      if (!this.sandbox.config.browserProxyUrl)
+        throw new Error("Home route is not configured");
       if (name === "home_vpn_status") return this.home.status(ctx);
-      if (this.home.active && !this.home.owns(ctx)) throw new Error("Home connection belongs to another task");
-      if (this.browser && this.browser.owner !== `${ctx.channelId}/${ctx.userId}`) throw new Error("Browser is busy in another turn");
+      if (this.home.active && !this.home.owns(ctx))
+        throw new Error("Home connection belongs to another task");
+      if (
+        this.browser &&
+        this.browser.owner !== `${ctx.channelId}/${ctx.userId}`
+      )
+        throw new Error("Browser is busy in another turn");
       if (name === "home_vpn_disconnect") {
-        await this.closeBrowserUnlocked(); return this.home.status(ctx);
+        await this.closeBrowserUnlocked();
+        return this.home.status(ctx);
       }
       if (name !== "home_vpn_connect") throw new Error("Unknown home tool");
       if (!this.home.active) await this.closeBrowserUnlocked();
@@ -74,19 +90,60 @@ export class Media {
     });
   }
   async finishHome(ctx: Context) {
-    await this.lock.run(async () => { if (this.home.owns(ctx)) await this.closeBrowserUnlocked(); });
+    await this.lock.run(async () => {
+      if (this.home.owns(ctx)) await this.closeBrowserUnlocked();
+    });
   }
   async browserCommand(ctx: Context, a: Json) {
     const started = performance.now();
     // Arguments, URLs, scripts and output can contain credentials or private page data.
-    const commands = new Set(["open", "goto", "close", "click", "dblclick", "fill", "type", "press", "hover",
-      "drag", "select", "check", "uncheck", "upload", "snapshot", "screenshot", "eval", "run-code",
-      "mousemove", "mousedown", "mouseup", "mousewheel", "keydown", "keyup", "resize", "reload",
-      "go-back", "go-forward", "tab-list", "tab-new", "tab-close", "tab-select", "console", "network"]);
-    const command = Array.isArray(a.args) && commands.has(a.args[0]) ? a.args[0] : "unknown";
-    const fields = { operation_id: crypto.randomUUID(), channel: ctx.channelId,
-      message_id: ctx.messageId, jev_run_id: ctx.jevDiagnostic?.runId, command };
-    let stage = "queue", outcome = "error";
+    const commands = new Set([
+      "open",
+      "goto",
+      "close",
+      "click",
+      "dblclick",
+      "fill",
+      "type",
+      "press",
+      "hover",
+      "drag",
+      "select",
+      "check",
+      "uncheck",
+      "upload",
+      "snapshot",
+      "screenshot",
+      "eval",
+      "run-code",
+      "mousemove",
+      "mousedown",
+      "mouseup",
+      "mousewheel",
+      "keydown",
+      "keyup",
+      "resize",
+      "reload",
+      "go-back",
+      "go-forward",
+      "tab-list",
+      "tab-new",
+      "tab-close",
+      "tab-select",
+      "console",
+      "network",
+    ]);
+    const command =
+      Array.isArray(a.args) && commands.has(a.args[0]) ? a.args[0] : "unknown";
+    const fields = {
+      operation_id: crypto.randomUUID(),
+      channel: ctx.channelId,
+      message_id: ctx.messageId,
+      jev_run_id: ctx.jevDiagnostic?.runId,
+      command,
+    };
+    let stage = "queue",
+      outcome = "error";
     this.log?.info(fields, "Browser operation started");
     try {
       return await this.lock.run(async () => {
@@ -112,8 +169,12 @@ export class Media {
         // Check ownership before touching or closing anything belonging to a
         // different task, even when it is from the same user and channel.
         const proxy = this.home.proxy(ctx);
-        try { await this.home.touch(ctx); }
-        catch (error) { await this.closeBrowserUnlocked(); throw error; }
+        try {
+          await this.home.touch(ctx);
+        } catch (error) {
+          await this.closeBrowserUnlocked();
+          throw error;
+        }
         if (this.browser) {
           const check = await processRun(
             "docker",
@@ -135,57 +196,78 @@ export class Media {
             throw new Error("Video renderer is busy or unavailable");
           const name = `hibana-browser-${crypto.randomUUID()}`,
             root = await this.sandbox.root(ctx);
-          const r = await processRun("docker", [
-            "run",
-            "-d",
-            "--rm",
-            "--name",
-            name,
-            "--init",
-            "--read-only",
-            "--cap-drop=ALL",
-            "--security-opt=no-new-privileges",
-            "--pids-limit=128",
-            "--memory=384m",
-            "--memory-swap=512m",
-            "--cpus=.5",
-            "--network",
-            // The home proxy is on the Docker bridge. Joining the Surfshark
-            // namespace would make the home route depend on an unrelated VPN.
-            proxy ? "bridge" : this.sandbox.network,
-            "--user",
-            `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`,
-            "--tmpfs",
-            "/tmp:rw,size=128m",
-            "--shm-size=64m",
-            "-e",
-            "HOME=/tmp",
-            // Pass names only: Docker inherits values without putting credentials
-            // into argv, process listings or a failed-command error message.
-            ...(proxy
-              ? ["-e", "HIBANA_BROWSER_PROXY_URL", "-e", "HIBANA_BROWSER_PROXY_USERNAME", "-e", "HIBANA_BROWSER_PROXY_PASSWORD"]
-              : []),
-            "--mount",
-            `type=bind,src=${root},dst=/workspace`,
-            "--workdir",
-            "/workspace",
-            this.sandbox.config.sandboxImage,
-            "node",
-            "/opt/hibana-browser/keeper.cjs",
-          ], { env: {
-            ...process.env,
-            HIBANA_BROWSER_PROXY_URL: proxy?.server,
-            HIBANA_BROWSER_PROXY_USERNAME: proxy?.username,
-            HIBANA_BROWSER_PROXY_PASSWORD: proxy?.password,
-          } });
+          const r = await processRun(
+            "docker",
+            [
+              "run",
+              "-d",
+              "--rm",
+              "--name",
+              name,
+              "--init",
+              "--read-only",
+              "--cap-drop=ALL",
+              "--security-opt=no-new-privileges",
+              "--pids-limit=128",
+              "--memory=384m",
+              "--memory-swap=512m",
+              "--cpus=.5",
+              "--network",
+              // The home proxy is on the Docker bridge. Joining the Surfshark
+              // namespace would make the home route depend on an unrelated VPN.
+              proxy ? "bridge" : this.sandbox.network,
+              "--user",
+              `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`,
+              "--tmpfs",
+              "/tmp:rw,size=128m",
+              "--shm-size=64m",
+              "-e",
+              "HOME=/tmp",
+              // Pass names only: Docker inherits values without putting credentials
+              // into argv, process listings or a failed-command error message.
+              ...(proxy
+                ? [
+                    "-e",
+                    "HIBANA_BROWSER_PROXY_URL",
+                    "-e",
+                    "HIBANA_BROWSER_PROXY_USERNAME",
+                    "-e",
+                    "HIBANA_BROWSER_PROXY_PASSWORD",
+                  ]
+                : []),
+              "--mount",
+              `type=bind,src=${root},dst=/workspace`,
+              "--workdir",
+              "/workspace",
+              this.sandbox.config.sandboxImage,
+              "node",
+              "/opt/hibana-browser/keeper.cjs",
+            ],
+            {
+              env: {
+                ...process.env,
+                HIBANA_BROWSER_PROXY_URL: proxy?.server,
+                HIBANA_BROWSER_PROXY_USERNAME: proxy?.username,
+                HIBANA_BROWSER_PROXY_PASSWORD: proxy?.password,
+              },
+            },
+          );
           if (r.exit_code !== 0) throw new Error(r.stderr);
           this.browser = { name, owner, release: this.sandbox.lease(ctx) };
         }
         stage = "command";
         const timeoutMs = Math.min(120, Number(a.timeout_secs ?? 60)) * 1000;
-        this.log?.info({ ...fields, queue_ms: queueMs, timeout_ms: timeoutMs,
-          jev_remaining_ms: ctx.jevDiagnostic ? Math.max(0, ctx.jevDiagnostic.deadline - performance.now()) : undefined,
-        }, "Browser command started");
+        this.log?.info(
+          {
+            ...fields,
+            queue_ms: queueMs,
+            timeout_ms: timeoutMs,
+            jev_remaining_ms: ctx.jevDiagnostic
+              ? Math.max(0, ctx.jevDiagnostic.deadline - performance.now())
+              : undefined,
+          },
+          "Browser command started",
+        );
         const result = await processRun(
           "docker",
           [
@@ -197,30 +279,52 @@ export class Media {
           ],
           {
             timeout: timeoutMs,
-            onExit: details => {
+            onExit: (details) => {
               outcome = details.termination;
-              this.log?.info({ ...fields, ...details }, "Browser command finished");
+              this.log?.info(
+                { ...fields, ...details },
+                "Browser command finished",
+              );
             },
             signal: ctx.signal,
           },
         );
         // Playwright may report a timeout in its output while the CLI itself exits normally.
         // Keep that signal separate from the outer process deadline; never persist raw output.
-        this.log?.info({ ...fields, exit_code: result.exit_code,
-          output_reports_timeout: /TimeoutError|Timeout \d+ms exceeded|timed out/i.test(result.stdout + result.stderr),
-          output_truncated: result.truncated,
-        }, "Browser result received");
+        this.log?.info(
+          {
+            ...fields,
+            exit_code: result.exit_code,
+            output_reports_timeout:
+              /TimeoutError|Timeout \d+ms exceeded|timed out/i.test(
+                result.stdout + result.stderr,
+              ),
+            output_truncated: result.truncated,
+          },
+          "Browser result received",
+        );
         if (args[0] === "close" || result.exit_code === 124) {
           stage = "cleanup";
-          this.log?.info({ ...fields, reason: args[0] === "close" ? "requested" : outcome }, "Browser closing");
+          this.log?.info(
+            { ...fields, reason: args[0] === "close" ? "requested" : outcome },
+            "Browser closing",
+          );
           await this.closeBrowserUnlocked();
         }
         stage = "complete";
         return result;
       });
     } finally {
-      this.log?.info({ ...fields, stage, outcome, elapsed_ms: Math.round(performance.now() - started),
-        parent_aborted: ctx.signal?.aborted ?? false }, "Browser operation finished");
+      this.log?.info(
+        {
+          ...fields,
+          stage,
+          outcome,
+          elapsed_ms: Math.round(performance.now() - started),
+          parent_aborted: ctx.signal?.aborted ?? false,
+        },
+        "Browser operation finished",
+      );
     }
   }
   async closeBrowser() {
@@ -234,7 +338,11 @@ export class Media {
     // Revoke the route first, so a slow or failing Docker removal cannot keep
     // the home connection usable. The relay has its own expiry if IPC fails.
     let failure: unknown;
-    try { await this.home.disconnect(); } catch (error) { failure = error; }
+    try {
+      await this.home.disconnect();
+    } catch (error) {
+      failure = error;
+    }
     if (this.browser) {
       await processRun("docker", ["rm", "-f", this.browser.name], {
         timeout: 10000,
@@ -430,7 +538,6 @@ export class Media {
     for (
       const deadline = Date.now() + Math.min(900, challenge.expires_in) * 1000;
       Date.now() < deadline;
-
     ) {
       await sleep(interval * 1000, ctx.signal);
       const res = await fetch("https://github.com/login/oauth/access_token", {

@@ -38,7 +38,11 @@ import {
   repairHistory,
   selectChild,
 } from "./multi-agent-policy";
-import { WorkflowJournals, WorkflowManager, type WorkflowFiles } from "./workflow/manager";
+import {
+  WorkflowJournals,
+  WorkflowManager,
+  type WorkflowFiles,
+} from "./workflow/manager";
 
 // Spawn messages may be 24k. The channel notice keeps one short line, same
 // budget as Jev status details, so two workers do not each dump a prompt.
@@ -76,7 +80,8 @@ export function oneLineTask(task: string): string {
 const JAPANESE_WORK = /[\u3040-\u30ff\u3400-\u9fff]/;
 
 export function subagentNoticeLine(value: unknown): string {
-  const line = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  const line =
+    typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
   if (!line || line.length > SUBAGENT_TASK_LINE || !JAPANESE_WORK.test(line))
     throw new Error(
       "notice must be one Japanese line of at most 160 characters describing the work",
@@ -168,7 +173,9 @@ export class MultiAgentSession {
     // history stays where it was sent.
     const role = this.roleMessage(root);
     const messages = options.messages.filter(
-      (m) => m.content === role.content || !/^<multi_agent_(role|triage)>/.test(m.content ?? ""),
+      (m) =>
+        m.content === role.content ||
+        !/^<multi_agent_(role|triage)>/.test(m.content ?? ""),
     );
     // Standing notes stay in history and are added again only when missing.
     // Appending them on every turn would put them between the previous turn's
@@ -185,28 +192,39 @@ export class MultiAgentSession {
     ];
     root.messages = [
       ...messages,
-      ...standing.filter((note) => !messages.some((m) => m.content === note.content)),
+      ...standing.filter(
+        (note) => !messages.some((m) => m.content === note.content),
+      ),
     ];
-    this.workflows = new WorkflowManager({
-      root: () => ({ context: root.context, selection: options.selection, messages: root.messages }),
-      options: () => this.rootOptions,
-      notify: (content) => {
-        if (this.closed) return;
-        if (root.mailbox.length >= 128) root.mailbox.shift();
-        root.mailbox.push({ role: "user", internal: true, content });
-        for (const wake of root.wake) wake();
+    this.workflows = new WorkflowManager(
+      {
+        root: () => ({
+          context: root.context,
+          selection: options.selection,
+          messages: root.messages,
+        }),
+        options: () => this.rootOptions,
+        notify: (content) => {
+          if (this.closed) return;
+          if (root.mailbox.length >= 128) root.mailbox.shift();
+          root.mailbox.push({ role: "user", internal: true, content });
+          for (const wake of root.wake) wake();
+        },
+        wake: () => {
+          for (const wake of root.wake) wake();
+        },
+        recordUsage: (usage) => addUsage(this.childUsage, usage),
+        spent: () => this.rootOutput + this.childUsage.completion_tokens,
       },
-      wake: () => { for (const wake of root.wake) wake(); },
-      recordUsage: (usage) => addUsage(this.childUsage, usage),
-      spent: () => this.rootOutput + this.childUsage.completion_tokens,
-    }, {
-      runtime: this.runtime,
-      agent: this.agent,
-      tools: this.tools,
-      journals: this.options.workflows?.journals ?? new WorkflowJournals(),
-      files: this.options.workflows?.files,
-      log: this.options.log,
-    });
+      {
+        runtime: this.runtime,
+        agent: this.agent,
+        tools: this.tools,
+        journals: this.options.workflows?.journals ?? new WorkflowJournals(),
+        files: this.options.workflows?.files,
+        log: this.options.log,
+      },
+    );
     try {
       const hint = this.options.triage ? await this.triage(root) : undefined;
       if (hint) root.messages.push(hint);
@@ -232,7 +250,11 @@ export class MultiAgentSession {
           // for its background workflows instead of polling; new user input
           // still interrupts the wait.
           while (!root.mailbox.length && this.workflows?.running()) {
-            const waited = await this.wait(root, 3_600_000, options.requestSignal?.());
+            const waited = await this.wait(
+              root,
+              3_600_000,
+              options.requestSignal?.(),
+            );
             if (waited.message === "Wait interrupted by new input.") break;
           }
           if (!root.mailbox.length && this.activeChildren())
@@ -246,7 +268,11 @@ export class MultiAgentSession {
                 "Subagents are still active. Collect their results or interrupt unnecessary work before delivering the final answer.",
             });
           if (pending.length) return pending;
-          return this.reviewGate(root, candidate ?? "", options.requestSignal?.());
+          return this.reviewGate(
+            root,
+            candidate ?? "",
+            options.requestSignal?.(),
+          );
         },
       });
       addUsage(result.usage, this.childUsage);
@@ -380,7 +406,10 @@ export class MultiAgentSession {
     steering?: AbortSignal,
   ): Promise<Message[]> {
     if (this.reviewed || !candidate) return [];
-    const settings = this.runtime.resolve(root.context.guildId, root.context.userId);
+    const settings = this.runtime.resolve(
+      root.context.guildId,
+      root.context.userId,
+    );
     if (subagentMode(settings) !== "multi") return [];
     const children = [...this.members.values()].filter((m) => m.parent);
     // The orchestrator already had a review this turn; do not add a second.
@@ -389,8 +418,12 @@ export class MultiAgentSession {
     const trigger = children.some((m) => m.role === "worker")
       ? "worker"
       : this.triageResult
-        ? this.triageResult.needs_review >= REVIEW_THRESHOLD ? "triage" : undefined
-        : children.length ? "children" : undefined;
+        ? this.triageResult.needs_review >= REVIEW_THRESHOLD
+          ? "triage"
+          : undefined
+        : children.length
+          ? "children"
+          : undefined;
     if (!trigger) return [];
     this.reviewed = true;
     const started = performance.now();
@@ -400,16 +433,23 @@ export class MultiAgentSession {
     // back to the orchestrator through the normal mailbox path.
     const takeOthers = () => {
       const own = (m: Message) =>
-        !!reviewer && !!m.content?.includes(`\nSender: ${reviewer.path}\nPayload:`);
+        !!reviewer &&
+        !!m.content?.includes(`\nSender: ${reviewer.path}\nPayload:`);
       const all = this.drain(root);
       return { own: all.filter(own), others: all.filter((m) => !own(m)) };
     };
     try {
       let name = "final_review";
-      for (let i = 2; this.members.has(`/root/${name}`); i++) name = `final_review_${i}`;
+      for (let i = 2; this.members.has(`/root/${name}`); i++)
+        name = `final_review_${i}`;
       const { task_name } = (await this.execute(
         "spawn_agent",
-        { task_name: name, role: "reviewer", message: finalReviewTask(candidate), notice: FINAL_REVIEW_NOTICE },
+        {
+          task_name: name,
+          role: "reviewer",
+          message: finalReviewTask(candidate),
+          notice: FINAL_REVIEW_NOTICE,
+        },
         root.context,
       )) as { task_name: string };
       reviewer = this.members.get(task_name)!;
@@ -423,7 +463,13 @@ export class MultiAgentSession {
         // user input is handled by the agent loop right after this returns.
         verdict = outcome;
         reviewer.restart = false;
-        reviewer.controller.abort(new Error(outcome === "timeout" ? "Review timed out" : "Superseded by new input"));
+        reviewer.controller.abort(
+          new Error(
+            outcome === "timeout"
+              ? "Review timed out"
+              : "Superseded by new input",
+          ),
+        );
         await reviewer.running;
         return takeOthers().others;
       }
@@ -434,16 +480,26 @@ export class MultiAgentSession {
       }
       verdict = finalReviewVerdict(reviewer.result ?? "");
       if (verdict === "pass") return others;
-      return [...others, ...own, { role: "developer", internal: true, content: FINAL_REVIEW_REVISION }];
+      return [
+        ...others,
+        ...own,
+        { role: "developer", internal: true, content: FINAL_REVIEW_REVISION },
+      ];
     } catch {
       // e.g. slots or the subagent model became unavailable: deliver as is.
       return reviewer ? takeOthers().others : [];
     } finally {
       // No candidate text or review body: only the decision and its cost.
-      this.options.log?.info({
-        channel: root.context.channelId, message_id: root.context.messageId,
-        trigger, verdict, elapsed_ms: Math.round(performance.now() - started),
-      }, "Multi-Agent review finished");
+      this.options.log?.info(
+        {
+          channel: root.context.channelId,
+          message_id: root.context.messageId,
+          trigger,
+          verdict,
+          elapsed_ms: Math.round(performance.now() - started),
+        },
+        "Multi-Agent review finished",
+      );
     }
   }
 
@@ -566,13 +622,16 @@ export class MultiAgentSession {
       const work = subagentNoticeLine(args.notice);
       // Read the live setting: a mode switch mid-turn applies to new spawns.
       const multi =
-        subagentMode(this.runtime.resolve(context.guildId, context.userId)) === "multi";
+        subagentMode(this.runtime.resolve(context.guildId, context.userId)) ===
+        "multi";
       if (multi && caller.path !== "/root")
         throw new Error(
           "In Multi-Agent mode only the orchestrator starts agents; ask it with agents__send_message",
         );
       if (multi && !isAgentRole(args.role))
-        throw new Error("role must be explorer, worker or reviewer in Multi-Agent mode");
+        throw new Error(
+          "role must be explorer, worker or reviewer in Multi-Agent mode",
+        );
       // Ultra ignores a stray role so its children keep every tool.
       const role = multi ? (args.role as AgentRole) : undefined;
       const path = `${caller.path}/${args.task_name}`;
@@ -621,9 +680,11 @@ export class MultiAgentSession {
       // The reason reaches the parent's mailbox. A bare "interrupted" read as
       // unfinished work: in production the since-removed Jev completion check
       // (#50) rejected an Ultra answer three times after root stopped idle workers.
-      recipient.controller.abort(new Error(
-        `Stopped on purpose by ${caller.path}; this assignment is no longer needed and is not unfinished user work`,
-      ));
+      recipient.controller.abort(
+        new Error(
+          `Stopped on purpose by ${caller.path}; this assignment is no longer needed and is not unfinished user work`,
+        ),
+      );
       if (!recipient.running) recipient.status = "interrupted";
       return { previous_status };
     }
@@ -822,7 +883,9 @@ export class MultiAgentSession {
     // Workflow agents share the workspace lease like members: wait for them.
     await Promise.allSettled([
       ...(this.workflows ? [this.workflows.close()] : []),
-      ...[...this.members.values()].flatMap((m) => (m.running ? [m.running] : [])),
+      ...[...this.members.values()].flatMap((m) =>
+        m.running ? [m.running] : [],
+      ),
     ]);
     this.members.clear();
   }

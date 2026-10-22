@@ -15,18 +15,28 @@ export type UsageBucket = {
   /** Requests that returned no usage: their tokens and cost are unknown, not zero. */
   unreported_requests: number;
 };
-type LedgerFile = { version: 1; days: Record<string, Record<string, UsageBucket>> };
+type LedgerFile = {
+  version: 1;
+  days: Record<string, Record<string, UsageBucket>>;
+};
 
 // About 13 months, so the previous month and the same month last year stay
 // readable while the file stays a few hundred KB at most.
 const RETAIN_DAYS = 400;
 const day = (date: Date) => date.toISOString().slice(0, 10);
 const empty = (): UsageBucket => ({
-  requests: 0, prompt_tokens: 0, cached_tokens: 0, cache_write_tokens: 0,
-  completion_tokens: 0, cost_usd: 0, unpriced_requests: 0, unreported_requests: 0,
+  requests: 0,
+  prompt_tokens: 0,
+  cached_tokens: 0,
+  cache_write_tokens: 0,
+  completion_tokens: 0,
+  cost_usd: 0,
+  unpriced_requests: 0,
+  unreported_requests: 0,
 });
 function add(into: UsageBucket, from: UsageBucket) {
-  for (const key of Object.keys(into) as (keyof UsageBucket)[]) into[key] += from[key] ?? 0;
+  for (const key of Object.keys(into) as (keyof UsageBucket)[])
+    into[key] += from[key] ?? 0;
 }
 const usd = (value: number) => Math.round(value * 10_000) / 10_000;
 
@@ -50,7 +60,10 @@ export class UsageLedger {
     private onError: (error: unknown) => void = () => {},
   ) {}
   async load() {
-    const stored = await readJson<LedgerFile>(this.path, { version: 1, days: {} });
+    const stored = await readJson<LedgerFile>(this.path, {
+      version: 1,
+      days: {},
+    });
     // Requests may complete before the file is read; keep both.
     for (const [date, models] of Object.entries(stored.days ?? {}))
       for (const [model, bucket] of Object.entries(models))
@@ -73,8 +86,10 @@ export class UsageLedger {
       bucket.cache_write_tokens += u.cache_write_tokens ?? 0;
       bucket.completion_tokens += u.completion_tokens;
       const cost = anthropicCost(record.model, {
-        prompt: u.prompt_tokens, cache_read: u.cached_tokens,
-        cache_write: u.cache_write_tokens ?? 0, output: u.completion_tokens,
+        prompt: u.prompt_tokens,
+        cache_read: u.cached_tokens,
+        cache_write: u.cache_write_tokens ?? 0,
+        output: u.completion_tokens,
       });
       if (cost === undefined) bucket.unpriced_requests++;
       else bucket.cost_usd += cost;
@@ -93,47 +108,66 @@ export class UsageLedger {
     const month = today.slice(0, 7);
     const total = (dates: string[]) => {
       const sum = empty();
-      for (const d of dates) for (const b of Object.values(this.data.days[d] ?? {})) add(sum, b);
+      for (const d of dates)
+        for (const b of Object.values(this.data.days[d] ?? {})) add(sum, b);
       return sum;
     };
-    const monthDays = Object.keys(this.data.days).filter((d) => d.startsWith(month));
+    const monthDays = Object.keys(this.data.days).filter((d) =>
+      d.startsWith(month),
+    );
     const byModel: Record<string, UsageBucket> = {};
     for (const d of monthDays)
-      for (const [model, b] of Object.entries(this.data.days[d]!)) add((byModel[model] ??= empty()), b);
+      for (const [model, b] of Object.entries(this.data.days[d]!))
+        add((byModel[model] ??= empty()), b);
     const brief = (b: UsageBucket) => ({
       cost_usd: usd(b.cost_usd),
       requests: b.requests,
       ...(b.unpriced_requests && { unpriced_requests: b.unpriced_requests }),
-      ...(b.unreported_requests && { unreported_requests: b.unreported_requests }),
+      ...(b.unreported_requests && {
+        unreported_requests: b.unreported_requests,
+      }),
     });
-    const last7 = Array.from({ length: 7 }, (_, i) => day(new Date(now.getTime() - i * 86_400_000)));
+    const last7 = Array.from({ length: 7 }, (_, i) =>
+      day(new Date(now.getTime() - i * 86_400_000)),
+    );
     return {
       note: "推計値（usage × 単価表）。請求額とは一致しない。日付は UTC",
       today: brief(total([today])),
       month: { month, ...brief(total(monthDays)) },
       month_by_model: Object.fromEntries(
-        Object.entries(byModel).map(([model, b]) => [model, {
-          ...brief(b),
-          input_tokens: b.prompt_tokens - b.cached_tokens - b.cache_write_tokens,
-          cache_read_tokens: b.cached_tokens,
-          cache_write_tokens: b.cache_write_tokens,
-          output_tokens: b.completion_tokens,
-        }]),
+        Object.entries(byModel).map(([model, b]) => [
+          model,
+          {
+            ...brief(b),
+            input_tokens:
+              b.prompt_tokens - b.cached_tokens - b.cache_write_tokens,
+            cache_read_tokens: b.cached_tokens,
+            cache_write_tokens: b.cache_write_tokens,
+            output_tokens: b.completion_tokens,
+          },
+        ]),
       ),
-      last_7_days: Object.fromEntries(last7.map((d) => [d, usd(total([d]).cost_usd)])),
+      last_7_days: Object.fromEntries(
+        last7.map((d) => [d, usd(total([d]).cost_usd)]),
+      ),
     };
   }
   private prune() {
-    const cutoff = day(new Date(this.now().getTime() - RETAIN_DAYS * 86_400_000));
-    for (const d of Object.keys(this.data.days)) if (d < cutoff) delete this.data.days[d];
+    const cutoff = day(
+      new Date(this.now().getTime() - RETAIN_DAYS * 86_400_000),
+    );
+    for (const d of Object.keys(this.data.days))
+      if (d < cutoff) delete this.data.days[d];
   }
   private save() {
     // Coalesce bursts (tool loops) into one write of the latest state.
     if (!this.loaded || this.queued) return;
     this.queued = true;
-    void this.serial.run(async () => {
-      this.queued = false;
-      await atomicJson(this.path, this.data);
-    }).catch(this.onError);
+    void this.serial
+      .run(async () => {
+        this.queued = false;
+        await atomicJson(this.path, this.data);
+      })
+      .catch(this.onError);
   }
 }

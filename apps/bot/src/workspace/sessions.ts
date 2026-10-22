@@ -1,5 +1,9 @@
 import type { ConversationStore } from "../conversation-store";
-import type { WorkspaceState, WorkspaceTotals, WorkspaceVariant } from "./types";
+import type {
+  WorkspaceState,
+  WorkspaceTotals,
+  WorkspaceVariant,
+} from "./types";
 
 /** The cloud session one channel (a thread or a DM included) talks to. */
 export type SessionRow = {
@@ -100,11 +104,21 @@ export class SessionTable {
   }
   /** Records the session a channel now uses. A different session the channel
    *  still had is queued to be archived, never overwritten. */
-  save(row: Omit<SessionRow, "createdAt" | "usedAt"> & { createdAt?: number; usedAt?: number }): SessionRow {
+  save(
+    row: Omit<SessionRow, "createdAt" | "usedAt"> & {
+      createdAt?: number;
+      usedAt?: number;
+    },
+  ): SessionRow {
     const previous = this.row(row.channelId);
-    if (previous && previous.sessionId !== row.sessionId) this.move([previous], "archive");
+    if (previous && previous.sessionId !== row.sessionId)
+      this.move([previous], "archive");
     const at = this.now();
-    const saved: SessionRow = plain({ ...row, createdAt: row.createdAt ?? at, usedAt: row.usedAt ?? at });
+    const saved: SessionRow = plain({
+      ...row,
+      createdAt: row.createdAt ?? at,
+      usedAt: row.usedAt ?? at,
+    });
     this.rows.set(saved.channelId, saved);
     this.store?.saveSession(saved);
     return structuredClone(saved);
@@ -118,9 +132,11 @@ export class SessionTable {
     if (patch.totals) row.totals = plain(patch.totals);
     if (patch.state) row.state = plain(patch.state);
     if (patch.lease === null) delete row.lease;
-    else if (patch.lease && "ceilingCents" in patch.lease) row.lease = { ceilingCents: patch.lease.ceilingCents, at: this.now() };
+    else if (patch.lease && "ceilingCents" in patch.lease)
+      row.lease = { ceilingCents: patch.lease.ceilingCents, at: this.now() };
     // Counted stays counted for as long as the lease is the same one.
-    else if (patch.lease && row.lease && row.lease.settled !== "counted") row.lease.settled = patch.lease.settled;
+    else if (patch.lease && row.lease && row.lease.settled !== "counted")
+      row.lease.settled = patch.lease.settled;
     row.usedAt = this.now();
     // Synchronous, so a lease is on disk before the ceiling is raised.
     this.store?.saveSession(row);
@@ -130,14 +146,25 @@ export class SessionTable {
    *  not read yet. Whether a turn is running on one is the caller's to know. */
   leased(): SessionRow[] {
     for (const saved of this.store?.leasedSessions() ?? [])
-      if (!this.rows.has(saved.channelId)) this.rows.set(saved.channelId, saved);
-    return [...this.rows.values()].filter((row) => row.lease).map((row) => structuredClone(row));
+      if (!this.rows.has(saved.channelId))
+        this.rows.set(saved.channelId, saved);
+    return [...this.rows.values()]
+      .filter((row) => row.lease)
+      .map((row) => structuredClone(row));
   }
   private move(rows: SessionRow[], mode: Disposal["mode"]): Disposal[] {
     const queuedAt = this.now();
     const moved = rows.map((row): Disposal => ({
-      sessionId: row.sessionId, mode, channelId: row.channelId, guildId: row.guildId, key: row.key,
-      variant: row.variant, totals: row.totals, ...(owed(row) > 0 && { allowedCents: owed(row) }), queuedAt, attempts: 0,
+      sessionId: row.sessionId,
+      mode,
+      channelId: row.channelId,
+      guildId: row.guildId,
+      key: row.key,
+      variant: row.variant,
+      totals: row.totals,
+      ...(owed(row) > 0 && { allowedCents: owed(row) }),
+      queuedAt,
+      attempts: 0,
     }));
     for (const disposal of moved) {
       this.rows.delete(disposal.channelId);
@@ -155,13 +182,21 @@ export class SessionTable {
   /** The same for every channel of a guild, in one step; without a guild,
    *  every channel (the reach of `History.clearGuild`). `except` names the
    *  channels to leave, such as those with a turn running. */
-  retireGuild(guildId: string | undefined, mode: Disposal["mode"], except: string[] = []): Disposal[] {
+  retireGuild(
+    guildId: string | undefined,
+    mode: Disposal["mode"],
+    except: string[] = [],
+  ): Disposal[] {
     // Also the channels of the guild that this process has not read yet.
     for (const saved of this.store?.guildSessions(guildId) ?? [])
-      if (!this.rows.has(saved.channelId)) this.rows.set(saved.channelId, saved);
+      if (!this.rows.has(saved.channelId))
+        this.rows.set(saved.channelId, saved);
     const kept = new Set(except);
     return this.move(
-      [...this.rows.values()].filter((row) => (!guildId || row.guildId === guildId) && !kept.has(row.channelId)),
+      [...this.rows.values()].filter(
+        (row) =>
+          (!guildId || row.guildId === guildId) && !kept.has(row.channelId),
+      ),
       mode,
     );
   }
@@ -171,11 +206,22 @@ export class SessionTable {
    *  ledger counted of it is not known, so it is queued without totals and
    *  its removal counts all it has used. False, and nothing changes, when
    *  the channel uses that session or it is queued already. */
-  abandon(session: Pick<Disposal, "sessionId" | "channelId" | "guildId" | "key" | "variant">): boolean {
+  abandon(
+    session: Pick<
+      Disposal,
+      "sessionId" | "channelId" | "guildId" | "key" | "variant"
+    >,
+  ): boolean {
     if (this.holds(session.channelId, session.sessionId)) return false;
     const disposal: Disposal = plain({
-      sessionId: session.sessionId, mode: "archive", channelId: session.channelId, guildId: session.guildId,
-      key: session.key, variant: session.variant, queuedAt: this.now(), attempts: 0,
+      sessionId: session.sessionId,
+      mode: "archive",
+      channelId: session.channelId,
+      guildId: session.guildId,
+      key: session.key,
+      variant: session.variant,
+      queuedAt: this.now(),
+      attempts: 0,
     });
     this.queue.set(disposal.sessionId, disposal);
     // No row is deleted with it: the insert is all this does on disk.
@@ -185,19 +231,26 @@ export class SessionTable {
   /** Whether the table still answers for a session: the channel uses it, or
    *  it waits to be removed. */
   holds(channelId: string, sessionId: string): boolean {
-    return this.row(channelId)?.sessionId === sessionId || this.pending().has(sessionId);
+    return (
+      this.row(channelId)?.sessionId === sessionId ||
+      this.pending().has(sessionId)
+    );
   }
   /** The queue, with what an earlier process left in the store. */
   private pending(): Map<string, Disposal> {
     for (const saved of this.store?.loadDisposals() ?? [])
-      if (!this.queue.has(saved.sessionId)) this.queue.set(saved.sessionId, saved);
+      if (!this.queue.has(saved.sessionId))
+        this.queue.set(saved.sessionId, saved);
     return this.queue;
   }
   /** Everything waiting to be removed, oldest first, including what an
    *  earlier process queued and could not finish. */
   disposals(): Disposal[] {
     return [...this.pending().values()]
-      .sort((a, b) => a.queuedAt - b.queuedAt || a.sessionId.localeCompare(b.sessionId))
+      .sort(
+        (a, b) =>
+          a.queuedAt - b.queuedAt || a.sessionId.localeCompare(b.sessionId),
+      )
       .map((disposal) => structuredClone(disposal));
   }
   /** A removal that did not succeed stays queued for the next attempt. */

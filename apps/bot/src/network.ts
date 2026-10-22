@@ -35,7 +35,10 @@ function proxyAgent(
     const headers: Record<string, string> = { Host: target };
     if (proxy.username)
       headers["Proxy-Authorization"] =
-        "Basic " + Buffer.from(`${proxy.username}:${proxy.password || ""}`).toString("base64");
+        "Basic " +
+        Buffer.from(`${proxy.username}:${proxy.password || ""}`).toString(
+          "base64",
+        );
     const tunnel = httpRequest({
       host: proxy.host,
       port: proxy.port,
@@ -44,9 +47,7 @@ function proxyAgent(
       headers,
       signal: signal ?? undefined,
     });
-    tunnel.setTimeout(30000, () =>
-      tunnel.destroy(new Error("Proxy timeout")),
-    );
+    tunnel.setTimeout(30000, () => tunnel.destroy(new Error("Proxy timeout")));
     tunnel.once("error", (error) => callback(error));
     tunnel.once("connect", (response, socket, head) => {
       if (response.statusCode !== 200) {
@@ -118,7 +119,8 @@ export async function publicFetch(
   if (body && typeof body !== "string" && !(body instanceof Uint8Array))
     throw new Error("Unsupported request body");
   const signal = init.signal ?? req?.signal;
-  const egress = proxy ?? (proxyPort ? { host: "127.0.0.1", port: proxyPort } : undefined);
+  const egress =
+    proxy ?? (proxyPort ? { host: "127.0.0.1", port: proxyPort } : undefined);
   const agent = egress
     ? proxyAgent(url, addresses[0]!.address, egress, signal)
     : undefined;

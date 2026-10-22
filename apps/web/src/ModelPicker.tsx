@@ -59,7 +59,12 @@ export function ModelDialog({
   available?: string[];
   isSelected: (p: Preset) => boolean;
   /** モデル以外の選択肢（マイ設定の「デフォルト」）。 */
-  special?: { label: string; sub: string; active: boolean; onSelect: () => void };
+  special?: {
+    label: string;
+    sub: string;
+    active: boolean;
+    onSelect: () => void;
+  };
   role?: string;
   roles?: string[];
   onPick: (presetId: string) => void;
@@ -74,7 +79,8 @@ export function ModelDialog({
     }
   }, [open]);
 
-  const keyOf = (p: Preset) => p.provider ?? providerMeta(undefined, p.label).label;
+  const keyOf = (p: Preset) =>
+    p.provider ?? providerMeta(undefined, p.label).label;
   // 出現順を保ったままプロバイダを集計する（カタログの並び = 推奨順）
   const providers = useMemo(() => {
     const acc: { key: string; count: number; label: string }[] = [];
@@ -82,7 +88,12 @@ export function ModelDialog({
       const key = keyOf(p);
       const hit = acc.find((x) => x.key === key);
       if (hit) hit.count += 1;
-      else acc.push({ key, count: 1, label: providerMeta(p.provider, p.label).label });
+      else
+        acc.push({
+          key,
+          count: 1,
+          label: providerMeta(p.provider, p.label).label,
+        });
     }
     return acc;
   }, [presets]);
@@ -112,7 +123,11 @@ export function ModelDialog({
             onChange={(e) => setQuery(e.target.value)}
           />
         </label>
-        <div className="chips-filter" role="group" aria-label="プロバイダで絞り込み">
+        <div
+          className="chips-filter"
+          role="group"
+          aria-label="プロバイダで絞り込み"
+        >
           <button
             type="button"
             className="chip-f"

@@ -2,7 +2,11 @@ import { crc32, deflateSync } from "node:zlib";
 
 /** A solid-color RGB PNG. Used where a real image of a known size and content
  *  is needed without an image library: the Jev image check and tests. */
-export function solidPng(width: number, height: number, [r, g, b]: [number, number, number]): Buffer {
+export function solidPng(
+  width: number,
+  height: number,
+  [r, g, b]: [number, number, number],
+): Buffer {
   const chunk = (type: string, data: Buffer) => {
     const head = Buffer.alloc(8);
     head.writeUInt32BE(data.length, 0);

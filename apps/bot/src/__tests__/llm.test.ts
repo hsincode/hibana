@@ -560,6 +560,82 @@ test("Opus 5.5 and Sonnet 5.5 get adaptive thinking instead of a fixed budget on
   }
 });
 
+test("Refuseless gets Chat Completions with only the reasoning efforts it accepts", async () => {
+  const cfg = loadConfig({ REFUSELESS_API_KEY: "fixture" });
+  expect(cfg.endpoints.refuseless).toEqual({
+    baseUrl: "https://api.refuseless.com/v1",
+    apiKey: "fixture",
+  });
+  let url = "";
+  let headers: Record<string, string> = {};
+  let body: Json = {};
+  const client = new LlmClient(cfg, async (to, init) => {
+    url = String(to);
+    headers = init?.headers as Record<string, string>;
+    body = JSON.parse(String(init?.body));
+    return Response.json({
+      choices: [{ message: { role: "assistant", content: "ok" } }],
+    });
+  });
+  // GET /v1/models (2026-10-23): GLM takes low / high / max, DeepSeek also
+  // off (or none). medium and xhigh are 400 on both.
+  for (const [model, effort, wire] of [
+    ["glm-5.3-abliterated", "none", "low"],
+    ["glm-5.3-abliterated", "low", "low"],
+    ["glm-5.3-abliterated", "medium", "high"],
+    ["glm-5.3-flash-abliterated", "high", "high"],
+    ["glm-5.3-flash-abliterated", "xhigh", "max"],
+    ["glm-5.3-flash-abliterated", "max", "max"],
+    ["deepseek-v4.1-flash-abliterated", "none", "none"],
+    ["deepseek-v4.1-flash-abliterated", "medium", "high"],
+    ["deepseek-v4.1-flash-abliterated", "max", "max"],
+  ] as const) {
+    await client.complete(
+      { provider: "refuseless", model, effort },
+      [{ role: "user", content: "Hello" }],
+      [tool],
+    );
+    expect(url).toBe("https://api.refuseless.com/v1/chat/completions");
+    expect(headers.Authorization).toBe("Bearer fixture");
+    expect(body.model).toBe(model);
+    expect(body.reasoning_effort).toBe(wire);
+    expect(body.thinking).toBeUndefined();
+    expect(body.tools).toEqual([tool]);
+    expect(body.service_tier).toBeUndefined();
+  }
+  // Without a stored effort the recommended one applies: max for DeepSeek
+  // (as on DeepSeek's own API), high otherwise.
+  await client.complete(
+    { provider: "refuseless", model: "deepseek-v4.1-flash-abliterated" },
+    [{ role: "user", content: "Hello" }],
+    [],
+  );
+  expect(body.reasoning_effort).toBe("max");
+  await client.complete(
+    { provider: "refuseless", model: "glm-5.3-abliterated" },
+    [{ role: "user", content: "Hello" }],
+    [],
+  );
+  expect(body.reasoning_effort).toBe("high");
+});
+
+test("PROVIDER=refuseless defaults to its first preset and keeps its key to itself", () => {
+  const cfg = loadConfig({
+    PROVIDER: "refuseless",
+    REFUSELESS_API_KEY: "fixture",
+  });
+  expect(cfg.selection).toEqual({
+    provider: "refuseless",
+    model: "glm-5.3-abliterated",
+    effort: "high",
+  });
+  expect(cfg.endpoints.deepseek?.apiKey).toBe("");
+  expect(cfg.endpoints.openrouter?.apiKey).toBe("");
+  expect(
+    loadConfig({ DEEPSEEK_API_KEY: "fixture" }).endpoints.refuseless?.apiKey,
+  ).toBe("");
+});
+
 test("Claude Max caches the system prefix and reports cache reads and writes", async () => {
   const cfg = loadConfig({ CLAUDE_MAX_API_KEY: "fixture" });
   let body: Json = {};

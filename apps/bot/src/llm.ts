@@ -622,6 +622,16 @@ export class LlmClient {
         // Anthropic's adaptive fields unchanged (verified against claude-opus-5-5).
         body.thinking = { type: effort === "none" ? "disabled" : "adaptive" };
         if (effort !== "none") body.output_config = { effort };
+      } else if (effort && selection.provider === "refuseless") {
+        // Refuseless takes `reasoning_effort` off (or none) / low / high / max
+        // and answers 400 to anything else; `wireEffort` already turned medium
+        // into high and xhigh into max. Its GLM models cannot turn reasoning
+        // off (400 as well), so none runs them at low, the cheapest they take.
+        // No `thinking` field: the effort alone sets the reasoning there.
+        body.reasoning_effort =
+          effort === "none" && !/deepseek/.test(selection.model)
+            ? "low"
+            : effort;
       } else if (effort) {
         if (effort !== "none" || /^gpt-/.test(selection.model))
           body.reasoning_effort = effort;

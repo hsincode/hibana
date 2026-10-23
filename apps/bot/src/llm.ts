@@ -96,6 +96,25 @@ export function anthropicWebTools(model: string, taken: Set<string>): Json[] {
     },
   ].filter((t) => !taken.has(t.name)); // A same-named client tool would be a 400.
 }
+/** True for an Anthropic assistant turn that called a client tool beside a
+ *  server tool (web search, web fetch, their code execution) whose result is
+ *  not in the turn. The API stops with `tool_use` before running the server
+ *  tool and runs it on the next request, whose user turn may then hold only
+ *  `tool_result` blocks: any text or image there is a 400 that names the
+ *  server tool use (#103). Other providers have no `server_tool_use` blocks. */
+export function awaitsServerTool(message: Message | undefined): boolean {
+  if (message?.role !== "assistant" || !message.tool_calls?.length)
+    return false;
+  const blocks = (message.providerBlocks ?? []) as Json[];
+  const answered = new Set(
+    blocks
+      .filter((b) => /_tool_result$/.test(String(b.type)))
+      .map((b) => b.tool_use_id),
+  );
+  return blocks.some(
+    (b) => b.type === "server_tool_use" && !answered.has(b.id),
+  );
+}
 // The server-side tool loop stops after a fixed number of iterations with
 // `pause_turn`; resending the paused turn continues it. Bounded so a stuck
 // loop cannot keep spending.

@@ -1,5 +1,5 @@
 import type { ServiceTier } from "@hibana/shared/settings";
-import { LlmClient } from "./llm";
+import { awaitsServerTool, LlmClient } from "./llm";
 import { failureDetail } from "./llm-errors";
 import type { Selection } from "./config";
 import { jevTaskModeIn, jevTaskModeMessage } from "./jev-task";
@@ -68,25 +68,54 @@ export class Agent {
     // The soft budget is refilled once, matching the original loop's completion guarantee.
     const hardLimit =
       o.context.team || o.context.depth === 0 ? 512 : o.maxRounds;
+    // Messages kept out of a request that continues a pending server tool
+    // (#103). They are appended once the turn that ran the tool is in.
+    const held: Message[] = [];
+    let lastTools: ToolDef[] | undefined;
     for (let round = 0; round < hardLimit; round++) {
       o.context.signal?.throwIfAborted();
-      const steer = o.takeSteering?.() ?? [];
+      if (held.length) messages.push(...held.splice(0));
+      // The last response called a client tool beside a server tool the API
+      // has not run yet. This request must carry the client results alone
+      // and keep the same tools, so steering stays queued, the Jev mode is
+      // not re-read, and other messages after the results wait (#103).
+      const waiting = awaitsServerTool(
+        messages[messages.map((m) => m.role).lastIndexOf("assistant")],
+      );
+      const steer = waiting ? [] : (o.takeSteering?.() ?? []);
       if (steer.length) messages.push(...steer);
-      const taskMode = o.jevTaskMode?.(o.context) ?? false;
+      const taskMode = waiting
+        ? lastTaskMode
+        : (o.jevTaskMode?.(o.context) ?? false);
       if (o.jevTaskMode && taskMode !== lastTaskMode) {
         // Re-read at each planning boundary for live settings. A checkpoint
         // drops developer notes, so a resumed task is told an active mode again.
         messages.push(jevTaskModeMessage(taskMode));
         lastTaskMode = taskMode;
       }
-      const tools = o.getTools?.(o.context) ?? o.tools;
+      const tools =
+        waiting && lastTools ? lastTools : (o.getTools?.(o.context) ?? o.tools);
+      lastTools = tools;
       const registered = new Set(tools.map((t) => t.function.name));
       // Persist steering and continuation instructions before the next network
       // request; a failed request must not restore an older user intention.
       await o.checkpoint?.(messages, usage);
+      // The checkpoint keeps the waiting messages where they are; a resumed
+      // run holds them back again.
+      let outgoing = messages;
+      let deferred: Message[] = [];
+      if (waiting) {
+        const at = messages.map((m) => m.role).lastIndexOf("assistant");
+        const after = messages.slice(at + 1);
+        deferred = after.filter((m) => m.role !== "tool");
+        outgoing = [
+          ...messages.slice(0, at + 1),
+          ...after.filter((m) => m.role === "tool"),
+        ];
+      }
       let completion;
       try {
-        completion = await this.llm.complete(o.selection, messages, tools, {
+        completion = await this.llm.complete(o.selection, outgoing, tools, {
           serviceTier: o.serviceTier,
           temperature: o.temperature,
           nativeSearch: !taskMode && o.nativeSearch,
@@ -119,6 +148,13 @@ export class Agent {
       addUsage(usage, completion.usage);
       o.recordUsage?.(completion.usage);
       const msg = completion.message;
+      if (deferred.length) {
+        // History follows what was sent: the waiting messages move behind
+        // this response (behind its tool results, if it called tools).
+        const kept = messages.filter((m) => !deferred.includes(m));
+        messages.splice(0, messages.length, ...kept);
+        held.push(...deferred);
+      }
       messages.push(msg);
       const calls = msg.tool_calls ?? [];
       if (calls.length) {
@@ -217,13 +253,15 @@ export class Agent {
             images: o.context.pendingImages.splice(0),
           });
         await o.checkpoint?.(messages, usage);
-        if (o.shouldStop?.())
+        if (o.shouldStop?.()) {
+          messages.push(...held.splice(0));
           return {
             text: msg.content?.trim() ?? "",
             messages,
             usage,
             rounds: round + 1,
           };
+        }
         if (round === o.maxRounds - 2)
           messages.push({
             role: "user",
@@ -233,7 +271,7 @@ export class Agent {
           });
         continue;
       }
-      const fresh = o.takeSteering?.() ?? [];
+      const fresh = [...held.splice(0), ...(o.takeSteering?.() ?? [])];
       if (fresh.length) {
         messages.push(...fresh);
         continue;
@@ -263,6 +301,8 @@ export class Agent {
       await o.checkpoint?.(messages, usage);
       return { text, messages, usage, rounds: round + 1 };
     }
+    messages.push(...held.splice(0));
+    await o.checkpoint?.(messages, usage);
     throw new Error(
       "Agent reached the hard tool-round limit; progress has been saved for /retry",
     );

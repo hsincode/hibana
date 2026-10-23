@@ -345,6 +345,19 @@ export const PROVIDERS: Record<string, ProviderMeta> = {
         </g>,
       ),
   },
+  // Refuseless: 断ち切った輪（切れ目のある円）に斜線。他社のロゴは写していない。
+  refuseless: {
+    label: "Refuseless",
+    mark: ({ size = 18, className }) =>
+      mark(
+        size,
+        className,
+        <g stroke="currentColor" strokeWidth="1.7" strokeLinecap="round">
+          <path d="M16.6 4.9A8 8 0 1 0 19.1 7.4" />
+          <path d="M9 15l6-6" />
+        </g>,
+      ),
+  },
 };
 
 const FALLBACK_PROVIDER: ProviderMeta = {

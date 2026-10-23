@@ -20,6 +20,24 @@ import {
   type UserOverridePatch,
 } from "../settings";
 
+test("PROVIDER=refuseless seeds new rows with its first preset, like the bot", () => {
+  expect(settingsDefaults({ PROVIDER: "refuseless" }).selection).toEqual({
+    provider: "refuseless",
+    model: "glm-5.3-abliterated",
+    effort: "high",
+  });
+  expect(
+    settingsDefaults({
+      PROVIDER: "refuseless",
+      LLM_MODEL: "deepseek-v4.1-flash-abliterated",
+    }).selection,
+  ).toEqual({
+    provider: "refuseless",
+    model: "deepseek-v4.1-flash-abliterated",
+    effort: "max",
+  });
+});
+
 test("new and legacy settings contain concrete values and preserve false, zero and empty lists", () => {
   const defaults = settingsDefaults({
     PROVIDER: "deepseek",

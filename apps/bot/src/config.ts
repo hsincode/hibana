@@ -34,6 +34,10 @@ const providers: Record<string, [string, string]> = {
   xai: ["https://api.x.ai/v1", "grok-3-mini"],
   openrouter: ["https://openrouter.ai/api/v1", ""],
   orca_router: ["https://api.orcarouter.ai/v1", "obsidian/Qwen3.8-27B"],
+  refuseless: [
+    "https://api.refuseless.com/v1",
+    MODEL_PRESETS.find((m) => m.provider === "refuseless")!.model,
+  ],
   ...Object.fromEntries(
     [
       "claude_kiro",

@@ -739,12 +739,22 @@ test.describe("usage (#110)", () => {
     await expect(section).toContainText("2026-09-20 から記録");
     // The page never shows who: the API sends no IDs, and nothing here lists people.
     await expect(section).not.toContainText("owner");
+    await expect(section.locator(".analytics-report")).toHaveAttribute(
+      "aria-busy",
+      "false",
+    );
+    await section.screenshot({
+      path: "test-results/analytics-usage.png",
+      animations: "disabled",
+    });
 
     // The section follows the month the cost report shows.
     await page.getByRole("button", { name: "前の月" }).click();
     await expect(stat("ターン数")).toContainText("5");
     await expect(stat("公開サイト")).toContainText("この月に作られたサイト 1");
-    expect(usageMonths).toEqual([null, "2026-09"]);
+    // The section always names the month it shows (the cost report's).
+    // The dev server's StrictMode runs the first load twice, hence the set.
+    expect([...new Set(usageMonths)]).toEqual(["2026-10", "2026-09"]);
   });
 
   test("a failed read of the usage keeps the cost report and says so", async ({

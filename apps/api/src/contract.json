@@ -4,6 +4,7 @@
     "DELETE /api/chatgpt/accounts/:id",
     "GET /api/analytics/cost",
     "GET /api/analytics/today",
+    "GET /api/analytics/usage",
     "GET /api/artifacts",
     "GET /api/blocked",
     "GET /api/budget-fallback",

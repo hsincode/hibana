@@ -47,6 +47,7 @@ make sandbox-smoke      # Docker隔離・ファイル操作の確認
 - 会話履歴と Auto Routing の経路は `HIBANA_DATA_DIR/conversations.db`（SQLite）に保存し、bot の再起動（デプロイ）をまたいで続ける。`/clear`・モデルの変更・guild の設定変更で消える（#59、[ADR-0008](docs/adr/0008-keep-conversations-across-restarts.md)）。
 - `/usage`: Anthropic API の推計利用額を、当日・当月・モデル別・直近7日で表示。応答の `usage` に `packages/shared` の単価表を掛けた推計で、請求額とは一致しない。日付は UTC。集計は `HIBANA_DATA_DIR/anthropic_usage.json` に約400日分を保存（#44）。Anthropic Workspace の分はこの推計に入らず、別の行で、セッションが報告する list cost（公開単価での額）の合計を出す。集計は `HIBANA_DATA_DIR/anthropic_workspace_usage.json`（#76）。だれでも実行できる（2026-10-15 まで owner のみ。#85）。
 - Web の `/analytics`（ログインした全員。2026-10-15 まで administrator のみ、#85）: Anthropic の Admin API の cost report から、日毎の利用料を表示。1日の目安（月 $200 ÷ その月の日数）を超えた日と、予算の残りが分かる。月の集計は、クレジットが付与される毎月5日から翌月4日まで（#81）。請求ベースで組織全体が対象。API の環境変数 `ANTHROPIC_ADMIN_API_KEY`（Admin API キーなど、cost report を読めるキー）が必要で、未設定ならページにその旨を表示する。日付は UTC（#48）。進行中の日（UTC）は cost report に載らないので、Admin API の usage report のトークン数に単価表を掛けた「今日の推計」を出し、1 分ごとに読み直す（#85）。
+- `/analytics` の「利用状況」（Administrator だけ、#110）: 同じ月の、bot が応答したターン数（失敗を含む）、使った Discord ユーザーの人数（Administrator を除いた人数も）、公開サイトの数（今公開中の数と、その月に作られた数）、日ごと・モデル別の内訳。bot がターンごとに送る `/internal/logs` から API が数える（会話ログの保存 `WEB_LOGS_ENABLED` が無効でも数える）。保存するのは日・ユーザー ID の鍵つきハッシュ・プロバイダー・モデル・成否の件数だけで、400 日で消す。インデックスと保存の仕方は #111 の計測で決めた。
 - Chat Completions / Responses / Anthropic Messages / Claude Managed Agents（Anthropic Workspace、#76）。プロバイダーの認証情報を分離。
 - [Jev 判定と行動選択モード](docs/jev.md)。根拠照合・分類と、Jev がファイル操作・検索などの各行動を選ぶ実行モードを別々に ON / OFF。
 - Discord操作、ファイル編集・配信、Exa検索、外部MCP、スキルCRUD、静的サイト公開。
@@ -88,7 +89,7 @@ flowchart LR
   pooler --> db
   api -- "HTTPS（1 分キャッシュ）" --> admin
   api -- "OAuth2 のトークンの交換<br>ユーザー・サーバー一覧" --> discord
-  bot -- "HTTPS /internal/snapshot 30 秒ごと（ETag）<br>/internal/budget 2 分ごと<br>起動時・変更時の報告" --> api
+  bot -- "HTTPS /internal/snapshot 30 秒ごと（ETag）<br>/internal/budget 2 分ごと<br>/internal/logs ターンごと（利用状況）<br>起動時・変更時の報告" --> api
   bot -- "受け取った設定を保存<br>起動時に読み戻す" --> snap
   bot -- "Gateway（WebSocket）・REST" --> discord
   client --> discord

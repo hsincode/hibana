@@ -632,6 +632,8 @@ describe.skipIf(!local)("PostgresStore against Postgres", () => {
   });
 
   test("site history: one row per site, counted by when it was created", async () => {
+    // The artifacts test above listed a site too.
+    await admin`DELETE FROM site_history`;
     const site = (token: string, created: number, over: object = {}) => ({
       token,
       guild_id: null,

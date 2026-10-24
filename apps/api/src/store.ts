@@ -3,6 +3,15 @@ import type { SkillRow, SkillCommand } from "./skills";
 import type { BlockedRow, LogEntry, LogQuery, LogRow } from "./audit";
 import { DEFAULT_ROLE, parseRole, type Role } from "./roles";
 import {
+  groupTurns,
+  reportFromRows,
+  siteTokenHash,
+  type UsageQuery,
+  type UsageReport,
+  type UsageRow,
+  type UsageTurn,
+} from "./usage";
+import {
   normalizeGuild,
   normalizeUserOverride,
   emptyGuild,
@@ -133,6 +142,12 @@ export interface Store {
   ): Promise<ArtifactCommandRow>;
   listArtifactCommands(): Promise<ArtifactCommandRow[]>;
   ackArtifactCommands(ids: number[]): Promise<number>;
+  /** Adds turns to the usage counts (#110). Returns how many turns were added. */
+  recordUsage(turns: UsageTurn[]): Promise<number>;
+  /** Drops usage rows of days before `beforeDay`. Returns how many rows went. */
+  pruneUsage(beforeDay: number): Promise<number>;
+  /** Usage of a range of days, and the sites published and created (#110). */
+  usageReport(q: UsageQuery): Promise<UsageReport>;
 }
 
 /** In-memory filter, shared by MemoryStore and the tests. */
@@ -163,6 +178,9 @@ export class MemoryStore implements Store {
   private logs: LogRow[] = [];
   private logSeq = 0;
   private artifacts = new Map<string, ArtifactRow>();
+  /** Token hash → when the site was created, for every site ever listed. */
+  private siteCreated = new Map<string, number>();
+  private usage = new Map<string, UsageRow>();
   private artifactCommands: ArtifactCommandRow[] = [];
   private artifactCmdSeq = 0;
   private skills: SkillRow[] = [];
@@ -368,6 +386,11 @@ export class MemoryStore implements Store {
   }
   async replaceArtifacts(sites: ArtifactRow[]) {
     this.artifacts = new Map(sites.map((s) => [s.token, s]));
+    for (const s of sites) {
+      const hash = siteTokenHash(s.token);
+      if (!this.siteCreated.has(hash))
+        this.siteCreated.set(hash, s.created_at_unix);
+    }
   }
   async listArtifacts(guildId?: string) {
     const rows = [...this.artifacts.values()];
@@ -404,6 +427,34 @@ export class MemoryStore implements Store {
     const n = before - this.artifactCommands.length;
     if (n) await this.bumpVersion();
     return n;
+  }
+  async recordUsage(turns: UsageTurn[]) {
+    for (const r of groupTurns(turns)) {
+      const key = [r.day, r.user_hash, r.provider, r.model].join("\u0000");
+      const row = this.usage.get(key);
+      if (row) {
+        row.turns += r.turns;
+        row.failed += r.failed;
+      } else this.usage.set(key, { ...r });
+    }
+    return turns.length;
+  }
+  async pruneUsage(beforeDay: number) {
+    let n = 0;
+    for (const [key, row] of this.usage)
+      if (row.day < beforeDay) {
+        this.usage.delete(key);
+        n++;
+      }
+    return n;
+  }
+  async usageReport(q: UsageQuery) {
+    return reportFromRows(
+      [...this.usage.values()],
+      [...this.artifacts.values()],
+      [...this.siteCreated.values()],
+      q,
+    );
   }
 }
 
@@ -646,6 +697,28 @@ export class PostgresStore implements Store {
       action TEXT NOT NULL,
       created_at BIGINT NOT NULL
     )`;
+    // Usage per UTC day, user hash and model, with the turns counted (#110).
+    // The primary key leads with the day, so a month's range, the first day
+    // and the prune read it and no other index is needed (#111: per-turn rows
+    // with a B-tree on time took 19-29 ms for a month at a million turns; this
+    // took 1.2 ms).
+    await this.sql`CREATE TABLE IF NOT EXISTS usage_daily (
+      day INTEGER NOT NULL,
+      user_hash TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      turns INTEGER NOT NULL,
+      failed INTEGER NOT NULL,
+      PRIMARY KEY (day, user_hash, provider, model)
+    )`;
+    // Every site the bot has listed, by a hash of its token, so a site that
+    // expired still counts in the month it was created (#110). A few hundred
+    // rows a year: counting a range reads the whole table in well under a
+    // millisecond, so creation time has no index (#111).
+    await this.sql`CREATE TABLE IF NOT EXISTS site_history (
+      token_hash TEXT PRIMARY KEY,
+      created_at_unix BIGINT NOT NULL
+    )`;
     if (this.logs) {
       await this.sql`CREATE TABLE IF NOT EXISTS logs (
         id BIGSERIAL PRIMARY KEY,
@@ -715,6 +788,8 @@ export class PostgresStore implements Store {
     await this.sql`ALTER TABLE blocked_users ENABLE ROW LEVEL SECURITY`;
     await this.sql`ALTER TABLE artifacts ENABLE ROW LEVEL SECURITY`;
     await this.sql`ALTER TABLE artifact_commands ENABLE ROW LEVEL SECURITY`;
+    await this.sql`ALTER TABLE usage_daily ENABLE ROW LEVEL SECURITY`;
+    await this.sql`ALTER TABLE site_history ENABLE ROW LEVEL SECURITY`;
     if (this.logs) await this.sql`ALTER TABLE logs ENABLE ROW LEVEL SECURITY`;
     if (!(await this.getMeta("snapshot_version"))) {
       await this.setMeta("snapshot_version", "0");
@@ -1064,6 +1139,11 @@ export class PostgresStore implements Store {
           ${s.retention}, ${s.bytes}, ${s.file_count}
         )
       `;
+      await this.sql`
+        INSERT INTO site_history (token_hash, created_at_unix)
+        VALUES (${siteTokenHash(s.token)}, ${s.created_at_unix})
+        ON CONFLICT (token_hash) DO NOTHING
+      `;
     }
   }
 
@@ -1124,6 +1204,88 @@ export class PostgresStore implements Store {
     }
     if (n) await this.bumpVersion();
     return n;
+  }
+
+  async recordUsage(turns: UsageTurn[]) {
+    // Turns of one post that share a row are summed first; each row is then
+    // one upsert. Postgres applies ON CONFLICT … DO UPDATE to the row under a
+    // lock, so API instances adding to the same row at once lose no count.
+    // A connection closed after the statement was sent can still count a turn
+    // twice when the query is retried (see query()).
+    for (const r of groupTurns(turns)) {
+      await this.sql`
+        INSERT INTO usage_daily (day, user_hash, provider, model, turns, failed)
+        VALUES (${r.day}, ${r.user_hash}, ${r.provider}, ${r.model}, ${r.turns}, ${r.failed})
+        ON CONFLICT (day, user_hash, provider, model) DO UPDATE
+        SET turns = usage_daily.turns + EXCLUDED.turns,
+            failed = usage_daily.failed + EXCLUDED.failed
+      `;
+    }
+    return turns.length;
+  }
+
+  async pruneUsage(beforeDay: number) {
+    const rows = (await this.sql`
+      WITH gone AS (DELETE FROM usage_daily WHERE day < ${beforeDay} RETURNING 1)
+      SELECT count(*)::int AS n FROM gone
+    `) as { n: number }[];
+    return rows[0]?.n ?? 0;
+  }
+
+  async usageReport(q: UsageQuery): Promise<UsageReport> {
+    // The hashes to leave out go as one JSON text parameter: the store's
+    // tagged template has no array helper.
+    const exclude = JSON.stringify(q.exclude);
+    const days = (await this.sql`
+      SELECT day,
+        sum(turns)::int AS turns,
+        sum(failed)::int AS failed,
+        count(DISTINCT user_hash)::int AS users,
+        (count(DISTINCT user_hash) FILTER (WHERE NOT (user_hash = ANY (ARRAY(
+          SELECT jsonb_array_elements_text(${exclude}::jsonb))))))::int
+          AS users_excluding_admins
+      FROM usage_daily
+      WHERE day >= ${q.fromDay} AND day < ${q.toDay}
+      GROUP BY day ORDER BY day
+    `) as UsageReport["days"];
+    const totals = (await this.sql`
+      SELECT coalesce(sum(turns), 0)::int AS turns,
+        coalesce(sum(failed), 0)::int AS failed,
+        count(DISTINCT user_hash)::int AS users,
+        (count(DISTINCT user_hash) FILTER (WHERE NOT (user_hash = ANY (ARRAY(
+          SELECT jsonb_array_elements_text(${exclude}::jsonb))))))::int
+          AS users_excluding_admins
+      FROM usage_daily
+      WHERE day >= ${q.fromDay} AND day < ${q.toDay}
+    `) as UsageReport["totals"][];
+    // COLLATE "C" orders names by code point, as the in-memory store does.
+    const models = (await this.sql`
+      SELECT provider, model, sum(turns)::int AS turns
+      FROM usage_daily
+      WHERE day >= ${q.fromDay} AND day < ${q.toDay}
+      GROUP BY provider, model
+      ORDER BY turns DESC, provider COLLATE "C", model COLLATE "C"
+    `) as UsageReport["models"];
+    const first = (await this.sql`
+      SELECT min(day) AS day FROM usage_daily
+    `) as { day: number | null }[];
+    // Published as the bot judges it (apps/bot/src/tools/sites.ts).
+    const sites = (await this.sql`
+      SELECT
+        (SELECT count(*)::int FROM artifacts
+          WHERE retention = 'permanent' OR expires_at_unix = 0
+            OR expires_at_unix > ${q.nowUnix}) AS published,
+        (SELECT count(*)::int FROM site_history
+          WHERE created_at_unix >= ${q.fromUnix}
+            AND created_at_unix < ${q.toUnix}) AS created
+    `) as UsageReport["sites"][];
+    return {
+      days: days.map((d) => ({ ...d, day: Number(d.day) })),
+      totals: totals[0]!,
+      models,
+      first_day: first[0]?.day == null ? null : Number(first[0].day),
+      sites: sites[0]!,
+    };
   }
 }
 

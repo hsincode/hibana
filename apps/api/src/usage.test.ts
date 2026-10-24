@@ -88,7 +88,7 @@ async function setup(now = NOW) {
           model: t.model ?? "claude-opus-5-5",
           error: t.failed ? "provider_error" : null,
           failure_phase: t.failed ? "provider" : null,
-          failure_code: t.failed ? "provider_error" : null,
+          failure_code: t.failed ? "provider_http" : null,
           http_status: null,
           has_checkpoint: null,
           latency_ms: 1000,
@@ -158,7 +158,7 @@ describe("usageTurn", () => {
   test("a turn that failed counts as one, marked failed", () => {
     expect(usageTurn(entry({ error: "timeout" }), key).failed).toBe(true);
     expect(
-      usageTurn(entry({ failure_code: "provider_error" }), key).failed,
+      usageTurn(entry({ failure_code: "provider_http" }), key).failed,
     ).toBe(true);
   });
 
@@ -186,7 +186,8 @@ describe("POST /internal/logs records usage", () => {
       { at: NOW, user: "u3", model: "claude-haiku-5-5" },
     ]);
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ enabled: false, usage: 3 });
+    // The answer is the same as before (#110): the bot does not read it.
+    expect(await res.json()).toEqual({ ok: true, n: 0, enabled: false });
     // The conversation log stays empty: only the usage counts are kept.
     expect(
       await store.listLogs({

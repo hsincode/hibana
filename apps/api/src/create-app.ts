@@ -23,6 +23,7 @@ import {
   canSelectPreset,
   canViewAllGuilds,
   canViewAnalytics,
+  canViewUsage,
   parseRole,
   rank,
   ROLES,
@@ -69,6 +70,14 @@ import {
   type Store,
 } from "./store";
 import { guildId, guildSkills, skillAction, skillRow } from "./skills";
+import {
+  hashUser,
+  usageHashKey,
+  usageQuery,
+  usageResponse,
+  usageTurn,
+  USAGE_RETENTION_DAYS,
+} from "./usage";
 import { ChatgptAccounts, ChatgptError } from "./chatgpt";
 import {
   CostReport,
@@ -246,6 +255,11 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
   // Pruning on every ingest would add a DELETE to each bot flush; once an hour
   // is enough for a 30-day window and keeps the hot path a single INSERT batch.
   let lastPrune = 0;
+  // Usage (#110): user IDs are kept as a keyed hash; the Administrators' are
+  // left out of one of the user counts. Pruned once an hour like the log.
+  const usageKey = usageHashKey(env.sessionSecret);
+  const adminHashes = env.adminIds.map((id) => hashUser(usageKey, id));
+  let lastUsagePrune = 0;
 
   return (
     new Elysia()
@@ -407,6 +421,7 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           can_moderate: canModerate(s.role),
           can_view_all_guilds: canViewAllGuilds(s.role),
           can_view_analytics: canViewAnalytics(s.role),
+          can_view_usage: canViewUsage(s.role),
         };
       })
       .get("/api/me/settings", async ({ cookie, set }) => {
@@ -1084,6 +1099,32 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
         if (!costReport.configured) return { configured: false };
         return costReport.today();
       })
+      // Turns, distinct users and published sites of a billing month (#110).
+      // Counts only, for Administrators; the month is the cost report's.
+      .get("/api/analytics/usage", async ({ cookie, set, query }) => {
+        set.headers["cache-control"] = "no-store";
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        if (!canViewUsage(s.role)) {
+          set.status = 403;
+          return { error: "forbidden" };
+        }
+        const at = now();
+        const month = parseMonth(
+          (query as Record<string, string | undefined>).month,
+          at,
+        );
+        if (!month) {
+          set.status = 400;
+          return { error: "month must be YYYY-MM and not in the future" };
+        }
+        const current = month === parseMonth(undefined, at);
+        const q = usageQuery(month, adminHashes, at);
+        return usageResponse(month, current, q, await store.usageReport(q));
+      })
       // The model Anthropic API turns switch to while the month's budget is
       // nearly spent, the threshold that switches them, and whether they do now
       // (#89, #95). Everyone who may read the cost may read this; only an
@@ -1191,19 +1232,38 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           set.status = 401;
           return { error: "unauthorized" };
         }
-        if (!env.logsEnabled) {
-          return { ok: true, n: 0, enabled: false };
-        }
         const raw = (body ?? {}) as { entries?: unknown };
         const list = Array.isArray(raw.entries) ? raw.entries : [];
         const entries = list
           .map(parseLogEntry)
           .filter((e): e is LogEntry => e !== null);
+        // Every turn counts toward the usage (#110), whether or not the
+        // conversation itself is kept. A failure here only loses the count:
+        // the bot does not wait for this answer, and the log still goes in.
+        try {
+          if (entries.length)
+            await store.recordUsage(entries.map((e) => usageTurn(e, usageKey)));
+          const at = now();
+          if (at - lastUsagePrune > 3_600_000) {
+            lastUsagePrune = at;
+            await store.pruneUsage(
+              Math.floor(at / 86_400_000) - USAGE_RETENTION_DAYS,
+            );
+          }
+        } catch (e) {
+          console.error(
+            "Usage not recorded:",
+            e instanceof Error ? e.message : String(e),
+          );
+        }
+        if (!env.logsEnabled) {
+          return { ok: true, n: 0, enabled: false };
+        }
         if (entries.length) await store.appendLogs(entries);
-        const now = Date.now();
-        if (now - lastPrune > 3_600_000) {
-          lastPrune = now;
-          await store.pruneLogs(now - LOG_RETENTION_MS);
+        const loggedAt = Date.now();
+        if (loggedAt - lastPrune > 3_600_000) {
+          lastPrune = loggedAt;
+          await store.pruneLogs(loggedAt - LOG_RETENTION_MS);
         }
         return { ok: true, n: entries.length, enabled: true };
       })

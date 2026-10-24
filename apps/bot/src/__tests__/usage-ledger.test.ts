@@ -61,6 +61,54 @@ test("prices each token kind at its own rate", () => {
   ).toBeUndefined();
 });
 
+test("five-minute cache writes cost 1.25× input and one-hour writes 2× (#109)", () => {
+  // Opus 5.5: 400k five-minute writes × $5 + 600k one-hour writes × $8.
+  expect(
+    anthropicCost("claude-opus-5-5", {
+      prompt: 1_000_000,
+      cache_read: 0,
+      cache_write: 1_000_000,
+      cache_write_5m: 400_000,
+      output: 0,
+    }),
+  ).toBeCloseTo(2 + 4.8, 10);
+  // Usage that does not tell the TTL apart is priced as one-hour writes.
+  expect(
+    anthropicCost("claude-opus-5-5", {
+      prompt: 1_000_000,
+      cache_read: 0,
+      cache_write: 1_000_000,
+      output: 0,
+    }),
+  ).toBeCloseTo(8, 10);
+});
+
+test("the ledger keeps five-minute writes apart and prices them at their rate", () => {
+  const ledger = new UsageLedger(
+    join(dir, "u.json"),
+    at("2026-10-25T12:00:00Z"),
+  );
+  ledger.record(
+    record({
+      model: "claude-opus-5-5",
+      usage: {
+        prompt_tokens: 1_000_000,
+        completion_tokens: 0,
+        total_tokens: 1_000_000,
+        cached_tokens: 0,
+        cache_write_tokens: 1_000_000,
+        cache_write_5m_tokens: 400_000,
+        cache_write_1h_tokens: 600_000,
+      },
+    }),
+  );
+  expect(ledger.summary().today.cost_usd).toBe(6.8);
+  expect(ledger.summary().month_by_model["claude-opus-5-5"]).toMatchObject({
+    cache_write_tokens: 1_000_000,
+    cache_write_5m_tokens: 400_000,
+  });
+});
+
 test("Haiku 5.5 bills the whole request at the long rate once the prompt, cache included, exceeds 100k", () => {
   const short = anthropicCost("claude-haiku-5-5", {
     prompt: 100_000,

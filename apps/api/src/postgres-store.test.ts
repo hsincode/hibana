@@ -178,6 +178,8 @@ const TABLES = [
   "artifacts",
   "artifact_commands",
   "logs",
+  "usage_daily",
+  "site_history",
 ];
 
 function logEntry(over: Partial<LogEntry>): LogEntry {
@@ -456,5 +458,220 @@ describe.skipIf(!local)("PostgresStore against Postgres", () => {
     await admin`SELECT pg_terminate_backend(pid) FROM pg_stat_activity
       WHERE datname = current_database() AND pid <> pg_backend_pid()`;
     expect(typeof (await store.version())).toBe("number");
+  });
+
+  // #110, #111: one row per UTC day, user and model, added to by upserts.
+  test("usage: upserts add up, and days and months count distinct users", async () => {
+    const day = 20_740;
+    await store.recordUsage([
+      {
+        day,
+        user_hash: "h-admin",
+        provider: "anthropic",
+        model: "opus",
+        failed: false,
+      },
+      {
+        day,
+        user_hash: "h-admin",
+        provider: "anthropic",
+        model: "opus",
+        failed: true,
+      },
+      {
+        day,
+        user_hash: "h-2",
+        provider: "anthropic",
+        model: "opus",
+        failed: false,
+      },
+      {
+        day,
+        user_hash: "h-2",
+        provider: "anthropic",
+        model: "haiku",
+        failed: false,
+      },
+    ]);
+    await store.recordUsage([
+      {
+        day: day + 1,
+        user_hash: "h-2",
+        provider: "anthropic",
+        model: "opus",
+        failed: false,
+      },
+      {
+        day: day + 1,
+        user_hash: "h-3",
+        provider: "",
+        model: "",
+        failed: false,
+      },
+    ]);
+    const rows =
+      (await admin`SELECT day, user_hash, provider, model, turns, failed
+      FROM usage_daily ORDER BY day, user_hash, model`) as unknown[];
+    expect(rows).toEqual([
+      {
+        day,
+        user_hash: "h-2",
+        provider: "anthropic",
+        model: "haiku",
+        turns: 1,
+        failed: 0,
+      },
+      {
+        day,
+        user_hash: "h-2",
+        provider: "anthropic",
+        model: "opus",
+        turns: 1,
+        failed: 0,
+      },
+      {
+        day,
+        user_hash: "h-admin",
+        provider: "anthropic",
+        model: "opus",
+        turns: 2,
+        failed: 1,
+      },
+      {
+        day: day + 1,
+        user_hash: "h-2",
+        provider: "anthropic",
+        model: "opus",
+        turns: 1,
+        failed: 0,
+      },
+      {
+        day: day + 1,
+        user_hash: "h-3",
+        provider: "",
+        model: "",
+        turns: 1,
+        failed: 0,
+      },
+    ]);
+    const report = await store.usageReport({
+      fromDay: day,
+      toDay: day + 2,
+      exclude: ["h-admin"],
+      fromUnix: 0,
+      toUnix: 0,
+      nowUnix: 0,
+    });
+    expect(report.days).toEqual([
+      { day, turns: 4, failed: 1, users: 2, users_excluding_admins: 1 },
+      {
+        day: day + 1,
+        turns: 2,
+        failed: 0,
+        users: 2,
+        users_excluding_admins: 2,
+      },
+    ]);
+    expect(report.totals).toEqual({
+      turns: 6,
+      failed: 1,
+      users: 3,
+      users_excluding_admins: 2,
+    });
+    expect(report.models).toEqual([
+      { provider: "anthropic", model: "opus", turns: 4 },
+      { provider: "", model: "", turns: 1 },
+      { provider: "anthropic", model: "haiku", turns: 1 },
+    ]);
+    expect(report.first_day).toBe(day);
+    // A range with nothing in it.
+    const empty = await store.usageReport({
+      fromDay: day + 10,
+      toDay: day + 20,
+      exclude: [],
+      fromUnix: 0,
+      toUnix: 0,
+      nowUnix: 0,
+    });
+    expect(empty.days).toEqual([]);
+    expect(empty.totals).toEqual({
+      turns: 0,
+      failed: 0,
+      users: 0,
+      users_excluding_admins: 0,
+    });
+    expect(await store.pruneUsage(day + 1)).toBe(3);
+    expect(
+      (
+        await store.usageReport({
+          fromDay: 0,
+          toDay: day + 100,
+          exclude: [],
+          fromUnix: 0,
+          toUnix: 0,
+          nowUnix: 0,
+        })
+      ).first_day,
+    ).toBe(day + 1);
+  });
+
+  test("usage: the month query reads a range of days through the primary key", async () => {
+    await admin`ANALYZE usage_daily`;
+    // Too few rows for the planner to prefer the index on its own.
+    await admin`SET enable_seqscan = off`;
+    try {
+      const plan = (await admin.unsafe(
+        "EXPLAIN SELECT count(*) FROM usage_daily WHERE day >= 1 AND day < 100",
+      )) as { "QUERY PLAN": string }[];
+      expect(plan.map((r) => r["QUERY PLAN"]).join("\n")).toContain(
+        "usage_daily_pkey",
+      );
+    } finally {
+      await admin`SET enable_seqscan = on`;
+    }
+  });
+
+  test("site history: one row per site, counted by when it was created", async () => {
+    // The artifacts test above listed a site too.
+    await admin`DELETE FROM site_history`;
+    const site = (token: string, created: number, over: object = {}) => ({
+      token,
+      guild_id: null,
+      channel_id: "c1",
+      url: `https://${token}.example`,
+      source_path: "",
+      created_at_unix: created,
+      updated_at_unix: null,
+      expires_at_unix: 2_000,
+      retention: "ttl" as const,
+      bytes: 0,
+      file_count: 0,
+      ...over,
+    });
+    await store.replaceArtifacts([
+      site("c1", 100),
+      site("c2", 200, { retention: "permanent", expires_at_unix: 1 }),
+      site("c3", 300, { expires_at_unix: 0 }),
+      site("c4", 400, { expires_at_unix: 999 }),
+    ]);
+    await store.replaceArtifacts([site("c2", 200), site("c5", 500)]);
+    const rows = (await admin`SELECT count(*)::int AS n FROM site_history`) as {
+      n: number;
+    }[];
+    expect(rows[0]!.n).toBe(5);
+    const tokens = (await admin`SELECT token_hash FROM site_history`) as {
+      token_hash: string;
+    }[];
+    expect(tokens.some((t) => t.token_hash.includes("c1"))).toBe(false);
+    const report = await store.usageReport({
+      fromDay: 0,
+      toDay: 1,
+      exclude: [],
+      fromUnix: 200,
+      toUnix: 500,
+      nowUnix: 1_000,
+    });
+    // c2, c3 and c4 were created in [200, 500); now only c2 (ttl, 2000) and c5 are listed.
+    expect(report.sites).toEqual({ published: 2, created: 3 });
   });
 });

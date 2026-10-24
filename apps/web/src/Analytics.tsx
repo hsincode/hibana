@@ -28,6 +28,8 @@ import {
    始まる月の名前で呼ぶ。期間の計算は API と同じ packages/shared のものを使う。
    進行中の日（今日）は cost report に載らないので、usage report のトークン数から
    API が推計した額を別に出し、今月を見ている間は 1 分ごとに読み直す（#85）。
+   利用状況（ターン数・利用ユーザー数・公開サイトの数）は Administrator にだけ、
+   同じ月で出す（#110）。数えるのは API で、ここは表示だけ。
    ============================================================ */
 
 type CostDay = { date: string; cost_usd: number | null; over: boolean };
@@ -63,6 +65,26 @@ type CostToday = {
   fetched_at: number;
 };
 type TodayResponse = CostToday | { configured: false };
+type UsageCounts = {
+  turns: number;
+  failed: number;
+  users: number;
+  users_excluding_admins: number;
+};
+/** GET /api/analytics/usage（#110）。人数と件数だけで、だれが使ったかは含まない。 */
+type UsageMonth = {
+  month: string;
+  current: boolean;
+  start: string;
+  end: string;
+  /** 記録を始めた日（全期間でいちばん古い日）。まだ無ければ null。 */
+  first_day: string | null;
+  retention_days: number;
+  days: ({ date: string } & UsageCounts)[];
+  totals: UsageCounts;
+  models: { provider: string; model: string; turns: number }[];
+  sites: { published: number; created: number };
+};
 /** 今日の推計。取得に失敗しても、月の表示は出す。 */
 type TodayState = { data: CostToday | null; error: string | null };
 
@@ -134,7 +156,12 @@ function Verdict({ over }: { over: boolean }) {
   );
 }
 
-export function AnalyticsPage() {
+export function AnalyticsPage({
+  canViewUsage = false,
+}: {
+  /** 利用状況の欄を出すか（`/api/me` の `can_view_usage`。旧 API は返さない）。 */
+  canViewUsage?: boolean;
+}) {
   // null = 今月。どの月が「今月」かは API が UTC で決める（5日より前は、前の月から続く期間）。
   const [month, setMonth] = useState<string | null>(null);
   const [reloads, setReloads] = useState(0);
@@ -288,7 +315,146 @@ export function AnalyticsPage() {
       <BudgetFallbackPanel
         reloadKey={`${reloads}:${today.data?.fetched_at ?? ""}`}
       />
+      {canViewUsage && <UsagePanel month={shown} reloadKey={reloads} />}
     </div>
+  );
+}
+
+const countFormat = new Intl.NumberFormat("ja-JP");
+const count = (n: number) => countFormat.format(n);
+
+/** 利用状況（#110）。見出しの月と同じ期間を、API が数えたとおりに出す。 */
+function UsagePanel({
+  month,
+  reloadKey,
+}: {
+  month: string;
+  reloadKey: number;
+}) {
+  const [data, setData] = useState<UsageMonth | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api<UsageMonth>(`/api/analytics/usage?month=${month}`)
+      .then((r) => {
+        if (cancelled) return;
+        setData(r);
+        setErr(null);
+      })
+      .catch((e) => {
+        if (!cancelled) setErr(String(e.message ?? e));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [month, reloadKey]);
+  // 料金の欄と同じく、読み込み中は前の表示を薄くして残し、終わったら違う月の数字を出さない。
+  const shown = data && (loading || data.month === month) ? data : null;
+  const t = shown?.totals;
+  return (
+    <Section
+      title="利用状況"
+      desc={
+        <>
+          bot が応答したターン（失敗を含む）と、使った Discord
+          ユーザーの人数、公開サイトの数です。Administrator
+          だけに表示します。人数と件数だけを数え、だれが使ったかは出しません（ID
+          は鍵つきのハッシュで保存し、
+          {shown?.retention_days ?? 400} 日で消します）。日付は UTC
+          で、月は利用料と同じ期間です。
+        </>
+      }
+    >
+      {err && <Alert>{err}</Alert>}
+      {!shown && !err && <Skeleton height={160} />}
+      {shown && t && (
+        <div
+          className={`analytics-report${loading ? " is-stale" : ""}`}
+          aria-busy={loading}
+        >
+          <p className="note">
+            {shown.first_day
+              ? `${shown.first_day} から記録しています。それより前の利用は数えていません。`
+              : "まだ記録がありません。"}
+          </p>
+          <div className="stats" style={{ "--cols": 3 } as CSSProperties}>
+            <Stat label="利用ユーザー数" value={`${count(t.users)} 人`}>
+              <p className="stat-note">
+                Administrator を除くと {count(t.users_excluding_admins)} 人
+              </p>
+            </Stat>
+            <Stat label="ターン数" value={count(t.turns)}>
+              <p className="stat-note">うち失敗 {count(t.failed)}</p>
+            </Stat>
+            <Stat label="公開サイト" value={count(shown.sites.published)}>
+              <p className="stat-note">
+                今公開中のサイト。この月に作られたサイト{" "}
+                {count(shown.sites.created)}
+              </p>
+            </Stat>
+          </div>
+          {shown.days.length > 0 && (
+            <div className="table-wrap">
+              <table
+                className="cost-table usage-days"
+                aria-label="日ごとの利用状況"
+              >
+                <thead>
+                  <tr>
+                    <th>日付（UTC）</th>
+                    <th className="num">ターン</th>
+                    <th className="num">失敗</th>
+                    <th className="num">利用ユーザー</th>
+                    <th className="num">Administrator を除く</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...shown.days].reverse().map((d) => (
+                    <tr key={d.date}>
+                      <td>{day(d.date)}</td>
+                      <td className="num">{count(d.turns)}</td>
+                      <td className="num">{count(d.failed)}</td>
+                      <td className="num">{count(d.users)}</td>
+                      <td className="num">{count(d.users_excluding_admins)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {shown.models.length > 0 && (
+            <div className="table-wrap">
+              <table
+                className="cost-table usage-models"
+                aria-label="モデル別のターン数"
+              >
+                <thead>
+                  <tr>
+                    <th>プロバイダー</th>
+                    <th>モデル</th>
+                    <th className="num">ターン</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shown.models.map((m) => (
+                    <tr key={`${m.provider}/${m.model}`}>
+                      <td>{m.provider || "不明"}</td>
+                      <td>{m.model || "不明"}</td>
+                      <td className="num">{count(m.turns)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </Section>
   );
 }
 

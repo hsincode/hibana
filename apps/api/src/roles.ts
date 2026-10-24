@@ -101,3 +101,13 @@ export function canManageBudget(role: Role): boolean {
 export function canViewAnalytics(_role: Role): boolean {
   return true;
 }
+
+/**
+ * Actor may read the usage on the 利用料 page: turns, distinct Discord users
+ * and published sites (#110). Administrator only (the `WEB_ADMIN_IDS`): the
+ * figures are counts only, but they say how much the bot is used and by how
+ * many people, which is the owner's to share.
+ */
+export function canViewUsage(role: Role): boolean {
+  return role === "administrator";
+}

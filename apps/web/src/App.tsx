@@ -67,7 +67,9 @@ export function App() {
                   path="/analytics"
                   element={
                     me.can_view_analytics ? (
-                      <AnalyticsPage />
+                      <AnalyticsPage
+                        canViewUsage={me.can_view_usage === true}
+                      />
                     ) : (
                       <Navigate to="/" />
                     )

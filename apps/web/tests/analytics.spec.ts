@@ -118,6 +118,8 @@ type MockOptions = {
   today?: () => CostReply;
   me?: Record<string, unknown>;
   budget?: () => CostReply;
+  /** GET /api/analytics/usage (#110). Unset: the page must not ask for it. */
+  usage?: (month: string | null) => CostReply;
 };
 
 async function mockApi(
@@ -128,9 +130,11 @@ async function mockApi(
     today = () => ({ json: todayFixture }),
     me = {},
     budget = () => ({ json: budgetFixture() }),
+    usage,
   }: MockOptions = {},
 ) {
   const months: (string | null)[] = [];
+  const usageMonths: (string | null)[] = [];
   const todays = { count: 0 };
   const budgetWrites: unknown[] = [];
   let stored: { fallback: unknown; threshold_usd: number } | null = null;
@@ -159,6 +163,11 @@ async function mockApi(
       months.push(month);
       return route.fulfill(cost(month));
     }
+    if (url.pathname === "/api/analytics/usage" && usage) {
+      const month = url.searchParams.get("month");
+      usageMonths.push(month);
+      return route.fulfill(usage(month));
+    }
     if (url.pathname === "/api/analytics/today") {
       todays.count++;
       return route.fulfill(today());
@@ -180,7 +189,7 @@ async function mockApi(
     }
     throw new Error(`Unexpected API request: ${url.pathname}`);
   });
-  return { months, todays, budgetWrites };
+  return { months, todays, budgetWrites, usageMonths };
 }
 
 const byMonth = (month: string | null): CostReply => ({
@@ -640,5 +649,135 @@ test.describe("budget fallback (#89)", () => {
     await expect(panel(page)).toContainText("判定できません");
     await expect(panel(page)).toContainText("HTTP 500");
     await expect(panel(page)).toContainText("最後に読めた判定のまま");
+  });
+});
+
+// Usage (#110): what the API counted for the billing month, for Administrators.
+function usageFixture(month: string) {
+  const october = month === "2026-10";
+  return {
+    month,
+    current: october,
+    start: october ? "2026-10-05" : "2026-09-05",
+    end: october ? "2026-11-05" : "2026-10-05",
+    first_day: "2026-09-20",
+    retention_days: 400,
+    days: october
+      ? [
+          {
+            date: "2026-10-11",
+            turns: 12,
+            failed: 1,
+            users: 3,
+            users_excluding_admins: 2,
+          },
+          {
+            date: "2026-10-12",
+            turns: 30,
+            failed: 0,
+            users: 4,
+            users_excluding_admins: 3,
+          },
+        ]
+      : [
+          {
+            date: "2026-09-21",
+            turns: 5,
+            failed: 0,
+            users: 1,
+            users_excluding_admins: 0,
+          },
+        ],
+    totals: october
+      ? { turns: 42, failed: 1, users: 5, users_excluding_admins: 4 }
+      : { turns: 5, failed: 0, users: 1, users_excluding_admins: 0 },
+    models: october
+      ? [
+          { provider: "anthropic", model: "claude-opus-5-5", turns: 35 },
+          { provider: "refuseless", model: "glm-5.3-abliterated", turns: 7 },
+        ]
+      : [{ provider: "anthropic", model: "claude-haiku-5-5", turns: 5 }],
+    sites: { published: 6, created: october ? 2 : 1 },
+  };
+}
+
+test.describe("usage (#110)", () => {
+  const usageSection = (page: Page) =>
+    page.getByRole("region", { name: "利用状況" });
+
+  test("an Administrator sees the month's users, turns and sites, per day and per model", async ({
+    page,
+  }) => {
+    const { usageMonths } = await mockApi(page, byMonth, {
+      me: { can_view_usage: true },
+      usage: (month) => ({ json: usageFixture(month ?? "2026-10") }),
+    });
+    await page.goto("/analytics");
+    const section = usageSection(page);
+    await expect(section).toBeVisible();
+    const stat = (label: string) =>
+      section
+        .locator(".stat")
+        .filter({ has: page.locator(".stat-label", { hasText: label }) });
+    await expect(stat("利用ユーザー数")).toContainText("5 人");
+    await expect(stat("利用ユーザー数")).toContainText(
+      "Administrator を除くと 4 人",
+    );
+    await expect(stat("ターン数")).toContainText("42");
+    await expect(stat("ターン数")).toContainText("うち失敗 1");
+    await expect(stat("公開サイト")).toContainText("6");
+    await expect(stat("公開サイト")).toContainText("この月に作られたサイト 2");
+    // Newest day first, like the cost table.
+    const days = section.locator(".usage-days tbody tr");
+    await expect(days).toHaveCount(2);
+    await expect(days.first()).toContainText("10/12");
+    await expect(days.first()).toContainText("30");
+    const models = section.locator(".usage-models tbody tr");
+    await expect(models).toHaveCount(2);
+    await expect(models.first()).toContainText("claude-opus-5-5");
+    await expect(models.first()).toContainText("35");
+    await expect(section).toContainText("2026-09-20 から記録");
+    // The page never shows who: the API sends no IDs, and nothing here lists people.
+    await expect(section).not.toContainText("owner");
+    await expect(section.locator(".analytics-report")).toHaveAttribute(
+      "aria-busy",
+      "false",
+    );
+    await section.screenshot({
+      path: "test-results/analytics-usage.png",
+      animations: "disabled",
+    });
+
+    // The section follows the month the cost report shows.
+    await page.getByRole("button", { name: "前の月" }).click();
+    await expect(stat("ターン数")).toContainText("5");
+    await expect(stat("公開サイト")).toContainText("この月に作られたサイト 1");
+    // The section always names the month it shows (the cost report's).
+    // The dev server's StrictMode runs the first load twice, hence the set.
+    expect([...new Set(usageMonths)]).toEqual(["2026-10", "2026-09"]);
+  });
+
+  test("a failed read of the usage keeps the cost report and says so", async ({
+    page,
+  }) => {
+    await mockApi(page, byMonth, {
+      me: { can_view_usage: true },
+      usage: () => ({ status: 500, json: { error: "internal error" } }),
+    });
+    await page.goto("/analytics");
+    await expect(usageSection(page).getByRole("alert")).toContainText(
+      "internal error",
+    );
+    await expect(page.locator(".cost-table tbody tr")).toHaveCount(8);
+  });
+
+  test("is not shown or asked for without can_view_usage", async ({ page }) => {
+    // mockApi throws on a request for /api/analytics/usage when `usage` is unset.
+    await mockApi(page, byMonth, {
+      me: { role: "moderator", can_view_usage: false },
+    });
+    await page.goto("/analytics");
+    await expect(page.locator(".cost-table tbody tr")).toHaveCount(8);
+    await expect(usageSection(page)).toHaveCount(0);
   });
 });

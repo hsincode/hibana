@@ -67,6 +67,8 @@ export type Me = {
   can_manage_users: boolean;
   /** 利用料ページを開けるか。旧 API は返さないので、無ければ出さない。 */
   can_view_analytics?: boolean;
+  /** 利用料ページの利用状況を見られるか（#110。Administrator だけ）。旧 API は返さない。 */
+  can_view_usage?: boolean;
 };
 
 export type GuildSummary = {

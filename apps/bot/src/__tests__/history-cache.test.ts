@@ -386,7 +386,13 @@ describe("a thread summary reuses the conversation's cache (#109)", () => {
     // was sent, so the provider can read it from the cache.
     expect(rest).toEqual(restBefore);
     expect(sent.slice(0, before.length)).toEqual(before);
-    expect(sent).toHaveLength(before.length + 1);
+    // Then only that request's answer and the instruction, as a new turn's
+    // first request would add the answer and the person's message.
+    expect(sent).toHaveLength(before.length + 2);
+    expect(sent[before.length]).toMatchObject({
+      role: "assistant",
+      content: "answer 4",
+    });
     const after = history.get(thread.channelId, undefined, "key", true, 3600);
     expect(after[0]!.content).toBe("Conversation summary:\nanswer 5");
     // The instruction names where the turns that stay verbatim begin.

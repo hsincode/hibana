@@ -780,13 +780,45 @@ export class Hibana {
         ctx.thread,
         settings.thread_history_max_age_secs ?? this.config.threadHistoryAge,
       );
+      // Assembled before a thread summary, which sends it ahead of the
+      // history like the turn will, so the summary reads the conversation
+      // from the cache instead of writing it again (#109).
+      failurePhase = "prompt_assembly";
+      const prefix = workspace
+        ? []
+        : await assemblePrompt(
+            this.runtime,
+            ctx,
+            this.config.skillsEnabled ? await this.tools.skillCatalog(ctx) : "",
+          );
       if (ctx.thread && !pending && !workspace) {
         failurePhase = "history_compaction";
+        // An auto preset has no model until it is routed below, so its
+        // summary cannot repeat the conversation's requests.
+        const reuse = !isAutoRoute(selection);
         await this.history.compact(
           ctx.channelId,
           this.llm,
-          settings.selection,
+          reuse ? selection : settings.selection,
           ctx.signal,
+          reuse
+            ? {
+                prefix,
+                history: prior,
+                tools: this.tools.tools(ctx),
+                options: {
+                  serviceTier: settings.service_tier,
+                  temperature: settings.temperature,
+                  nativeSearch:
+                    !this.tools.jevTaskMode(ctx) &&
+                    nativeSearchFor(
+                      settings.selection,
+                      settings.exa_mode,
+                      this.config.webSearch,
+                    ),
+                },
+              }
+            : undefined,
         );
         failurePhase = "history_read";
         prior = this.history.get(
@@ -813,14 +845,6 @@ export class Hibana {
         // the same route say nothing.
         if (route.announce) await send(routeHeader(selection));
       }
-      failurePhase = "prompt_assembly";
-      const prefix = workspace
-        ? []
-        : await assemblePrompt(
-            this.runtime,
-            ctx,
-            this.config.skillsEnabled ? await this.tools.skillCatalog(ctx) : "",
-          );
       const resumed =
         pending && !workspace
           ? resumeCheckpoint(pending, prefix, settings.selection)

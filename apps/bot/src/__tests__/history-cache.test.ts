@@ -6,7 +6,13 @@ import { jevTaskModeMessage } from "../jev-task";
 import { LlmClient, type RequestRecord } from "../llm";
 import { MultiAgentSession } from "../multi-agent";
 import { Runtime } from "../runtime";
-import { emptyUsage, type Context, type Message, type ToolDef } from "../types";
+import {
+  emptyUsage,
+  type Context,
+  type Json,
+  type Message,
+  type ToolDef,
+} from "../types";
 
 // A `gpt-` model keeps developer notes in place on the chat protocol, like the
 // Responses protocol does, so a note missing from history shows as a divergence.
@@ -307,6 +313,151 @@ describe("thread compaction", () => {
     // Only the summary precedes the oversized turn now: nothing new to fold in.
     await h.compact("1", llm as never, selection);
     expect(summaries).toBe(1);
+  });
+});
+
+describe("a thread summary reuses the conversation's cache (#109)", () => {
+  const big = { THREAD_COMPACTION_TOKENS: "1000" };
+  const answer = (content: string) => ({
+    message: { role: "assistant" as const, content },
+    usage: emptyUsage(),
+    incomplete: false,
+  });
+  const filled = () => {
+    const h = new History(config(big));
+    h.get("1", undefined, "key", true, 3600);
+    for (let i = 0; i < 9; i++) h.put("1", turn(`t${i}`, 600), emptyUsage());
+    return h;
+  };
+  test("the summary request repeats the last request of the turn before and adds only the instruction", async () => {
+    const bodies: Json[] = [];
+    let call = 0;
+    const client = new LlmClient(config(big), async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      call++;
+      return Response.json({
+        choices: [
+          { message: { role: "assistant", content: `answer ${call}` } },
+        ],
+        usage: { prompt_tokens: 10, completion_tokens: 2 },
+      });
+    });
+    const history = new History(config(big));
+    const thread = { ...ctx, thread: true };
+    for (let i = 0; i < 4; i++) {
+      const messages: Message[] = [
+        ...prefix,
+        ...history.get(thread.channelId, undefined, "key", true, 3600),
+      ];
+      const seed = messages.length;
+      messages.push({
+        role: "user",
+        content: `request ${i} ${"z".repeat(1600)}`,
+        turnStart: true,
+      });
+      const result = await new Agent(client).run({
+        selection,
+        messages,
+        tools: [tool],
+        context: thread,
+        maxRounds: 4,
+        temperature: 0.7,
+        nativeSearch: false,
+        execute: async () => "",
+      });
+      history.put(thread.channelId, result.messages.slice(seed), result.usage);
+    }
+    const last = bodies.at(-1)!;
+    const prior = history.get(thread.channelId, undefined, "key", true, 3600);
+    await history.compact(thread.channelId, client, selection, undefined, {
+      prefix,
+      history: prior,
+      tools: [tool],
+      options: { temperature: 0.7, nativeSearch: false },
+    });
+    expect(bodies).toHaveLength(5);
+    const { messages: sent, ...rest } = bodies[4]! as {
+      messages: Json[];
+    } & Json;
+    const { messages: before, ...restBefore } = last as {
+      messages: Json[];
+    } & Json;
+    // Model, tools and settings match, and the conversation is repeated as it
+    // was sent, so the provider can read it from the cache.
+    expect(rest).toEqual(restBefore);
+    expect(sent.slice(0, before.length)).toEqual(before);
+    // Then only that request's answer and the instruction, as a new turn's
+    // first request would add the answer and the person's message.
+    expect(sent).toHaveLength(before.length + 2);
+    expect(sent[before.length]).toMatchObject({
+      role: "assistant",
+      content: "answer 4",
+    });
+    const after = history.get(thread.channelId, undefined, "key", true, 3600);
+    expect(after[0]!.content).toBe("Conversation summary:\nanswer 5");
+    // The instruction names where the turns that stay verbatim begin.
+    const kept = String(after[1]!.content);
+    expect(String(sent.at(-1)!.content)).toContain(kept.slice(0, 40));
+  });
+  test("an answer that calls a tool falls back to the transcript form, which is not cached", async () => {
+    const calls: { messages: Message[]; tools: ToolDef[]; options: Json }[] =
+      [];
+    const llm = {
+      complete: async (
+        _s: unknown,
+        messages: Message[],
+        tools: ToolDef[],
+        options: Json,
+      ) => {
+        calls.push({ messages, tools, options });
+        return calls.length === 1
+          ? {
+              message: {
+                role: "assistant",
+                content: null,
+                tool_calls: [
+                  {
+                    id: "a",
+                    type: "function",
+                    function: { name: "lookup", arguments: "{}" },
+                  },
+                ],
+              },
+              usage: emptyUsage(),
+              incomplete: false,
+            }
+          : answer("summary");
+      },
+    };
+    const h = filled();
+    await h.compact("1", llm as never, selection, undefined, {
+      prefix,
+      history: h.get("1", undefined, "key", true, 3600),
+      tools: [tool],
+      options: {},
+    });
+    expect(calls).toHaveLength(2);
+    expect(calls[0]!.options.cache).toBeUndefined();
+    expect(calls[0]!.tools).toEqual([tool]);
+    expect(calls[1]!.messages[0]!.role).toBe("system");
+    expect(calls[1]!.tools).toEqual([]);
+    expect(calls[1]!.options.cache).toBe(false);
+    expect(h.get("1", undefined, "key", true, 3600)[0]!.content).toBe(
+      "Conversation summary:\nsummary",
+    );
+  });
+  test("without the conversation's prefix, the transcript form is sent and not cached", async () => {
+    const options: Json[] = [];
+    const llm = {
+      complete: async (_s: unknown, _m: Message[], _t: ToolDef[], o: Json) => (
+        options.push(o),
+        answer("summary")
+      ),
+    };
+    const h = filled();
+    await h.compact("1", llm as never, selection);
+    expect(options).toHaveLength(1);
+    expect(options[0]!.cache).toBe(false);
   });
 });
 

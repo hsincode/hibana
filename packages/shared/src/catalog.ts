@@ -660,15 +660,22 @@ export const ANTHROPIC_PRICES: Record<
   },
 };
 
+/** A five-minute cache write costs this many times the base input price
+ *  (a one-hour write is the table's `cache_write_1h`, twice input). */
+export const CACHE_WRITE_5M = 1.25;
+
 /** Estimated USD for one Anthropic request, or `undefined` for a model the
  *  table does not price. `prompt` counts uncached input plus cache reads and
- *  writes, as the bot's normalized usage does. */
+ *  writes, as the bot's normalized usage does. `cache_write_5m` is the part
+ *  of `cache_write` written with the five-minute TTL; without it every write
+ *  is priced as a one-hour write (#109). */
 export function anthropicCost(
   model: string,
   usage: {
     prompt: number;
     cache_read: number;
     cache_write: number;
+    cache_write_5m?: number;
     output: number;
   },
 ): number | undefined {
@@ -679,9 +686,11 @@ export function anthropicCost(
     0,
     usage.prompt - usage.cache_read - usage.cache_write,
   );
+  const short = Math.min(usage.cache_write_5m ?? 0, usage.cache_write);
   return (
     (uncached * price.input +
-      usage.cache_write * price.cache_write_1h +
+      short * price.input * CACHE_WRITE_5M +
+      (usage.cache_write - short) * price.cache_write_1h +
       usage.cache_read * price.cache_read +
       usage.output * price.output) /
     1_000_000

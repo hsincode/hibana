@@ -42,6 +42,10 @@ export type Usage = {
   cached_tokens: number;
   // Optional: usage persisted before cache write tracking lacks it.
   cache_write_tokens?: number;
+  /** Anthropic only, per request: `cache_write_tokens` split by TTL, which
+   *  bill at different rates (#109). Absent when the response does not say. */
+  cache_write_5m_tokens?: number;
+  cache_write_1h_tokens?: number;
   /** Anthropic Workspace (#76): input plus output of the turn's last model
    *  request, which is how large the session's conversation has grown. The
    *  totals above add every request of a turn together and cannot tell. */
@@ -58,6 +62,11 @@ export function addUsage(a: Usage, b: Usage) {
   // Iterate the full key set so an older record missing a key still sums.
   for (const k of Object.keys(emptyUsage()) as (keyof Usage)[])
     a[k] = (a[k] ?? 0) + (b[k] ?? 0);
+  // The TTL split exists only where a response reported it; keep it absent
+  // rather than zero elsewhere.
+  for (const k of ["cache_write_5m_tokens", "cache_write_1h_tokens"] as const)
+    if (a[k] !== undefined || b[k] !== undefined)
+      a[k] = (a[k] ?? 0) + (b[k] ?? 0);
 }
 export type Context = {
   guildId?: string;

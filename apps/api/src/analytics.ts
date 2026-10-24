@@ -20,7 +20,7 @@
 
 import { billingBounds, billingMonth } from "@hibana/shared/billing";
 import { budgetLow } from "@hibana/shared/budget";
-import { ANTHROPIC_PRICES } from "@hibana/shared/catalog";
+import { ANTHROPIC_PRICES, CACHE_WRITE_5M } from "@hibana/shared/catalog";
 
 const ENDPOINT = "https://api.anthropic.com/v1/organizations/cost_report";
 const USAGE_ENDPOINT =
@@ -195,7 +195,6 @@ export type UsageRow = {
 // Multipliers and fees from https://platform.claude.com/docs/en/about-claude/pricing,
 // read 2026-10-15 (#85). The per-token rates themselves are the bot's table
 // (`ANTHROPIC_PRICES`), so a price is changed in one place.
-const CACHE_WRITE_5M = 1.25; // times the base input price
 const BATCH = 0.5;
 const US_ONLY = 1.1; // `inference_geo: "us"`, Claude 4.6 and later
 const WEB_SEARCH_USD = 10 / 1000;

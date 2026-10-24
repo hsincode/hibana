@@ -8,6 +8,8 @@ export type UsageBucket = {
   prompt_tokens: number;
   cached_tokens: number;
   cache_write_tokens: number;
+  /** The part of `cache_write_tokens` written for five minutes (#109). */
+  cache_write_5m_tokens: number;
   completion_tokens: number;
   cost_usd: number;
   /** Requests whose model has no price row: their cost is missing from `cost_usd`. */
@@ -29,6 +31,7 @@ const empty = (): UsageBucket => ({
   prompt_tokens: 0,
   cached_tokens: 0,
   cache_write_tokens: 0,
+  cache_write_5m_tokens: 0,
   completion_tokens: 0,
   cost_usd: 0,
   unpriced_requests: 0,
@@ -84,11 +87,13 @@ export class UsageLedger {
       bucket.prompt_tokens += u.prompt_tokens;
       bucket.cached_tokens += u.cached_tokens;
       bucket.cache_write_tokens += u.cache_write_tokens ?? 0;
+      bucket.cache_write_5m_tokens += u.cache_write_5m_tokens ?? 0;
       bucket.completion_tokens += u.completion_tokens;
       const cost = anthropicCost(record.model, {
         prompt: u.prompt_tokens,
         cache_read: u.cached_tokens,
         cache_write: u.cache_write_tokens ?? 0,
+        cache_write_5m: u.cache_write_5m_tokens,
         output: u.completion_tokens,
       });
       if (cost === undefined) bucket.unpriced_requests++;
@@ -143,6 +148,7 @@ export class UsageLedger {
               b.prompt_tokens - b.cached_tokens - b.cache_write_tokens,
             cache_read_tokens: b.cached_tokens,
             cache_write_tokens: b.cache_write_tokens,
+            cache_write_5m_tokens: b.cache_write_5m_tokens,
             output_tokens: b.completion_tokens,
           },
         ]),

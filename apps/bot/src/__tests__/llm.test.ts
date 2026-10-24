@@ -666,7 +666,8 @@ test("Claude Max caches the system prefix and reports cache reads and writes", a
       cache_control: { type: "ephemeral", ttl: "1h" },
     },
   ]);
-  expect(body.cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
+  // The conversation tail is cached for five minutes (#109).
+  expect(body.cache_control).toEqual({ type: "ephemeral" });
   expect(body.temperature).toBeUndefined();
   expect(usage).toEqual({
     prompt_tokens: 1000,
@@ -675,6 +676,53 @@ test("Claude Max caches the system prefix and reports cache reads and writes", a
     cached_tokens: 900,
     cache_write_tokens: 90,
   });
+});
+
+test("Anthropic keeps the system prefix for an hour and the conversation tail for five minutes, and a request can skip both (#109)", async () => {
+  const cfg = loadConfig({ ANTHROPIC_API_KEY: "fixture" });
+  const bodies: Json[] = [];
+  const client = new LlmClient(cfg, async (_url, init) => {
+    bodies.push(JSON.parse(String(init?.body)));
+    return Response.json({
+      content: [{ type: "text", text: "ok" }],
+      usage: {
+        input_tokens: 10,
+        cache_read_input_tokens: 900,
+        cache_creation_input_tokens: 90,
+        cache_creation: {
+          ephemeral_5m_input_tokens: 60,
+          ephemeral_1h_input_tokens: 30,
+        },
+        output_tokens: 5,
+      },
+    });
+  });
+  const selection = { provider: "anthropic", model: "claude-opus-5-5" };
+  const messages: Message[] = [
+    { role: "system", content: "Stable rules" },
+    { role: "user", content: "Hello" },
+  ];
+  const { usage } = await client.complete(selection, messages, []);
+  // A longer TTL must come first: the one-hour system breakpoint precedes the
+  // five-minute automatic one.
+  expect(bodies[0]!.system).toEqual([
+    {
+      type: "text",
+      text: "Stable rules",
+      cache_control: { type: "ephemeral", ttl: "1h" },
+    },
+  ]);
+  expect(bodies[0]!.cache_control).toEqual({ type: "ephemeral" });
+  // Writes are reported by TTL, so each is priced at its own rate.
+  expect(usage).toMatchObject({
+    cache_write_tokens: 90,
+    cache_write_5m_tokens: 60,
+    cache_write_1h_tokens: 30,
+  });
+  // A one-off request (the transcript form of a summary) writes nothing.
+  await client.complete(selection, messages, [], { cache: false });
+  expect(bodies[1]!.system).toEqual([{ type: "text", text: "Stable rules" }]);
+  expect(bodies[1]!.cache_control).toBeUndefined();
 });
 
 test("OpenAI-style usage keeps prompt_tokens as the cached-inclusive total", () => {

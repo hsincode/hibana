@@ -330,6 +330,7 @@ export function normalizeUsage(raw: Json = {}): Usage {
         0,
     ),
     cacheWrite = Number(raw.cache_creation_input_tokens ?? 0),
+    byTtl = raw.cache_creation as Json | undefined,
     // Anthropic's `input_tokens` counts only the uncached tail; cache reads and
     // writes are reported beside it. OpenAI-style `prompt_tokens` already
     // includes cached tokens, so only the Anthropic shape is summed here.
@@ -346,6 +347,10 @@ export function normalizeUsage(raw: Json = {}): Usage {
     total_tokens: Number(raw.total_tokens ?? prompt + completion),
     cached_tokens: cacheRead,
     cache_write_tokens: cacheWrite,
+    ...(byTtl && {
+      cache_write_5m_tokens: Number(byTtl.ephemeral_5m_input_tokens ?? 0),
+      cache_write_1h_tokens: Number(byTtl.ephemeral_1h_input_tokens ?? 0),
+    }),
   };
 }
 const normalizeCall = (call: Json): ToolCall => {
@@ -499,6 +504,9 @@ export class LlmClient {
       resumes?: number;
       onRetry?: (notice: RetryNotice) => Promise<void> | void;
       trace?: RequestTrace;
+      /** `false` sends no cache breakpoints: for a one-off request whose
+       *  prefix no later request repeats, a cache write is never read (#109). */
+      cache?: boolean;
     } = {},
   ): Promise<Completion> {
     selection = concreteSelection(selection);
@@ -578,13 +586,16 @@ export class LlmClient {
       body = {
         model: selection.model,
         // Explicit 1h breakpoint on the stable tools + system prefix, so it
-        // survives history trimming that moves the rolling breakpoint below.
+        // survives history trimming that moves the rolling breakpoint below,
+        // and the pauses between turns and channels that share it.
         ...(system && {
           system: [
             {
               type: "text",
               text: system,
-              cache_control: { type: "ephemeral", ttl: "1h" },
+              ...(options.cache !== false && {
+                cache_control: { type: "ephemeral", ttl: "1h" },
+              }),
             },
           ],
         }),
@@ -618,7 +629,11 @@ export class LlmClient {
       }
       // Top-level automatic caching moves a second breakpoint to the last
       // cacheable block each request, so tool loops reuse the previous prefix.
-      body.cache_control = { type: "ephemeral", ttl: "1h" };
+      // Five minutes, the default TTL: the next request of a tool loop or a
+      // quick reply starts within it, and a five-minute write costs 1.25x
+      // input against 2x for an hour. The one-hour system breakpoint above
+      // must stay before it; a longer TTL may not follow a shorter one (#109).
+      if (options.cache !== false) body.cache_control = { type: "ephemeral" };
     } else {
       path = "/chat/completions";
       body = {

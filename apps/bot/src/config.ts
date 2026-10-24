@@ -305,8 +305,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     promptFile: resolve(env.PROMPT_FILE || "prompt.md"),
     personaFile: resolve(env.PERSONA_FILE || "persona.md"),
     // Anthropic Workspace (#76): limits of the Managed Agents path. The key
-    // and base URL are `endpoints.anthropic_workspace`. The defaults are the
-    // values proposed in #76, which the owner has yet to confirm.
+    // and base URL are `endpoints.anthropic_workspace`. The defaults are
+    // those of #76.
     anthropicWorkspace: {
       // List cost one turn may add to its session, and what all Workspace
       // turns together may add in one UTC day and month, in cents. A turn's

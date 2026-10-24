@@ -72,7 +72,7 @@ const request: Message[] = [
 ];
 const never = new AbortController().signal;
 
-test("the routing table is the owner's five levels, without Sonnet, and never uses max", () => {
+test("the routing table is the five levels of #35, without Sonnet, and never uses max", () => {
   expect(AUTO_ROUTE_LEVELS.map((l) => `${l.model}/${l.effort}`)).toEqual([
     "claude-haiku-5-5/medium",
     "claude-haiku-5-5/high",

@@ -583,7 +583,7 @@
   line-height: 1.6;
 }
 /* 選んだモード: 箔の縁と、藤色の薄い色づけ。切り替えたときは、縁と色づけが短く現れるだけにする
-   （まとまり全体を光が回る動きは、本人の指摘「派手すぎる」で外した） */
+   （まとまり全体を光が回る動きは、派手すぎるので外した） */
 .mode[aria-checked="true"] {
   border-color: transparent;
   background: color-mix(in oklch, var(--f2) 9%, transparent);

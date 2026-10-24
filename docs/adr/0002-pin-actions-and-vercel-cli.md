@@ -1,7 +1,7 @@
 # ADR-0002: action は commit SHA で、Vercel CLI は専用の lockfile で固定する
 
 - 状態: 採用
-- 決定日・判断者: 2026-10-04、持ち主
+- 決定日: 2026-10-04
 - 判断の過程を残した Issue: #3（作り直す範囲）、#5（方式の選択。表の 7 と、コメントの 18・19）
 - 置き換える／置き換えられた ADR: なし
 
@@ -24,7 +24,6 @@
   - 更新の仕組み
     - Renovate: まとめ方や頻度を細かく決められる。GitHub App を別に導入する必要がある
     - 手動: PR が増えない。古い版が残りやすい
-  - 持ち主の言葉での理由は #5 に追記する
 
 ## 影響
 
@@ -32,7 +31,7 @@
 - 費用・運用の負荷・残る制約:
   - Dependabot の PR を読んでマージする作業が増える。`tools/vercel/` と `.github/` だけの変更なので、マージしても API・Web・bot は配信されない。新しい CLI が使われるのは、その次の配信から
   - 配信の job に `bun install`（286 パッケージ）が加わる
-  - アプリの依存（ルートの `bun.lock`）は Dependabot の対象にしていない。更新すると bot が再配信されるため、持ち主が時期を選んで手で行う
+  - アプリの依存（ルートの `bun.lock`）は Dependabot の対象にしていない。更新すると bot が再配信されるため、時期を選んで手で行う
   - `Dockerfile` のベースイメージ（`oven/bun:1.4.3`）と、Vercel 側の `installCommand`（`npx --yes bun@1.4.3`）は、タグと版の指定のまま
   - Dependabot は SHA とコメントの両方を更新する（#16・#17 で確かめた）
 - セキュリティ・障害時の挙動:
@@ -48,7 +47,7 @@
 - 実際の運用・CI/CD の実行記録（2026-10-04）:
   - 固定した action での最初の実行: #7 のマージ後（https://github.com/hsincode/hibana/actions/runs/37191456680）
   - 固定した Vercel CLI での最初の配信: https://github.com/hsincode/hibana/actions/runs/37192815027 （API・Web）
-  - Dependabot: #7 のマージの直後に #16（checkout 4.4.0 → 7.0.1）と #17（upload-artifact 4.6.2 → 7.0.1）を開いた。差分は commit SHA と版のコメントの両方を更新していた。持ち主の決定で 2 件ともマージし、マージ後の検査は成功した（https://github.com/hsincode/hibana/actions/runs/37193353942）
+  - Dependabot: #7 のマージの直後に #16（checkout 4.4.0 → 7.0.1）と #17（upload-artifact 4.6.2 → 7.0.1）を開いた。差分は commit SHA と版のコメントの両方を更新していた。2 件ともマージし、マージ後の検査は成功した（https://github.com/hsincode/hibana/actions/runs/37193353942）
 
 ## 見直す条件
 

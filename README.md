@@ -54,6 +54,48 @@ make sandbox-smoke      # Docker隔離・ファイル操作の確認
 - GitHub device login、Surfshark / VPN Gate、xAI STT / S2S通話（オプトイン）。
 - サーバー／個人の設定、OAuth・ロール・利用停止、成果物・スキル管理のWeb画面。
 
+## 本番の構成
+
+設定 API の DB は Supabase（東京）の Postgres で、API の関数は Vercel の `hnd1`（東京）で動きます（2026-10-21 の `a796753` から。#93、[ADR-0012](docs/adr/0012-move-api-database-to-supabase.md)）。
+
+```mermaid
+flowchart LR
+  browser["利用者・管理者<br>ブラウザ"]
+
+  subgraph vercel["Vercel"]
+    web("hibana-web<br>bot.hsincode.com<br>静的な SPA")
+    api("hibana-api<br>api.bot.hsincode.com<br>Elysia・Bun の関数<br>hnd1（東京）")
+  end
+
+  subgraph supabase["Supabase（ap-northeast-1、東京）"]
+    pooler["Supavisor<br>transaction モード :6543"]
+    db[("Postgres 17・Free プラン（NANO）<br>全テーブルで RLS を有効<br>Data API は公開しない")]
+  end
+
+  admin["Anthropic Admin API<br>cost report・usage report"]
+  discord["Discord<br>Gateway・REST API・OAuth2"]
+
+  subgraph vps["VPS（東京）"]
+    bot("bot<br>hibana.service・Bun")
+    snap[("runtime_state.json<br>受け取った設定の写し")]
+  end
+
+  client["利用者<br>Discord のクライアント"]
+
+  browser -- "HTTPS" --> web
+  browser -- "HTTPS /api/*<br>セッションの cookie" --> api
+  api -- "TCP・TLS（Bun の SQL）<br>プール 最大 5 本<br>アイドル 5 秒" --> pooler
+  pooler --> db
+  api -- "HTTPS（1 分キャッシュ）" --> admin
+  api -- "OAuth2 のトークンの交換<br>ユーザー・サーバー一覧" --> discord
+  bot -- "HTTPS /internal/snapshot 30 秒ごと（ETag）<br>/internal/budget 2 分ごと<br>起動時・変更時の報告" --> api
+  bot -- "受け取った設定を保存<br>起動時に読み戻す" --> snap
+  bot -- "Gateway（WebSocket）・REST" --> discord
+  client --> discord
+```
+
+角の丸い四角は Hibana のプロセス、円柱はデータの保存先、四角は外部のサービスと利用者、外側の枠は事業者とリージョンです。矢印は接続を始める側から受ける側へ向き、ラベルは経路と頻度です。DNS と TLS の終端（Cloudflare）、relay と CI/CD、sandbox・公開サイト、LLM のプロバイダー、bot の会話の保存先（SQLite）は省いています。省いたものの詳細と、Neon から移した経緯の図は [docs/architecture.md](docs/architecture.md) にあります。
+
 ## 運用・移行
 
 稼働先・更新手順は[本番環境](docs/production.md)を参照してください。

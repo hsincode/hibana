@@ -35,7 +35,7 @@
 
 ## 実装と検証
 
-- 適用した commit・構成図: この ADR を含む PR
+- 適用した commit・構成図: `a796753`（#94）。移行の前と後の構成図は [architecture.md](../architecture.md#設定-api-の-db-の移行2026-10-21neon--supabase)
 - 要求ごとの検証記録: [database.md の「検証の範囲」](../database.md#検証の範囲)
 - 実際の運用・CI/CD の実行記録: 未実施
 

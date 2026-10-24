@@ -2,6 +2,8 @@
 
 設定 API（`apps/api`）の DB は Postgres です。本番は Supabase の Free プラン（東京リージョン）で、API の関数も東京（Vercel の `hnd1`）で動かします（判断記録 #93、[ADR-0012](adr/0012-move-api-database-to-supabase.md)）。`DATABASE_URL` を空にすると、メモリストアで動きます（ローカルの開発とテスト用）。
 
+今の構成図は [README](../README.md#本番の構成)、Neon から移した前と後の構成図は [architecture.md](architecture.md) にあります。
+
 ## 接続の仕様
 
 - ドライバは Bun に組み込みの `SQL`（`apps/api/src/store.ts` の `PostgresStore`）。普通の TCP 接続なので、Neon に限らず、どの Postgres にもつながります

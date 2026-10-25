@@ -53,6 +53,7 @@ make sandbox-smoke      # Docker隔離・ファイル操作の確認
 - Discord操作、ファイル編集・配信、Exa検索、外部MCP、スキルCRUD、静的サイト公開。
 - 制限付きDockerでのbash・メディア処理・ブラウザ・動画レンダリング。Python製の既存メディアスキルは資産として引き継ぎ。Anthropic Workspace のターンは Docker を使わず、Anthropic のコンテナで動く（スキル・サイトの公開・画像生成・VPN などは使えない）。
 - GitHub device login、Surfshark / VPN Gate、xAI STT / S2S通話（オプトイン）。
+- 会議の録音と文字起こし（`/recording start|stop`、#118）: ボイスチャンネルの発言を xAI の Speech to Text で文字にし、全員が抜けるか止めると、サーバーの Text Generation Model（既定 Claude Haiku 5.5 / medium、Anthropic API のモデルから選ぶ）で要約して、要約と全文のファイルをコマンドを送ったチャンネルに送る。最長 3 時間・同時 2 件。通話と同じ `VOICE_ENABLED` と `XAI_API_KEY` が要る。**実際の Discord・xAI ではまだ動かしていない**。[docs/recording.md](docs/recording.md)。
 - サーバー／個人の設定、OAuth・ロール・利用停止、成果物・スキル管理のWeb画面。
 
 ## 本番の構成

@@ -327,6 +327,88 @@ describe("GET /api/analytics/usage", () => {
     expect(october.totals.turns).toBe(1);
   });
 
+  test("counts the entries the backfill sends: no text, a bare error, no model (#116)", async () => {
+    const { call, usage } = await setup();
+    const at = Date.parse("2026-10-18T10:00:00Z");
+    // What apps/bot/src/usage-backfill.ts posts for a turn found in the logs
+    // that failed, and for one found in Discord's history.
+    const base = {
+      at,
+      guild_id: "g1",
+      channel_id: "c1",
+      prompt: "",
+      reply: null,
+      failure_code: null,
+    };
+    const res = await call("/internal/logs", {
+      method: "POST",
+      headers: INTERNAL,
+      body: {
+        entries: [
+          {
+            ...base,
+            user_id: "u2",
+            username: "u2",
+            provider: "anthropic",
+            model: "claude-opus-5-5",
+            error: "failed",
+          },
+          {
+            ...base,
+            user_id: "u3",
+            username: "u3",
+            provider: null,
+            model: null,
+            error: null,
+          },
+        ],
+      },
+    });
+    expect(res.status).toBe(200);
+    const { body } = await usage();
+    expect(body.totals).toEqual({
+      turns: 2,
+      failed: 1,
+      users: 2,
+      users_excluding_admins: 2,
+    });
+    expect(body.models).toEqual([
+      { provider: "", model: "", turns: 1 },
+      { provider: "anthropic", model: "claude-opus-5-5", turns: 1 },
+    ]);
+  });
+
+  test("all_time counts every day kept: a person in two months is one user (#116)", async () => {
+    const { turns, usage } = await setup();
+    await turns([
+      {
+        at: Date.parse("2026-08-20T10:00:00Z"),
+        user: "u2",
+        provider: "",
+        model: "",
+      },
+      { at: Date.parse("2026-09-10T10:00:00Z"), user: "admin-1" },
+      { at: Date.parse("2026-09-10T11:00:00Z"), user: "u3", failed: true },
+      { at: Date.parse("2026-10-18T10:00:00Z"), user: "u2" },
+    ]);
+    const october = (await usage("2026-10")).body;
+    expect(october.totals).toEqual({
+      turns: 1,
+      failed: 0,
+      users: 1,
+      users_excluding_admins: 1,
+    });
+    expect(october.first_day).toBe("2026-08-20");
+    expect(october.all_time).toEqual({
+      turns: 4,
+      failed: 1,
+      users: 3,
+      users_excluding_admins: 2,
+    });
+    // The same in every month asked for: it does not follow the month.
+    expect((await usage("2026-08")).body.all_time).toEqual(october.all_time);
+  });
+
   test("refuses a month that is malformed or in the future", async () => {
     const { usage } = await setup();
     expect((await usage("2026-11")).status).toBe(400);
@@ -347,6 +429,12 @@ describe("GET /api/analytics/usage", () => {
       users_excluding_admins: 0,
     });
     expect(body.sites).toEqual({ published: 0, created: 0 });
+    expect(body.all_time).toEqual({
+      turns: 0,
+      failed: 0,
+      users: 0,
+      users_excluding_admins: 0,
+    });
   });
 
   test(`drops days older than ${USAGE_RETENTION_DAYS} days`, async () => {
@@ -359,6 +447,7 @@ describe("GET /api/analytics/usage", () => {
     const oldMonth = new Date(old).toISOString().slice(0, 7);
     expect((await usage(oldMonth)).body.totals.turns).toBe(0);
     expect((await usage()).body.first_day).toBe("2026-10-20");
+    expect((await usage()).body.all_time.turns).toBe(1);
   });
 });
 

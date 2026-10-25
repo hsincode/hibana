@@ -584,6 +584,13 @@ describe.skipIf(!local)("PostgresStore against Postgres", () => {
       { provider: "anthropic", model: "haiku", turns: 1 },
     ]);
     expect(report.first_day).toBe(day);
+    // Every day kept, whatever the range (#116).
+    expect(report.all_time).toEqual({
+      turns: 6,
+      failed: 1,
+      users: 3,
+      users_excluding_admins: 2,
+    });
     // A range with nothing in it.
     const empty = await store.usageReport({
       fromDay: day + 10,
@@ -599,6 +606,13 @@ describe.skipIf(!local)("PostgresStore against Postgres", () => {
       failed: 0,
       users: 0,
       users_excluding_admins: 0,
+    });
+    // The range does not narrow it; this query leaves out no one.
+    expect(empty.all_time).toEqual({
+      turns: 6,
+      failed: 1,
+      users: 3,
+      users_excluding_admins: 3,
     });
     expect(await store.pruneUsage(day + 1)).toBe(3);
     expect(

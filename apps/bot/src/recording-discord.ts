@@ -171,9 +171,9 @@ export class DiscordRecordingPort implements RecordingPort {
         return;
       const entry: {
         stream?: SpeechStream;
-        /** xAI took the stream (`transcript.created`), and did not end it
-         *  with an error. */
+        /** xAI took the stream (`transcript.created`). */
         ready?: boolean;
+        /** xAI sent an error event: the stream counts as failed. */
         failed?: boolean;
         /** xAI sent text: it was transcribing speech. */
         transcribed?: boolean;

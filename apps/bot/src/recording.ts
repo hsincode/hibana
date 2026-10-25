@@ -551,7 +551,9 @@ export class Recorder {
       } catch (error) {
         if (header.voice_channel_id !== header.text_channel_id)
           await post(header.voice_channel_id, {
-            content: `⏹️ ${where} の録音を終了しましたが、要約と全文を <#${header.text_channel_id}> に送れませんでした。`,
+            content: posted
+              ? `⏹️ ${where} の録音を終了しました。要約の続きを <#${header.text_channel_id}> に送れませんでした。`
+              : `⏹️ ${where} の録音を終了しましたが、要約と全文を <#${header.text_channel_id}> に送れませんでした。`,
           }).catch((e) => this.o.report(e));
         throw error;
       }

@@ -850,6 +850,65 @@ describe("guild settings", () => {
     expect(okAdmin.status).toBe(200);
   });
 
+  test("Text Generation Model (#118): Haiku 5.5 medium by default, an Anthropic API preset that needs the plan, in the snapshot", async () => {
+    const { app, store } = await setup();
+    expect((await store.getGuild("g1")).text_model).toEqual({
+      preset: "anthropic-haiku-5-5",
+      effort: "medium",
+    });
+    const sonnet = { preset: "anthropic-sonnet-5-5", effort: "high" };
+    const denied = await app.handle(
+      req("/api/guilds/g1/settings", {
+        method: "PATCH",
+        cookie: "sess-free",
+        body: JSON.stringify({ text_model: sonnet }),
+      }),
+    );
+    expect(denied.status).toBe(403);
+    const other = await app.handle(
+      req("/api/guilds/g1/settings", {
+        method: "PATCH",
+        cookie: "sess-admin",
+        body: JSON.stringify({
+          text_model: { preset: "sol", effort: "high" },
+        }),
+      }),
+    );
+    expect(other.status).toBe(400);
+    const saved = await app.handle(
+      req("/api/guilds/g1/settings", {
+        method: "PATCH",
+        cookie: "sess-admin",
+        body: JSON.stringify({ text_model: sonnet }),
+      }),
+    );
+    expect(saved.status).toBe(200);
+    expect(
+      ((await saved.json()) as { settings: { text_model: unknown } }).settings
+        .text_model,
+    ).toEqual(sonnet);
+    const snapshot = await app.handle(
+      req("/internal/snapshot", {
+        headers: { authorization: "Bearer test-internal" },
+      }),
+    );
+    const data = (await snapshot.json()) as {
+      guilds: Record<string, { text_model: unknown }>;
+    };
+    expect(data.guilds.g1!.text_model).toEqual(sonnet);
+    const reset = await app.handle(
+      req("/api/guilds/g1/settings", {
+        method: "PATCH",
+        cookie: "sess-admin",
+        body: JSON.stringify({ text_model: null }),
+      }),
+    );
+    expect(
+      ((await reset.json()) as { settings: { text_model: unknown } }).settings
+        .text_model,
+    ).toEqual({ preset: "anthropic-haiku-5-5", effort: "medium" });
+  });
+
   test("trigger words persist including disabled builtins", async () => {
     const { app, store } = await setup();
     const res = await app.handle(

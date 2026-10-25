@@ -2011,3 +2011,98 @@ test("the server list and the model list tell Anthropic Workspace from Anthropic
     row.getByRole("button", { name: "非公開", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
 });
+
+test("Text Generation Model picks the Anthropic API model and effort of recording summaries (#118)", async ({
+  page,
+}) => {
+  const writes = await mockApi(page);
+  const anthropic = (id: string, model: string, label: string) => ({
+    id,
+    provider: "anthropic",
+    model,
+    label,
+    min_role: "premium",
+  });
+  await page.route("**/api/catalog", (route) =>
+    route.fulfill({
+      json: {
+        ...catalog,
+        presets: [
+          ...catalog.presets,
+          anthropic("anthropic-auto", "auto", "Anthropic / Auto (Jev)"),
+          anthropic(
+            "anthropic-haiku-5-5",
+            "claude-haiku-5-5",
+            "Anthropic / Claude Haiku 5.5",
+          ),
+          anthropic(
+            "anthropic-sonnet-5-5",
+            "claude-sonnet-5-5",
+            "Anthropic / Claude Sonnet 5.5",
+          ),
+          {
+            id: "anthropic-workspace-haiku-5-5",
+            provider: "anthropic_workspace",
+            model: "claude-haiku-5-5",
+            label: "Anthropic Workspace / Claude Haiku 5.5",
+          },
+        ],
+      },
+    }),
+  );
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/g/100/tools");
+    const model = page.getByRole("combobox", {
+      name: "Text Generation Model",
+      exact: true,
+    });
+    // The server's value; Haiku 5.5 medium until one is saved.
+    await expect(model).toHaveText("Anthropic / Claude Haiku 5.5");
+    await model.click();
+    // Only Anthropic API models: not Auto, not Workspace, not other providers.
+    await expect(page.getByRole("option")).toHaveText([
+      "Anthropic / Claude Haiku 5.5",
+      "Anthropic / Claude Sonnet 5.5",
+    ]);
+    await page
+      .getByRole("option", { name: "Anthropic / Claude Sonnet 5.5" })
+      .click();
+    await expect
+      .poll(() =>
+        writes.some(
+          (w) =>
+            JSON.stringify(w.body.text_model) ===
+            JSON.stringify({
+              preset: "anthropic-sonnet-5-5",
+              effort: "medium",
+            }),
+        ),
+      )
+      .toBe(true);
+    const effort = page.getByRole("combobox", {
+      name: "Text Generation Model の effort",
+    });
+    await effort.click();
+    await page.getByRole("option", { name: "high", exact: true }).click();
+    await expect
+      .poll(() =>
+        writes.some(
+          (w) =>
+            JSON.stringify(w.body.text_model) ===
+            JSON.stringify({ preset: "anthropic-sonnet-5-5", effort: "high" }),
+        ),
+      )
+      .toBe(true);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/text-model-${width}.png`,
+      animations: "disabled",
+    });
+    writes.length = 0;
+  }
+});

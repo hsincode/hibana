@@ -29,6 +29,8 @@ import { ConversationStore } from "./conversation-store";
 import { ToolRegistry } from "./tools";
 import { WebSync } from "./sync";
 import { Voice } from "./voice";
+import { Recorder } from "./recording";
+import { DiscordRecordingPort } from "./recording-discord";
 import { commands, handleCommand } from "./commands";
 import { imagePrompt, shouldRespond, splitMessage } from "./triggers";
 import { assemblePrompt } from "./harness";
@@ -129,6 +131,8 @@ export class Hibana {
   readonly tools: ToolRegistry;
   readonly sync: WebSync;
   readonly voice: Voice;
+  /** Meeting recordings (#118). */
+  readonly recorder: Recorder;
   private active = new Map<string, Active>();
   /** Steering prompts that carried the "ultracode" keyword. */
   private keywordPrompts = new WeakSet<Message>();
@@ -197,6 +201,24 @@ export class Hibana {
       (text, ctx) => this.respond(text, ctx),
       (e) => this.report(e),
     );
+    this.recorder = new Recorder({
+      runtime: this.runtime,
+      llm: this.llm,
+      port: new DiscordRecordingPort(this.client, this.runtime, (e) =>
+        this.report(e),
+      ),
+      dir: join(config.dataDir, "recordings"),
+      log: this.log,
+      report: (e) => this.report(e),
+      maxMs: config.recordingMaxMinutes * 60000,
+      maxSessions: config.recordingMaxSessions,
+      voiceBusy: (id) => this.voice.active(id),
+    });
+    // A server has one voice connection: a recording keeps `/join` out.
+    this.voice.busy = (id) =>
+      this.recorder.active(id)
+        ? "このサーバーでは録音中です。止めるには /recording stop を使ってください。"
+        : undefined;
     this.runtime.onChange = (id) => this.history.clearGuild(id);
     this.runtime.onBudgetChange = (state) => {
       if (!state.low) this.budgetAnnounced.clear();
@@ -294,9 +316,19 @@ export class Hibana {
             (ctx) => this.retry(ctx),
             this.usage,
             this.workspace,
+            this.recorder,
           ),
         );
     });
+    // A recording ends once everyone but bots has left (#118), or when the
+    // bot itself is moved out or disconnected.
+    if (this.config.voiceEnabled)
+      this.client.on(Events.VoiceStateUpdate, (_before, after) =>
+        this.recorder.voiceStateChanged(
+          after.guild.id,
+          after.id === this.client.user?.id ? after.channelId : undefined,
+        ),
+      );
     const cleanup = (channel: { id: string; isThread?: () => boolean }) => {
       this.history.clear(channel.id);
       if (channel.isThread?.())
@@ -314,6 +346,9 @@ export class Hibana {
     // guild's settings, the command registration).
     const swept = this.workspace.sweep();
     this.track(swept);
+    // Recordings a restart cut off are delivered as such (#118), whether
+    // or not voice is still enabled.
+    this.track(this.recorder.recover());
     for (const id of this.client.guilds.cache.keys())
       await this.runtime.initializeGuild(id);
     const applicationId = this.client.application!.id;
@@ -1178,6 +1213,8 @@ export class Hibana {
     this.shutdown.abort(new Error("Shutdown"));
     this.sync.stop();
     this.voice.close();
+    // Leaves at once; what was recorded stays on disk for the next start.
+    await this.recorder.close();
     await this.tools.close();
     await Promise.allSettled([...this.tasks]);
     await this.runtime.persist();

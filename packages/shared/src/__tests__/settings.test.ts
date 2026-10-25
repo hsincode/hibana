@@ -15,6 +15,10 @@ import {
   patchPresetIds,
   subagentMode,
   subagentModePatch,
+  DEFAULT_TEXT_MODEL,
+  TEXT_MODEL_EFFORTS,
+  isTextModelPreset,
+  textModelSelection,
   type GuildRow,
   type UserOverrideRow,
   type UserOverridePatch,
@@ -673,4 +677,82 @@ test("Multi-Agent role policies default to the common policy, merge per field an
       },
     }),
   ).toEqual(["sol", "pro-luna", "fable-5"]);
+});
+
+test("Text Generation Model is a server setting: Haiku 5.5 medium by default, Anthropic API presets only (#118)", () => {
+  expect(DEFAULT_TEXT_MODEL).toEqual({
+    preset: "anthropic-haiku-5-5",
+    effort: "medium",
+  });
+  expect(emptyGuild().text_model).toEqual(DEFAULT_TEXT_MODEL);
+  expect(settingsDefaults({}).text_model).toEqual(DEFAULT_TEXT_MODEL);
+  expect(textModelSelection(DEFAULT_TEXT_MODEL)).toEqual({
+    provider: "anthropic",
+    model: "claude-haiku-5-5",
+    effort: "medium",
+  });
+
+  // Anthropic API presets other than Auto; not Workspace, not other providers.
+  expect(isTextModelPreset("anthropic-haiku-5-5")).toBe(true);
+  expect(isTextModelPreset("anthropic-sonnet-5-5")).toBe(true);
+  expect(isTextModelPreset("anthropic-opus-5-5")).toBe(true);
+  expect(isTextModelPreset("anthropic-auto")).toBe(false);
+  expect(isTextModelPreset("anthropic-workspace-haiku-5-5")).toBe(false);
+  expect(isTextModelPreset("max-opus-5-5")).toBe(false);
+  expect(isTextModelPreset("sol")).toBe(false);
+  expect(isTextModelPreset("nope")).toBe(false);
+  // `none` is left out: Claude 5.x cannot switch thinking off.
+  expect([...TEXT_MODEL_EFFORTS]).toEqual([
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+  ]);
+
+  const sonnet = { preset: "anthropic-sonnet-5-5", effort: "high" } as const;
+  expect(guildPatchSchema.safeParse({ text_model: sonnet }).success).toBe(true);
+  expect(guildPatchSchema.safeParse({ text_model: null }).success).toBe(true);
+  for (const bad of [
+    { preset: "anthropic-auto", effort: "medium" },
+    { preset: "anthropic-workspace-haiku-5-5", effort: "medium" },
+    { preset: "sol", effort: "medium" },
+    { preset: "anthropic-haiku-5-5", effort: "none" },
+    { preset: "anthropic-haiku-5-5" },
+    { preset: "anthropic-haiku-5-5", effort: "medium", extra: 1 },
+  ])
+    expect(guildPatchSchema.safeParse({ text_model: bad }).success).toBe(false);
+  // A personal row does not carry it: the owner made it per server.
+  expect(
+    userOverridePatchSchema.safeParse({ text_model: sonnet }).success,
+  ).toBe(false);
+
+  // Writing it changes nothing else; null returns to the default.
+  const base = emptyGuild();
+  const written = applyPatch(base, { text_model: sonnet });
+  expect(written.text_model).toEqual(sonnet);
+  expect({ ...written, text_model: base.text_model }).toEqual(
+    normalizeGuild(base),
+  );
+  expect(applyPatch(written, { text_model: null }).text_model).toEqual(
+    DEFAULT_TEXT_MODEL,
+  );
+  expect(applyPatch(written, { temperature: 1 }).text_model).toEqual(sonnet);
+
+  // A row stored before the setting existed, or holding a preset that no
+  // longer qualifies, reads as the default.
+  const { text_model: _omitted, ...legacy } = emptyGuild();
+  expect(normalizeGuild(legacy).text_model).toEqual(DEFAULT_TEXT_MODEL);
+  expect(
+    normalizeGuild({
+      text_model: { preset: "anthropic-gone", effort: "high" },
+    } as never).text_model,
+  ).toEqual(DEFAULT_TEXT_MODEL);
+  expect(normalizeGuild(written).text_model).toEqual(sonnet);
+
+  // The plan and visibility checks of the API and the bot see the preset.
+  expect(patchPresetIds({ text_model: sonnet })).toEqual([
+    "anthropic-sonnet-5-5",
+  ]);
+  expect(patchPresetIds({ text_model: null })).toEqual([]);
 });

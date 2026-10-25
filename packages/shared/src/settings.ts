@@ -1,9 +1,11 @@
 import { z } from "zod";
 import {
+  AUTO_ROUTE_MODEL,
   BUILTIN_TRIGGERS,
   EFFORTS,
   EXA_MODES,
   MODEL_PRESETS,
+  SELECTABLE_PRESETS,
   TRIGGER_EXTRA_MAX,
   TRIGGER_WORD_MAX_CHARS,
   WORKSPACE_PROVIDER,
@@ -118,6 +120,60 @@ export const defaultMultiAgentRoles = (): MultiAgentRoles =>
     ]),
   ) as MultiAgentRoles;
 
+/**
+ * Text Generation Model (#118): the model a server's one-off text jobs run
+ * on, now the summary of a meeting recording. Owner's decisions: per server,
+ * Anthropic API presets only (as #67 keeps to Anthropic, so the cost is in
+ * `/usage` and the budget fallback of #89 applies), Haiku 5.5 medium by
+ * default. Auto is left out (it routes a conversation, not a job) and so is
+ * Anthropic Workspace (a cloud session, not one request).
+ */
+export function isTextModelPreset(raw: string): boolean {
+  const id = canonicalPresetId(raw);
+  return SELECTABLE_PRESETS.some(
+    (p) =>
+      p.id === id && p.provider === "anthropic" && p.model !== AUTO_ROUTE_MODEL,
+  );
+}
+/** `none` is left out: Claude 5.x cannot switch thinking off (the bot would
+ *  send low instead), so it would only mislead. */
+export const TEXT_MODEL_EFFORTS = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+export const textModelSchema = z
+  .object({
+    preset: z
+      .string()
+      .refine(isTextModelPreset, {
+        message: "text_model must be an Anthropic API preset other than Auto",
+      })
+      .transform(canonicalPresetId),
+    effort: z.enum(TEXT_MODEL_EFFORTS),
+  })
+  .strict();
+export type TextModel = z.infer<typeof textModelSchema>;
+export const DEFAULT_TEXT_MODEL: TextModel = {
+  preset: "anthropic-haiku-5-5",
+  effort: "medium",
+};
+/** The selection a Text Generation Model runs as. */
+export function textModelSelection(model: TextModel): {
+  provider: string;
+  model: string;
+  effort: string;
+} {
+  const preset = MODEL_PRESETS.find((p) => p.id === model.preset)!;
+  return {
+    provider: preset.provider,
+    model: preset.model,
+    effort: model.effort,
+  };
+}
+
 export const selectionSchema = z.object({
   provider: z.string().min(1),
   model: z.string().min(1),
@@ -220,6 +276,9 @@ export const guildPatchSchema = z
     suppress_embeds: z.boolean().nullable(),
     voice_mode: z.enum(["stt", "s2s"]),
     filler_removal: z.boolean(),
+    // A whole value, so the dashboard's two pickers never leave half of one.
+    // null returns to DEFAULT_TEXT_MODEL.
+    text_model: textModelSchema.nullable(),
     temperature: z.number().min(0).max(2).nullable(),
     exa_mode: exaSchema.nullable(),
     thread_history_max_age_secs: z.number().int().min(0).nullable(),
@@ -246,6 +305,7 @@ export type GuildRow = {
   suppress_embeds: boolean | null;
   voice_mode: "stt" | "s2s";
   filler_removal: boolean;
+  text_model: TextModel;
   selection: { provider: string; model: string; effort?: string | null } | null;
   effort: string | null;
   service_tier: ServiceTier | null;
@@ -274,6 +334,7 @@ export const emptyGuild = (): GuildRow => ({
   suppress_embeds: false,
   voice_mode: "stt",
   filler_removal: true,
+  text_model: { ...DEFAULT_TEXT_MODEL },
   selection: { provider: "codex_plus", model: "gpt-6-luna", effort: "max" },
   effort: "max",
   service_tier: "auto",
@@ -455,10 +516,14 @@ export function patchPresetIds(patch: {
   multi_agent_roles?: Partial<
     Record<string, { model?: { mode: string; preset?: string } }>
   > | null;
+  text_model?: { preset: string } | null;
 }): string[] {
   const ids: string[] = [];
   if (patch.preset && patch.preset !== "reset")
     ids.push(canonicalPresetId(patch.preset));
+  // Picking a Text Generation Model takes the plan the preset needs (#35):
+  // Anthropic API presets are Premium and up. The default needs no pick.
+  if (patch.text_model) ids.push(canonicalPresetId(patch.text_model.preset));
   if (patch.subagent_model?.mode === "fixed" && patch.subagent_model.preset)
     ids.push(canonicalPresetId(patch.subagent_model.preset));
   for (const role of Object.values(patch.multi_agent_roles ?? {}))
@@ -484,6 +549,8 @@ export function applyPatch(
   if (patch.voice_mode !== undefined) next.voice_mode = patch.voice_mode;
   if (patch.filler_removal !== undefined)
     next.filler_removal = patch.filler_removal;
+  if (patch.text_model !== undefined)
+    next.text_model = patch.text_model ?? { ...DEFAULT_TEXT_MODEL };
   if (patch.jev_enabled !== undefined) next.jev_enabled = patch.jev_enabled;
   if (patch.jev_task_enabled !== undefined)
     next.jev_task_enabled = patch.jev_task_enabled;
@@ -778,6 +845,11 @@ export function normalizeGuild(
   row.multi_agent_roles = normalizeMultiAgentRoles(
     raw?.multi_agent_roles ?? defaults.multi_agent_roles,
   );
+  // A row from before #118, or one naming a preset that no longer qualifies.
+  row.text_model = textModelSchema.safeParse(raw?.text_model).data ??
+    textModelSchema.safeParse(defaults.text_model).data ?? {
+      ...DEFAULT_TEXT_MODEL,
+    };
   return normalizeMode(row);
 }
 

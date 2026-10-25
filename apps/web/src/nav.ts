@@ -57,6 +57,7 @@ export const GUILD_SETTINGS: { label: string; page: string; row: string }[] = [
   { label: "URL previews", page: "tools", row: "g-url-previews" },
   { label: "voice-mode", page: "tools", row: "g-voice" },
   { label: "filler removal", page: "tools", row: "g-filler" },
+  { label: "Text Generation Model", page: "tools", row: "g-text-model" },
   { label: "トリガーワード", page: "tools", row: "g-triggers" },
   { label: "サーバーコンテキスト", page: "context", row: "g-context" },
   { label: "persona override", page: "context", row: "g-persona" },

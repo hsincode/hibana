@@ -483,6 +483,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     xaiKey: env.XAI_API_KEY || "",
     voiceModel: env.VOICE_S2S_MODEL || "grok-voice-latest",
     voiceName: env.VOICE_S2S_VOICE || "eve",
+    // Meeting recording (#118). The owner's limits: three hours a recording,
+    // two at once (apart from the voice conversation's three).
+    recordingMaxMinutes: numberEnv(env, "RECORDING_MAX_MINUTES", 180, 1, 1440),
+    recordingMaxSessions: numberEnv(env, "RECORDING_MAX_SESSIONS", 2, 1, 10),
     vpnEnabled: flag(env, "VPN_ENABLED", false),
     vpnProvider: vpn,
     vpnServer: env.VPN_SERVER || (vpn === "vpngate" ? "jp" : "jp-tok"),

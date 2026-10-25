@@ -17,6 +17,12 @@ import {
 import { AgentSections, guildEffective } from "./Agent";
 import { GuildArtifacts } from "./Artifacts";
 import { Select } from "./controls";
+import { roleAllows } from "./ModelPicker";
+import {
+  DEFAULT_TEXT_MODEL,
+  TEXT_MODEL_EFFORTS,
+  isTextModelPreset,
+} from "@hibana/shared/settings";
 import { GUILD_PAGES, LEGACY_SECTION_PAGE, guildPath } from "./nav";
 import { Row, SaveMarksContext, useReportSave, useRowTarget } from "./save";
 import { ContextSection, useOptimisticPatch, type PatchFn } from "./settings";
@@ -209,7 +215,12 @@ export function GuildPage() {
           </>
         )}
         {ready && page.path === "tools" && (
-          <ToolsSections catalog={cat} settings={settings} patch={patch} />
+          <ToolsSections
+            catalog={cat}
+            settings={settings}
+            role={me?.role}
+            patch={patch}
+          />
         )}
         {ready && page.path === "context" && (
           <ContextSection
@@ -252,12 +263,30 @@ const DEFAULT_MCP_URL = "https://ww.hsincode.com/api/mcp";
 function ToolsSections({
   catalog: c,
   settings: s,
+  role,
   patch,
 }: {
   catalog: Catalog;
   settings: GuildSettings;
+  role: string | undefined;
   patch: PatchFn;
 }) {
+  // 録音の要約に使うモデル（#118）。Anthropic API のモデルだけ（Auto・Workspace を除く）。
+  // 送るときはモデルと effort の組を丸ごと送る（片方だけの保存で、もう片方を失わない）。
+  const textModel = s.text_model ?? DEFAULT_TEXT_MODEL;
+  const textPresets = c.presets.filter(
+    (p) =>
+      isTextModelPreset(p.id) &&
+      (p.published !== false || p.id === textModel.preset),
+  );
+  // 選んだ後に非公開になったモデルは、bot では既定で動き、もう選べない（保存も API に断られる）。
+  // effort だけを変えるときは、既定のモデルと組にして保存する。カタログはスタッフにしか
+  // 非公開のプリセットを返さないので、カタログに無いものも非公開として扱う。
+  const keptPreset = c.presets.some(
+    (p) => p.id === textModel.preset && p.published !== false,
+  )
+    ? textModel.preset
+    : DEFAULT_TEXT_MODEL.preset;
   /** 数値はフォーカスを外した時点で保存する。値が変わっていなければ何も送らない。 */
   const saveNumber = (
     input: HTMLInputElement,
@@ -387,7 +416,7 @@ function ToolsSections({
         </div>
       </Section>
 
-      <Section id="behavior" title="サーバーツール / スレッド / 通話">
+      <Section id="behavior" title="サーバーツール / スレッド / 通話・録音">
         <div className="rows">
           {bool("g-server-tools", "server-tools", s.server_tools ?? true, (v) =>
             patch({ server_tools: v }, "g-server-tools"),
@@ -420,6 +449,59 @@ function ToolsSections({
           {bool("g-filler", "filler removal", s.filler_removal ?? true, (v) =>
             patch({ filler_removal: v }, "g-filler"),
           )}
+          <Row
+            k="g-text-model"
+            name="Text Generation Model"
+            hint="録音（/recording）の要約を作るモデル。既定は Claude Haiku 5.5 / medium。"
+          >
+            <div className="row-pair">
+              <Select
+                aria-label="Text Generation Model"
+                // 非公開でカタログに無いモデルは、bot と同じく既定を出す。
+                value={
+                  textPresets.some((p) => p.id === textModel.preset)
+                    ? textModel.preset
+                    : DEFAULT_TEXT_MODEL.preset
+                }
+                onValueChange={(preset) =>
+                  patch(
+                    { text_model: { ...textModel, preset } },
+                    "g-text-model",
+                  )
+                }
+              >
+                {textPresets.map((p) => {
+                  const hidden = p.published === false;
+                  const locked = !roleAllows(role, p.min_role, c.roles);
+                  return (
+                    <option key={p.id} value={p.id} disabled={hidden || locked}>
+                      {hidden
+                        ? `${p.label}（非公開。既定で動きます）`
+                        : locked
+                          ? `${p.label}（${p.min_role} 以上）`
+                          : p.label}
+                    </option>
+                  );
+                })}
+              </Select>
+              <Select
+                aria-label="Text Generation Model の effort"
+                value={textModel.effort}
+                onValueChange={(effort) =>
+                  patch(
+                    { text_model: { preset: keptPreset, effort } },
+                    "g-text-model",
+                  )
+                }
+              >
+                {TEXT_MODEL_EFFORTS.map((e) => (
+                  <option key={e} value={e}>
+                    {e}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </Row>
         </div>
       </Section>
 

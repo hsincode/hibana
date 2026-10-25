@@ -147,6 +147,8 @@ export type GuildSettings = Record<string, unknown> & {
   suppress_embeds?: boolean | null;
   voice_mode?: string;
   filler_removal?: boolean;
+  /** 録音の要約に使うモデル（#118）。旧 API は返さない。 */
+  text_model?: { preset: string; effort: string } | null;
   temperature?: number | null;
   exa_mode?: string | null;
   thread_history_max_age_secs?: number | null;

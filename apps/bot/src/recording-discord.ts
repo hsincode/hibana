@@ -5,6 +5,7 @@ import {
   EndBehaviorType,
   VoiceConnectionStatus,
   entersState,
+  getVoiceConnection,
   joinVoiceChannel,
 } from "@discordjs/voice";
 import {
@@ -23,9 +24,15 @@ import {
   type SpeechStream,
 } from "./stt";
 
-/** Speakers transcribed at once in one recording, as in the voice
- *  conversation: a bound on the xAI connections a meeting opens. */
+/** Speakers received at once in one recording, as in the voice
+ *  conversation. */
 const MAX_SPEAKERS = 8;
+/** xAI connections open at once in one recording: the speakers being
+ *  received, and utterances still being finished after a pause. */
+const MAX_STREAMS = 16;
+/** Streams in a row that xAI never got ready for before the channels are
+ *  told that speech is not being transcribed. */
+const FAILURES_TO_WARN = 5;
 /** One stream is cut here; a speaker still talking goes on in a new one. The
  *  conversation's two minutes would drop the middle of a long explanation. */
 const STREAM_MAX_MS = 5 * 60000;
@@ -41,6 +48,7 @@ export class DiscordRecordingPort implements RecordingPort {
     private deps: {
       joinVoiceChannel?: typeof joinVoiceChannel;
       entersState?: typeof entersState;
+      getVoiceConnection?: typeof getVoiceConnection;
       streamSpeech?: typeof streamSpeech;
     } = {},
   ) {}
@@ -116,6 +124,15 @@ export class DiscordRecordingPort implements RecordingPort {
     const join = this.deps.joinVoiceChannel ?? joinVoiceChannel;
     const waitFor = this.deps.entersState ?? entersState;
     const stream = this.deps.streamSpeech ?? streamSpeech;
+    // A server has one voice connection, and joining again returns it. One
+    // still open (a /join call connecting, a recording leaving) is not taken.
+    const existing = (this.deps.getVoiceConnection ?? getVoiceConnection)(
+      guildId,
+    );
+    if (existing && existing.state.status !== VoiceConnectionStatus.Destroyed)
+      throw new Error(
+        "このサーバーでは bot がボイスチャンネルに接続しています（/join の通話など）。終わってから始めてください。",
+      );
     const guild = await this.client.guilds.fetch(guildId);
     const connection = join({
       channelId,
@@ -142,24 +159,29 @@ export class DiscordRecordingPort implements RecordingPort {
     const tasks = new Set<Promise<void>>();
     // Other bots (a music bot) are not part of the meeting.
     const bots = new Set<string>();
+    let failures = 0;
     const listen = (userId: string) => {
       if (
         abort.signal.aborted ||
         bots.has(userId) ||
         speakers.has(userId) ||
-        speakers.size >= MAX_SPEAKERS
+        speakers.size >= MAX_SPEAKERS ||
+        tasks.size >= MAX_STREAMS
       )
         return;
-      const entry: { stream?: SpeechStream } = {};
+      const entry: { stream?: SpeechStream; ready?: boolean } = {};
       speakers.set(userId, entry);
       const release = (again: boolean) => {
         if (speakers.get(userId) !== entry) return;
         speakers.delete(userId);
         // Still talking when the receive stream closed (it reached its
-        // limit): carry on in a new one. Deferred, so the receiver has let
-        // go of the stream that closed before a new one is asked for.
+        // limit): carry on in a new one. Only after a stream xAI took:
+        // one it refused (a bad key, an outage) would be retried for as
+        // long as the speaker talks. Deferred, so the receiver has let go
+        // of the stream that closed before a new one is asked for.
         if (
           again &&
+          entry.ready &&
           !abort.signal.aborted &&
           connection.receiver.speaking.users.has(userId)
         )
@@ -194,10 +216,16 @@ export class DiscordRecordingPort implements RecordingPort {
           sockets,
           maxMs: STREAM_MAX_MS,
           report: this.report,
-          onMessage: (data) => emit(assembler.push(data)),
+          onMessage: (data) => {
+            if (data.type === "transcript.created") entry.ready = true;
+            emit(assembler.push(data));
+          },
         });
         await entry.stream.done;
         emit(assembler.flush());
+        if (entry.ready) failures = 0;
+        else if (++failures === FAILURES_TO_WARN && !abort.signal.aborted)
+          events.failing();
       })()
         .catch(this.report)
         // Never listens again from here: a lookup that keeps failing would

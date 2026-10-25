@@ -21,6 +21,10 @@ function setup(
   options: {
     bots?: string[];
     failLookup?: boolean;
+    /** xAI never gets ready: every stream fails. */
+    refuse?: boolean;
+    /** A voice connection already open in the server. */
+    existing?: { state: { status: string } };
   } = {},
 ) {
   const runtime = new Runtime(
@@ -80,6 +84,13 @@ function setup(
       ended: false,
     };
     streams.push(call);
+    if (options.refuse)
+      queueMicrotask(() => {
+        // The socket fails at once: the receive stream is torn down too.
+        call.opus.destroy();
+        resolve();
+      });
+    else call.onMessage({ type: "transcript.created" });
     return {
       done,
       end: () => {
@@ -104,15 +115,18 @@ function setup(
     {
       joinVoiceChannel: (() => connection) as never,
       entersState: (async () => connection) as never,
+      getVoiceConnection: (() => options.existing) as never,
       streamSpeech: fakeStream,
     },
   );
   const heard: { userId: string; name: string; text: string }[] = [];
   let disconnected = 0;
+  let failing = 0;
   const events = {
     utterance: (userId: string, name: string, _at: number, text: string) =>
       heard.push({ userId, name, text }),
     disconnected: () => disconnected++,
+    failing: () => failing++,
   };
   return {
     port,
@@ -124,6 +138,7 @@ function setup(
     errors,
     events,
     disconnected: () => disconnected,
+    failing: () => failing,
     join: () => port.join("g1", "vc1", events),
   };
 }
@@ -208,6 +223,42 @@ describe("DiscordRecordingPort.join", () => {
     expect(s.streams.length).toBe(8);
   });
 
+  test("utterances still being finished count too: at most sixteen xAI streams at once", async () => {
+    const s = setup();
+    await s.join();
+    for (let round = 0; round < 3; round++) {
+      for (let i = 0; i < 8; i++) s.speaking.emit("start", `u${round}-${i}`);
+      await tick();
+      // They pause; xAI is still finishing each of them.
+      for (const c of s.streams) if (!c.opus.destroyed) c.opus.destroy();
+      await tick();
+    }
+    expect(s.streams.length).toBe(16);
+  });
+
+  test("xAI refusing every stream is not retried while someone talks, and is reported once five have failed", async () => {
+    const s = setup({ refuse: true });
+    await s.join();
+    s.speaking.users.set("u1", 1);
+    s.speaking.emit("start", "u1");
+    await tick(30);
+    // No reconnect loop.
+    expect(s.streams.length).toBe(1);
+    for (let i = 0; i < 6; i++) {
+      s.speaking.emit("start", "u1");
+      await tick();
+    }
+    expect(s.streams.length).toBe(7);
+    expect(s.failing()).toBe(1);
+  });
+
+  test("a voice connection already open in the server (a /join call connecting) is not taken", async () => {
+    const s = setup({ existing: { state: { status: "connecting" } } });
+    await expect(s.join()).rejects.toThrow("接続しています");
+    const t = setup({ existing: { state: { status: "destroyed" } } });
+    await t.join();
+  });
+
   test("leaving with flush finishes open speech before it disconnects; without, at once", async () => {
     const s = setup();
     const handle = await s.join();
@@ -245,6 +296,7 @@ describe("DiscordRecordingPort.join", () => {
           if (status !== "ready") throw new Error("timeout");
           return s.connection;
         }) as never,
+        getVoiceConnection: (() => undefined) as never,
         streamSpeech: (() => ({
           done: new Promise(() => {}),
           end() {},

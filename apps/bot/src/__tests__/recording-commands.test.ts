@@ -171,6 +171,24 @@ describe("/text-model", () => {
     });
   });
 
+  test("a model hidden since it was picked runs as the default; changing the effort alone stores the default with it", async () => {
+    const rt = runtime();
+    rt.snapshot.user_roles.u1 = "premium";
+    await slash(rt, "text-model", {
+      strings: { preset: "anthropic-opus-5-5" },
+    });
+    rt.snapshot.unpublished_presets = [
+      ...rt.snapshot.unpublished_presets,
+      "anthropic-opus-5-5",
+    ];
+    const reply = await slash(rt, "text-model", { strings: { effort: "low" } });
+    expect(reply).not.toContain("エラー");
+    expect(rt.guild("g1").text_model).toEqual({
+      preset: "anthropic-haiku-5-5",
+      effort: "low",
+    });
+  });
+
   test("Anthropic API presets are Premium and up to pick (#35), as on the dashboard", async () => {
     const rt = runtime();
     const reply = await slash(rt, "text-model", {

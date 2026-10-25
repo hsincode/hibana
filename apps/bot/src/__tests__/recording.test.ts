@@ -65,6 +65,10 @@ class FakePort implements RecordingPort {
   joinError?: Error;
   /** Runs inside `leave`, as the real port flushes open speech there. */
   duringLeave?: (events: RecordingEvents) => void;
+  /** Holds `leave` until it resolves, as a slow flush does. */
+  leaveGate?: Promise<void>;
+  /** Runs before each post; a throw fails it. */
+  beforeSend?: (channelId: string, message: Omit<Sent, "channelId">) => void;
   sent: Sent[] = [];
   joined: Joined[] = [];
   async voiceChannelOf(_guildId: string, userId: string) {
@@ -77,6 +81,7 @@ class FakePort implements RecordingPort {
     return this.sendable;
   }
   async send(channelId: string, message: Omit<Sent, "channelId">) {
+    this.beforeSend?.(channelId, message);
     this.sent.push({ channelId, ...message });
   }
   async join(guildId: string, channelId: string, events: RecordingEvents) {
@@ -87,6 +92,7 @@ class FakePort implements RecordingPort {
       leave: async (flush: boolean) => {
         entry.left.push(flush);
         if (flush) this.duringLeave?.(events);
+        await this.leaveGate;
       },
     };
   }
@@ -339,10 +345,14 @@ describe("ending", () => {
     expect(transcript).toContain(
       "[00:00:01] Aoi: 明日の天気は？\n[00:01:05] Ren: 晴れるといいですね",
     );
-    // The voice chat is told the recording ended and where the summary is.
+    // The voice chat is told the recording ended and where the summary is,
+    // after the summary: a restart in between does not say it twice.
     const notice = s.port.sent.filter((m) => m.channelId === "vc1").at(-1)!;
     expect(notice.content).toContain("終了");
     expect(notice.content).toContain("<#t1>");
+    expect(s.port.sent.indexOf(notice)).toBeGreaterThan(
+      s.port.sent.indexOf(summary),
+    );
     // Nothing of the meeting stays on disk once it is delivered.
     expect(files(s.dir)).toEqual([]);
   });
@@ -356,8 +366,8 @@ describe("ending", () => {
     // `humans` already leaves bots out.
     s.port.members.set("vc1", []);
     s.recorder.voiceStateChanged("g1");
-    expect(s.recorder.active("g1")).toBe(false);
     await s.recorder.settled();
+    expect(s.recorder.active("g1")).toBe(false);
   });
 
   test("only someone in the voice channel, or the one who started it, can stop it", async () => {
@@ -369,8 +379,8 @@ describe("ending", () => {
     );
     expect(s.recorder.active("g1")).toBe(true);
     await s.recorder.stop("g1", "u2");
-    expect(s.recorder.active("g1")).toBe(false);
     await s.recorder.settled();
+    expect(s.recorder.active("g1")).toBe(false);
     const summary = s.port.sent.find((m) => m.content.includes("録音の要約"))!;
     expect(summary.content).toContain("<@u2> が録音を止めました");
     await expect(s.recorder.stop("g1", "u1")).rejects.toThrow(
@@ -382,8 +392,8 @@ describe("ending", () => {
     await t.recorder.start("g1", "t1", "u1");
     t.port.members.set("vc1", [{ id: "u2", name: "Ren" }]);
     await t.recorder.stop("g1", "u1");
-    expect(t.recorder.active("g1")).toBe(false);
     await t.recorder.settled();
+    expect(t.recorder.active("g1")).toBe(false);
   });
 
   test("it stops itself at the longest length allowed", async () => {
@@ -403,15 +413,15 @@ describe("ending", () => {
     s.recorder.voiceStateChanged("g1", "vc1");
     expect(s.recorder.active("g1")).toBe(true);
     s.recorder.voiceStateChanged("g1", "vc-other");
-    expect(s.recorder.active("g1")).toBe(false);
     await s.recorder.settled();
+    expect(s.recorder.active("g1")).toBe(false);
     expect(s.port.sent.at(-1)!.content).toContain("切断");
 
     const t = setup();
     await t.recorder.start("g1", "t1", "u1");
     t.port.joined[0]!.events.disconnected();
-    expect(t.recorder.active("g1")).toBe(false);
     await t.recorder.settled();
+    expect(t.recorder.active("g1")).toBe(false);
   });
 
   test("speech recognized while leaving is still in the transcript", async () => {
@@ -480,6 +490,138 @@ describe("ending", () => {
     for (const p of posts) expect(p.content.length).toBeLessThanOrEqual(2000);
     expect(posts[0]!.files?.length).toBe(1);
     expect(posts.slice(1).every((p) => !p.files?.length)).toBe(true);
+  });
+});
+
+describe("overlaps (review of #119)", () => {
+  test("the server stays taken until the bot has left the voice channel", async () => {
+    const s = setup();
+    await s.recorder.start("g1", "t1", "u1");
+    let release!: () => void;
+    s.port.leaveGate = new Promise((r) => {
+      release = r;
+    });
+    await s.recorder.stop("g1", "u1");
+    // Still leaving: a new recording would get the connection being torn down.
+    expect(s.recorder.active("g1")).toBe(true);
+    await expect(s.recorder.start("g1", "t1", "u2")).rejects.toThrow(
+      "前の録音を終えているところ",
+    );
+    await expect(s.recorder.stop("g1", "u1")).rejects.toThrow(
+      "録音は終了しました",
+    );
+    release();
+    await s.recorder.settled();
+    expect(s.recorder.active("g1")).toBe(false);
+    s.port.leaveGate = undefined;
+    await s.recorder.start("g1", "t1", "u2");
+    expect(s.recorder.active("g1")).toBe(true);
+  });
+
+  test("transcription failing is said once in both channels, and the recording goes on", async () => {
+    const s = setup();
+    await s.recorder.start("g1", "t1", "u1");
+    const before = s.port.sent.length;
+    s.port.joined[0]!.events.failing();
+    s.port.joined[0]!.events.failing();
+    await s.recorder.settled();
+    const warnings = s.port.sent.slice(before);
+    expect(warnings.map((m) => m.channelId)).toEqual(["t1", "vc1"]);
+    for (const w of warnings) expect(w.content).toContain("文字起こしに");
+    expect(s.recorder.active("g1")).toBe(true);
+  });
+
+  test("a shutdown once the summary is posted does not post it again after the restart", async () => {
+    const dir = tempDir();
+    const llm = fakeLlm(
+      () => "## 概要\n" + "- 長い要約の行です。\n".repeat(400),
+    );
+    const before = setup({ dir, llm });
+    await before.recorder.start("g1", "t1", "u1");
+    before.port.joined[0]!.events.utterance(
+      "u1",
+      "Aoi",
+      before.at(1000),
+      "はい",
+    );
+    let closing: Promise<void> | undefined;
+    before.port.beforeSend = (_channel, message) => {
+      if (message.files?.length && !closing) closing = before.recorder.close();
+    };
+    await before.recorder.stop("g1", "u1");
+    while (!closing) await new Promise((r) => setTimeout(r, 1));
+    await closing;
+    await before.recorder.settled();
+    expect(
+      before.port.sent.filter((m) => m.content.includes("録音の要約")).length,
+    ).toBe(1);
+    expect(files(dir)).toEqual([]);
+    const after = setup({ dir });
+    await after.recorder.recover();
+    expect(after.port.sent).toEqual([]);
+  });
+
+  test("a shutdown before anything is posted keeps the file, and says nothing twice", async () => {
+    const dir = tempDir();
+    const before = setup({ dir, llm: fakeLlm(undefined, true) });
+    await before.recorder.start("g1", "t1", "u1");
+    before.port.joined[0]!.events.utterance(
+      "u1",
+      "Aoi",
+      before.at(1000),
+      "はい",
+    );
+    const posted = before.port.sent.length;
+    await before.recorder.stop("g1", "u1");
+    while (!before.llm.calls.length) await new Promise((r) => setTimeout(r, 1));
+    await before.recorder.close();
+    // Neither the voice chat nor the command channel was told yet.
+    expect(before.port.sent.length).toBe(posted);
+    expect(files(dir).length).toBe(1);
+  });
+
+  test("a recording that cannot be delivered does not hold up the others", async () => {
+    const dir = tempDir();
+    for (const [guild, channel] of [
+      ["g1", "t-gone"],
+      ["g2", "t2"],
+    ] as const)
+      await Bun.write(
+        join(dir, `${guild}-1.jsonl`),
+        [
+          JSON.stringify({
+            type: "start",
+            id: `${guild}-1`,
+            guild_id: guild,
+            guild_name: "S",
+            voice_channel_id: `vc-${guild}`,
+            voice_channel_name: "会議室",
+            text_channel_id: channel,
+            started_by: "u1",
+            started_at: START,
+          }),
+          JSON.stringify({
+            type: "line",
+            at: START + 1000,
+            user_id: "u1",
+            name: "Aoi",
+            text: "はい",
+          }),
+          "",
+        ].join("\n"),
+      );
+    const s = setup({ dir });
+    s.port.beforeSend = (channel) => {
+      if (channel === "t-gone") throw new Error("Unknown Channel");
+    };
+    await s.recorder.recover();
+    expect(
+      s.port.sent.some(
+        (m) => m.channelId === "t2" && m.content.includes("録音の要約"),
+      ),
+    ).toBe(true);
+    expect(s.errors.length).toBe(1);
+    expect(files(dir)).toEqual([]);
   });
 });
 

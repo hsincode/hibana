@@ -57,6 +57,8 @@ export type RecordingEvents = {
   utterance(userId: string, name: string, at: number, text: string): void;
   /** The bot lost the voice channel and did not get it back. */
   disconnected(): void;
+  /** xAI failed several streams in a row: speech is not being transcribed. */
+  failing(): void;
 };
 export type VoiceHandle = {
   /** Leaves the voice channel. With `flush`, open speech is finished first
@@ -116,6 +118,8 @@ type Session = {
   /** Takes utterances until it has left the channel. */
   open: boolean;
   ending?: Ending;
+  /** Told the channels that transcription is failing (once a recording). */
+  warned?: boolean;
 };
 
 const SYSTEM_NOTE =
@@ -189,8 +193,14 @@ export class Recorder {
         `要約に使う Text Generation Model（${modelLabel(model)}）の API キーが設定されていないため、録音を始められません。`,
       );
     const refuse = () => {
-      if (this.sessions.has(guildId))
-        throw new Error("このサーバーでは録音中です。");
+      const current = this.sessions.get(guildId);
+      // An ended recording keeps the server until the bot has left the
+      // voice channel: a new connection would be the old one, torn down.
+      if (current?.ending)
+        throw new Error(
+          "このサーバーでは前の録音を終えているところです。少し待ってから始めてください。",
+        );
+      if (current) throw new Error("このサーバーでは録音中です。");
       if (this.o.voiceBusy(guildId))
         throw new Error(
           "このサーバーでは通話（/join）中です。先に /leave してください。",
@@ -242,6 +252,7 @@ export class Recorder {
         utterance: (id, name, at, text) =>
           this.heard(session, id, name, at, text),
         disconnected: () => void this.end(session, { reason: "disconnected" }),
+        failing: () => void this.warn(session),
       });
     } catch (error) {
       if (this.sessions.get(guildId) === session) this.sessions.delete(guildId);
@@ -284,8 +295,9 @@ export class Recorder {
    *  summary is delivered in the background. */
   async stop(guildId: string, userId: string) {
     const session = this.sessions.get(guildId);
-    if (!session || session.ending)
-      throw new Error("このサーバーでは録音していません。");
+    if (!session) throw new Error("このサーバーでは録音していません。");
+    if (session.ending)
+      throw new Error("録音は終了しました。要約を作っています。");
     if (!session.handle)
       throw new Error(
         "ボイスチャンネルに接続しています。少し待ってから止めてください。",
@@ -340,8 +352,10 @@ export class Recorder {
         continue;
       }
       const last = saved.lines.at(-1)?.at ?? saved.header.started_at;
-      await this.track(
-        this.deliver(
+      // One that cannot be delivered (its channel was deleted) does not
+      // hold up the others.
+      try {
+        await this.deliver(
           file,
           saved.header,
           saved.lines,
@@ -350,8 +364,10 @@ export class Recorder {
             at: Math.max(last, saved.header.started_at),
           },
           saved.participants,
-        ),
-      );
+        );
+      } catch (error) {
+        this.o.report(error);
+      }
     }
   }
 
@@ -414,12 +430,13 @@ export class Recorder {
   private end(session: Session, ending: Omit<Ending, "at">): Promise<void> {
     if (session.ending) return Promise.resolve();
     session.ending = { ...ending, at: this.now() };
-    if (this.sessions.get(session.header.guild_id) === session)
-      this.sessions.delete(session.header.guild_id);
     clearTimeout(session.timer);
     return this.track(
       (async () => {
         await session.handle?.leave(true).catch((e) => this.o.report(e));
+        // The server is free once the connection is gone, not before.
+        if (this.sessions.get(session.header.guild_id) === session)
+          this.sessions.delete(session.header.guild_id);
         session.open = false;
         // Kept with the file: a delivery the process does not finish is
         // still told why it ended.
@@ -455,6 +472,27 @@ export class Recorder {
     for (const notice of notices)
       await this.o.port
         .send(notice.channel, { content: notice.content })
+        .catch((e) => this.o.report(e));
+  }
+
+  /** Says once that speech is not being transcribed, and keeps recording:
+   *  xAI may come back, and the meeting goes on either way. */
+  private async warn(session: Session) {
+    if (session.warned || session.ending) return;
+    session.warned = true;
+    const { header } = session;
+    this.o.log.warn(
+      { recording: header.id, guild: header.guild_id },
+      "Recording transcription failing",
+    );
+    const content =
+      "⚠️ xAI の文字起こしに続けて失敗しています。この間の発言は記録されていません。録音は続けます。";
+    for (const channel of new Set([
+      header.text_channel_id,
+      header.voice_channel_id,
+    ]))
+      await this.o.port
+        .send(channel, { content })
         .catch((e) => this.o.report(e));
   }
 
@@ -495,15 +533,16 @@ export class Recorder {
     const where = `<#${header.voice_channel_id}>`;
     let summarized = false;
     let parts = 0;
+    // Once the summary is posted, the file goes even if the process is
+    // shutting down: the next one would post it again.
+    let posted = false;
     try {
-      if (header.voice_channel_id !== header.text_channel_id)
-        await post(header.voice_channel_id, {
-          content: `⏹️ ${where} の録音を終了しました。${why}要約と全文は <#${header.text_channel_id}> に送ります。`,
-        }).catch((e) => this.o.report(e));
+      if (signal.aborted) return;
       if (!sorted.length) {
         await post(header.text_channel_id, {
           content: `⏹️ **録音を終了しました** — ${where}（${duration}）\n${why}発言は記録されませんでした。`,
         });
+        posted = true;
       } else {
         let result: Awaited<ReturnType<Recorder["summarize"]>> | undefined;
         let failure: string | undefined;
@@ -535,9 +574,15 @@ export class Recorder {
             },
           ],
         });
+        posted = true;
         for (const part of rest)
           await post(header.text_channel_id, { content: part });
       }
+      // After the summary, so a restart in between does not say it twice.
+      if (header.voice_channel_id !== header.text_channel_id)
+        await post(header.voice_channel_id, {
+          content: `⏹️ ${where} の録音を終了しました。${why}要約と全文は <#${header.text_channel_id}> に送りました。`,
+        }).catch((e) => this.o.report(e));
       this.o.log.info(
         {
           recording: header.id,
@@ -553,8 +598,8 @@ export class Recorder {
       );
     } finally {
       // Removed even when the post failed: the transcript is not kept on
-      // disk to be retried. Kept only when shutting down mid-delivery.
-      if (!signal.aborted)
+      // disk to be retried. Kept only when shutting down before the post.
+      if (posted || !signal.aborted)
         await rm(file, { force: true }).catch((e) => this.o.report(e));
     }
   }

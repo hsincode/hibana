@@ -5,7 +5,11 @@ import {
   ultraSupported,
   WORKSPACE_PROVIDER,
 } from "@hibana/shared/catalog";
-import { TEXT_MODEL_EFFORTS, isTextModelPreset } from "@hibana/shared/settings";
+import {
+  DEFAULT_TEXT_MODEL,
+  TEXT_MODEL_EFFORTS,
+  isTextModelPreset,
+} from "@hibana/shared/settings";
 import type { Runtime } from "./runtime";
 import type { ToolRegistry } from "./tools";
 import type { History } from "./history";
@@ -323,11 +327,19 @@ export async function handleCommand(
       }
       case "text-model": {
         const current = runtime.guild(guild()).text_model;
+        // A preset hidden since it was picked runs as the default
+        // (`Runtime.textModel`) and can no longer be picked: changing the
+        // effort alone stores the default with it.
+        const kept = runtime.snapshot.unpublished_presets.includes(
+          current.preset,
+        )
+          ? DEFAULT_TEXT_MODEL.preset
+          : current.preset;
         if (s("preset") === null && s("effort") === null) result = current;
         else
           patch = {
             text_model: {
-              preset: s("preset") ?? current.preset,
+              preset: s("preset") ?? kept,
               effort: s("effort") ?? current.effort,
             },
           };

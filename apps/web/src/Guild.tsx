@@ -279,6 +279,12 @@ function ToolsSections({
       isTextModelPreset(p.id) &&
       (p.published !== false || p.id === textModel.preset),
   );
+  // 選んだ後に非公開になったモデルは、bot では既定で動き、もう選べない（保存も API に断られる）。
+  // effort だけを変えるときは、既定のモデルと組にして保存する。
+  const keptPreset =
+    c.presets.find((p) => p.id === textModel.preset)?.published === false
+      ? DEFAULT_TEXT_MODEL.preset
+      : textModel.preset;
   /** 数値はフォーカスを外した時点で保存する。値が変わっていなければ何も送らない。 */
   const saveNumber = (
     input: HTMLInputElement,
@@ -458,10 +464,15 @@ function ToolsSections({
                 }
               >
                 {textPresets.map((p) => {
+                  const hidden = p.published === false;
                   const locked = !roleAllows(role, p.min_role, c.roles);
                   return (
-                    <option key={p.id} value={p.id} disabled={locked}>
-                      {locked ? `${p.label}（${p.min_role} 以上）` : p.label}
+                    <option key={p.id} value={p.id} disabled={hidden || locked}>
+                      {hidden
+                        ? `${p.label}（非公開。既定で動きます）`
+                        : locked
+                          ? `${p.label}（${p.min_role} 以上）`
+                          : p.label}
                     </option>
                   );
                 })}
@@ -471,7 +482,7 @@ function ToolsSections({
                 value={textModel.effort}
                 onValueChange={(effort) =>
                   patch(
-                    { text_model: { ...textModel, effort } },
+                    { text_model: { preset: keptPreset, effort } },
                     "g-text-model",
                   )
                 }

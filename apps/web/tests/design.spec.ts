@@ -2108,3 +2108,68 @@ test("Text Generation Model picks the Anthropic API model and effort of recordin
     writes.length = 0;
   }
 });
+
+test("Text Generation Model hidden since it was picked: shown as not used, and an effort change stores the default model (#118)", async ({
+  page,
+}) => {
+  const writes = await mockApi(page);
+  await page.route("**/api/catalog", (route) =>
+    route.fulfill({
+      json: {
+        ...catalog,
+        roles: ["admin", "premium", "user"],
+        presets: [
+          ...catalog.presets,
+          {
+            id: "anthropic-haiku-5-5",
+            provider: "anthropic",
+            model: "claude-haiku-5-5",
+            label: "Anthropic / Claude Haiku 5.5",
+            min_role: "premium",
+          },
+          {
+            id: "anthropic-opus-5-6",
+            provider: "anthropic",
+            model: "claude-opus-5-6",
+            label: "Anthropic / Claude Opus 5.6",
+            min_role: "premium",
+            published: false,
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/api/guilds/100/settings", (route) => {
+    const request = route.request();
+    const body =
+      request.method() === "PATCH" ? request.postDataJSON() : undefined;
+    if (body) writes.push({ path: "/api/guilds/100/settings", body });
+    return route.fulfill({
+      json: {
+        settings: {
+          ...emptyGuild(),
+          text_model: { preset: "anthropic-opus-5-6", effort: "high" },
+          ...body,
+        },
+      },
+    });
+  });
+  await page.goto("/g/100/tools");
+  await expect(
+    page.getByRole("combobox", { name: "Text Generation Model", exact: true }),
+  ).toHaveText("Anthropic / Claude Opus 5.6（非公開。既定で動きます）");
+  const effort = page.getByRole("combobox", {
+    name: "Text Generation Model の effort",
+  });
+  await effort.click();
+  await page.getByRole("option", { name: "low", exact: true }).click();
+  await expect
+    .poll(() =>
+      writes.some(
+        (w) =>
+          JSON.stringify(w.body.text_model) ===
+          JSON.stringify({ preset: "anthropic-haiku-5-5", effort: "low" }),
+      ),
+    )
+    .toBe(true);
+});

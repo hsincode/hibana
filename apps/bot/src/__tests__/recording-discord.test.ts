@@ -23,6 +23,8 @@ function setup(
     failLookup?: boolean;
     /** xAI never gets ready: every stream fails. */
     refuse?: boolean;
+    /** xAI gets ready, then closes at once (with an error event, if set). */
+    closeAfterReady?: "quietly" | "with an error";
     /** A voice connection already open in the server. */
     existing?: { state: { status: string } };
   } = {},
@@ -91,6 +93,13 @@ function setup(
         resolve();
       });
     else call.onMessage({ type: "transcript.created" });
+    if (options.closeAfterReady)
+      queueMicrotask(() => {
+        if (options.closeAfterReady === "with an error")
+          call.onMessage({ type: "error", message: "limit" });
+        call.opus.destroy();
+        resolve();
+      });
     return {
       done,
       end: () => {
@@ -184,6 +193,14 @@ describe("DiscordRecordingPort.join", () => {
     s.speaking.users.set("u1", 1);
     s.speaking.emit("start", "u1");
     await tick();
+    // Five minutes of speech: xAI has been sending text.
+    s.streams[0]!.onMessage({
+      type: "transcript.partial",
+      is_final: true,
+      speech_final: false,
+      text: "説明を続けます",
+      start: 0,
+    });
     s.streams[0]!.opus.destroy();
     await tick(20);
     expect(s.streams.length).toBe(2);
@@ -250,6 +267,23 @@ describe("DiscordRecordingPort.join", () => {
     }
     expect(s.streams.length).toBe(7);
     expect(s.failing()).toBe(1);
+  });
+
+  test("xAI closing every stream right after it is ready is not retried while someone talks either (second review)", async () => {
+    for (const how of ["quietly", "with an error"] as const) {
+      const s = setup({ closeAfterReady: how });
+      await s.join();
+      s.speaking.users.set("u1", 1);
+      s.speaking.emit("start", "u1");
+      await tick(30);
+      expect(s.streams.length).toBe(1);
+      for (let i = 0; i < 5; i++) {
+        s.speaking.emit("start", "u1");
+        await tick();
+      }
+      // An error event counts as a failure; a quiet close does not.
+      expect(s.failing()).toBe(how === "with an error" ? 1 : 0);
+    }
   });
 
   test("a voice connection already open in the server (a /join call connecting) is not taken", async () => {

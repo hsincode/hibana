@@ -345,16 +345,16 @@ export class Recorder {
       const file = join(this.o.dir, name);
       // A recording started since this process came up is not a leftover.
       if ([...this.sessions.values()].some((s) => s.file === file)) continue;
-      const saved = parseRecording(await readFile(file, "utf8"));
-      if (!saved) {
-        this.o.log.warn({ file: name }, "Unreadable recording removed");
-        await rm(file, { force: true });
-        continue;
-      }
-      const last = saved.lines.at(-1)?.at ?? saved.header.started_at;
-      // One that cannot be delivered (its channel was deleted) does not
-      // hold up the others.
+      // One that cannot be read or delivered (its channel was deleted) does
+      // not hold up the others.
       try {
+        const saved = parseRecording(await readFile(file, "utf8"));
+        if (!saved) {
+          this.o.log.warn({ file: name }, "Unreadable recording removed");
+          await rm(file, { force: true });
+          continue;
+        }
+        const last = saved.lines.at(-1)?.at ?? saved.header.started_at;
         await this.deliver(
           file,
           saved.header,
@@ -376,6 +376,9 @@ export class Recorder {
   async close() {
     this.shutdown.abort(new Error("Shutdown"));
     for (const session of this.sessions.values()) {
+      // One already ending finishes its flush (its task is tracked), keeps
+      // its file and stops at the delivery.
+      if (session.ending) continue;
       clearTimeout(session.timer);
       session.open = false;
       if (session.handle) this.track(session.handle.leave(false));
@@ -536,10 +539,27 @@ export class Recorder {
     // Once the summary is posted, the file goes even if the process is
     // shutting down: the next one would post it again.
     let posted = false;
+    // A post to the command channel that fails (the channel was deleted, a
+    // permission removed) is still said in the voice chat before it is
+    // reported: the file is removed either way.
+    const posting = async (
+      channel: string,
+      message: Parameters<RecordingPort["send"]>[1],
+    ) => {
+      try {
+        await post(channel, message);
+      } catch (error) {
+        if (header.voice_channel_id !== header.text_channel_id)
+          await post(header.voice_channel_id, {
+            content: `⏹️ ${where} の録音を終了しましたが、要約と全文を <#${header.text_channel_id}> に送れませんでした。`,
+          }).catch((e) => this.o.report(e));
+        throw error;
+      }
+    };
     try {
       if (signal.aborted) return;
       if (!sorted.length) {
-        await post(header.text_channel_id, {
+        await posting(header.text_channel_id, {
           content: `⏹️ **録音を終了しました** — ${where}（${duration}）\n${why}発言は記録されませんでした。`,
         });
         posted = true;
@@ -562,7 +582,7 @@ export class Recorder {
           ? `${head}\n-# ${modelLabel(result.selection)}（effort ${result.selection.effort ?? "既定"}）が文字起こしから作った要約です。誤りを含むことがあります。${result.omitted ? "後半の一部は要約に含めていません（全文には入っています）。" : ""}\n\n${result.summary}`
           : `${head}\n要約を作れませんでした（${failure}）。全文を添付します。`;
         const [first, ...rest] = splitMessage(body, 1900);
-        await post(header.text_channel_id, {
+        await posting(header.text_channel_id, {
           content: first!,
           files: [
             {
@@ -576,7 +596,7 @@ export class Recorder {
         });
         posted = true;
         for (const part of rest)
-          await post(header.text_channel_id, { content: part });
+          await posting(header.text_channel_id, { content: part });
       }
       // After the summary, so a restart in between does not say it twice.
       if (header.voice_channel_id !== header.text_channel_id)

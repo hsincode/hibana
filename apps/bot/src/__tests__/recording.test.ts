@@ -4,7 +4,13 @@
 // and the whole transcript go to the channel the command was sent in.
 // Discord and xAI are behind `RecordingPort`, faked here.
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyPatch, emptyGuild } from "@hibana/shared/settings";
@@ -578,6 +584,77 @@ describe("overlaps (review of #119)", () => {
     // Neither the voice chat nor the command channel was told yet.
     expect(before.port.sent.length).toBe(posted);
     expect(files(dir).length).toBe(1);
+  });
+
+  test("a shutdown while the bot is leaving keeps the speech finished in the flush (second review)", async () => {
+    const dir = tempDir();
+    const before = setup({ dir });
+    await before.recorder.start("g1", "t1", "u1");
+    let release!: () => void;
+    before.port.leaveGate = new Promise((r) => {
+      release = r;
+    });
+    await before.recorder.stop("g1", "u1");
+    const closing = before.recorder.close();
+    // The flush finishes an utterance after the shutdown began.
+    before.port.joined[0]!.events.utterance(
+      "u1",
+      "Aoi",
+      before.at(2000),
+      "最後の一言",
+    );
+    release();
+    await closing;
+    expect(files(dir).length).toBe(1);
+    const after = setup({ dir });
+    await after.recorder.recover();
+    const summary = after.port.sent.find((m) =>
+      m.content.includes("録音の要約"),
+    )!;
+    expect(text(summary)).toContain("最後の一言");
+    expect(summary.content).toContain("<@u1> が録音を止めました");
+  });
+
+  test("a summary that cannot be posted is still said in the voice chat (second review)", async () => {
+    const s = setup();
+    await s.recorder.start("g1", "t1", "u1");
+    s.port.joined[0]!.events.utterance("u1", "Aoi", s.at(1000), "はい");
+    s.port.beforeSend = (channel, message) => {
+      if (channel === "t1" && message.files?.length)
+        throw new Error("Missing Permissions");
+    };
+    await s.recorder.stop("g1", "u1");
+    await s.recorder.settled();
+    const notice = s.port.sent.filter((m) => m.channelId === "vc1").at(-1)!;
+    expect(notice.content).toContain("送れませんでした");
+    expect(s.errors.length).toBe(1);
+    expect(files(s.dir)).toEqual([]);
+  });
+
+  test("a file that cannot be read does not hold up the others (second review)", async () => {
+    const dir = tempDir();
+    mkdirSync(join(dir, "a-broken.jsonl"));
+    await Bun.write(
+      join(dir, "g2-1.jsonl"),
+      [
+        JSON.stringify({
+          type: "start",
+          id: "g2-1",
+          guild_id: "g2",
+          guild_name: "S",
+          voice_channel_id: "vc2",
+          voice_channel_name: "会議室",
+          text_channel_id: "t2",
+          started_by: "u1",
+          started_at: START,
+        }),
+        "",
+      ].join("\n"),
+    );
+    const s = setup({ dir });
+    await s.recorder.recover();
+    expect(s.port.sent.some((m) => m.channelId === "t2")).toBe(true);
+    expect(s.errors.length).toBe(1);
   });
 
   test("a recording that cannot be delivered does not hold up the others", async () => {

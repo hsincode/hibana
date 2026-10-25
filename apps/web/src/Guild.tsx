@@ -280,11 +280,13 @@ function ToolsSections({
       (p.published !== false || p.id === textModel.preset),
   );
   // 選んだ後に非公開になったモデルは、bot では既定で動き、もう選べない（保存も API に断られる）。
-  // effort だけを変えるときは、既定のモデルと組にして保存する。
-  const keptPreset =
-    c.presets.find((p) => p.id === textModel.preset)?.published === false
-      ? DEFAULT_TEXT_MODEL.preset
-      : textModel.preset;
+  // effort だけを変えるときは、既定のモデルと組にして保存する。カタログはスタッフにしか
+  // 非公開のプリセットを返さないので、カタログに無いものも非公開として扱う。
+  const keptPreset = c.presets.some(
+    (p) => p.id === textModel.preset && p.published !== false,
+  )
+    ? textModel.preset
+    : DEFAULT_TEXT_MODEL.preset;
   /** 数値はフォーカスを外した時点で保存する。値が変わっていなければ何も送らない。 */
   const saveNumber = (
     input: HTMLInputElement,
@@ -455,7 +457,12 @@ function ToolsSections({
             <div className="row-pair">
               <Select
                 aria-label="Text Generation Model"
-                value={textModel.preset}
+                // 非公開でカタログに無いモデルは、bot と同じく既定を出す。
+                value={
+                  textPresets.some((p) => p.id === textModel.preset)
+                    ? textModel.preset
+                    : DEFAULT_TEXT_MODEL.preset
+                }
                 onValueChange={(preset) =>
                   patch(
                     { text_model: { ...textModel, preset } },

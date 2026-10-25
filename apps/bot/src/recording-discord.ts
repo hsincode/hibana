@@ -169,19 +169,28 @@ export class DiscordRecordingPort implements RecordingPort {
         tasks.size >= MAX_STREAMS
       )
         return;
-      const entry: { stream?: SpeechStream; ready?: boolean } = {};
+      const entry: {
+        stream?: SpeechStream;
+        /** xAI took the stream (`transcript.created`), and did not end it
+         *  with an error. */
+        ready?: boolean;
+        failed?: boolean;
+        /** xAI sent text: it was transcribing speech. */
+        transcribed?: boolean;
+      } = {};
       speakers.set(userId, entry);
       const release = (again: boolean) => {
         if (speakers.get(userId) !== entry) return;
         speakers.delete(userId);
         // Still talking when the receive stream closed (it reached its
-        // limit): carry on in a new one. Only after a stream xAI took:
-        // one it refused (a bad key, an outage) would be retried for as
-        // long as the speaker talks. Deferred, so the receiver has let go
-        // of the stream that closed before a new one is asked for.
+        // limit): carry on in a new one. Only after a stream xAI was
+        // transcribing: one it refused or closed at once (a bad key, an
+        // outage, a limit) would be retried for as long as the speaker
+        // talks. Deferred, so the receiver has let go of the stream that
+        // closed before a new one is asked for.
         if (
           again &&
-          entry.ready &&
+          entry.transcribed &&
           !abort.signal.aborted &&
           connection.receiver.speaking.users.has(userId)
         )
@@ -218,12 +227,14 @@ export class DiscordRecordingPort implements RecordingPort {
           report: this.report,
           onMessage: (data) => {
             if (data.type === "transcript.created") entry.ready = true;
+            if (data.type === "transcript.partial") entry.transcribed = true;
+            if (data.type === "error") entry.failed = true;
             emit(assembler.push(data));
           },
         });
         await entry.stream.done;
         emit(assembler.flush());
-        if (entry.ready) failures = 0;
+        if (entry.ready && !entry.failed) failures = 0;
         else if (++failures === FAILURES_TO_WARN && !abort.signal.aborted)
           events.failing();
       })()

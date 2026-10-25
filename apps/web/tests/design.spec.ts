@@ -2027,6 +2027,8 @@ test("Text Generation Model picks the Anthropic API model and effort of recordin
     route.fulfill({
       json: {
         ...catalog,
+        // As the API sends them, strongest first: the admin may pick Premium presets.
+        roles: ["admin", "premium", "user"],
         presets: [
           ...catalog.presets,
           anthropic("anthropic-auto", "auto", "Anthropic / Auto (Jev)"),

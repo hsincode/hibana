@@ -1,13 +1,16 @@
 import { type ChatInputCommandInteraction, MessageFlags } from "discord.js";
 import {
   REASONING_EFFORTS,
+  SELECTABLE_PRESETS,
   ultraSupported,
   WORKSPACE_PROVIDER,
 } from "@hibana/shared/catalog";
+import { TEXT_MODEL_EFFORTS, isTextModelPreset } from "@hibana/shared/settings";
 import type { Runtime } from "./runtime";
 import type { ToolRegistry } from "./tools";
 import type { History } from "./history";
 import type { Voice } from "./voice";
+import type { Recorder } from "./recording";
 import type { UsageLedger } from "./usage-ledger";
 import type { Workspace } from "./workspace";
 import type { Context, Json } from "./types";
@@ -104,6 +107,36 @@ export function commands(runtime: Runtime) {
           command("filler-words", "通話のフィラー処理", [
             string("mode", "フィラー", ["remove", "keep"], true),
           ]),
+          // Meeting recording (#118): the voice channel is the one the
+          // member is in, and the summary goes to this channel.
+          command("recording", "会議の録音と文字起こし", [
+            {
+              type: 1,
+              name: "start",
+              description: "いるボイスチャンネルの録音を始める",
+            },
+            {
+              type: 1,
+              name: "stop",
+              description: "録音を止めて、要約と全文をこのチャンネルに送る",
+            },
+          ]),
+          command(
+            "text-model",
+            "録音の要約に使うモデル（Text Generation Model）",
+            [
+              {
+                ...string("preset", "Anthropic API のモデル"),
+                // Fixed when the commands are registered, at start.
+                choices: SELECTABLE_PRESETS.filter(
+                  (p) =>
+                    isTextModelPreset(p.id) &&
+                    !runtime.snapshot.unpublished_presets.includes(p.id),
+                ).map((p) => ({ name: p.label, value: p.id })),
+              },
+              string("effort", "推論の深さ", TEXT_MODEL_EFFORTS),
+            ],
+          ),
         ]
       : []),
     ...["login", "status", "logout"].map((action) =>
@@ -145,6 +178,8 @@ export async function handleCommand(
   usage: UsageLedger,
   /** Anthropic Workspace sessions (#76). */
   workspace?: Workspace,
+  /** Meeting recordings (#118). */
+  recorder?: Recorder,
 ) {
   if (runtime.snapshot.blocked_users.includes(i.user.id)) {
     await i.reply({
@@ -271,7 +306,33 @@ export async function handleCommand(
       case "leave":
         voice.leave(guild());
         result = { ok: true };
+        if (recorder?.active(guild()))
+          note =
+            "録音は続いています。止めるには `/recording stop` を使ってください。";
         break;
+      case "recording": {
+        if (!recorder) throw new Error("録音は使えません。");
+        if (i.options.getSubcommand() === "stop") {
+          result = await recorder.stop(guild(), i.user.id);
+          note = "録音を止めました。要約を作って、このチャンネルに送ります。";
+        } else {
+          result = await recorder.start(guild(), i.channelId, i.user.id);
+          note = "録音を始めました。";
+        }
+        break;
+      }
+      case "text-model": {
+        const current = runtime.guild(guild()).text_model;
+        if (s("preset") === null && s("effort") === null) result = current;
+        else
+          patch = {
+            text_model: {
+              preset: s("preset") ?? current.preset,
+              effort: s("effort") ?? current.effort,
+            },
+          };
+        break;
+      }
       case "voice-mode":
         patch = { voice_mode: s("mode") };
         break;
@@ -327,6 +388,8 @@ export async function handleCommand(
     }
     if (Object.keys(patch).length) {
       result = await runtime.patch(guild(), patch, i.user.id);
+      if (i.commandName === "text-model")
+        result = runtime.guild(guild()).text_model;
       // The switch is stored either way; on Anthropic Workspace it only
       // takes effect as Haiku Ultra (#76), and the person is told when the
       // turns they will get are not that.

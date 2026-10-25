@@ -201,7 +201,7 @@ describe("UtteranceAssembler", () => {
 describe("streamSpeech", () => {
   const setup = (maxMs = 10000) => {
     const opus = new PassThrough();
-    const sockets = new Set<SttSocket>();
+    const sockets = new Set<{ close(): void }>();
     const messages: Json[] = [];
     const errors: unknown[] = [];
     let socket!: FakeSocket;

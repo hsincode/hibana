@@ -1,4 +1,3 @@
-import WebSocket from "ws";
 import {
   joinVoiceChannel,
   entersState,
@@ -12,9 +11,10 @@ import {
   type VoiceConnection,
 } from "@discordjs/voice";
 import { Client, ChannelType, PermissionFlagsBits } from "discord.js";
-import prism from "prism-media";
 import { Readable } from "node:stream";
+import WebSocket from "ws";
 import { Serial } from "./io";
+import { conversationQuery, streamSpeech } from "./stt";
 import { matchesKeyword, triggerWords } from "./triggers";
 import type { Runtime } from "./runtime";
 import type { ToolRegistry } from "./tools";
@@ -23,12 +23,15 @@ type Session = {
   connection: VoiceConnection;
   abort: AbortController;
   player?: AudioPlayer;
-  websockets: Set<WebSocket>;
+  websockets: Set<{ close(): void }>;
   timer: ReturnType<typeof setTimeout>;
   queue: Serial;
 };
 export class Voice {
   private sessions = new Map<string, Session>();
+  /** Set by the bot: a reason this guild's voice connection is taken, by a
+   *  meeting recording (#118). A guild has one voice connection. */
+  busy?: (guildId: string) => string | undefined;
   constructor(
     private runtime: Runtime,
     private tools: ToolRegistry,
@@ -57,6 +60,8 @@ export class Voice {
         ?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect])
     )
       throw new Error("Voice channel access denied");
+    const busy = this.busy?.(guildId);
+    if (busy) throw new Error(busy);
     if (!this.sessions.has(guildId) && this.sessions.size >= 3)
       throw new Error("Voice session limit reached");
     this.leave(guildId);
@@ -102,6 +107,10 @@ export class Voice {
     });
     return { ok: true, channel_id: channelId };
   }
+  /** Whether this guild is in a voice conversation. */
+  active(guildId: string) {
+    return this.sessions.has(guildId);
+  }
   leave(guildId: string) {
     const session = this.sessions.get(guildId);
     if (!session) return;
@@ -125,125 +134,51 @@ export class Voice {
     const opus = session.connection.receiver.subscribe(userId, {
       end: { behavior: EndBehaviorType.AfterSilence, duration: 1200 },
     });
-    const decoder = new prism.opus.Decoder({
-      rate: 48000,
-      channels: 2,
-      frameSize: 960,
-    });
-    opus.pipe(decoder);
-    const query = new URLSearchParams({
-      sample_rate: "16000",
-      encoding: "pcm",
-      interim_results: "false",
-      smart_turn: "0.7",
-      smart_turn_timeout: "2500",
-      language: "ja",
-      filler_words: this.runtime.guild(guildId).filler_removal
-        ? "false"
-        : "true",
-    });
     const words = triggerWords(
       this.runtime.guild(guildId),
       this.runtime.config.extraTriggers,
     );
-    for (const word of words) query.append("keyterm", word);
-    const ws = new WebSocket(`wss://api.x.ai/v1/stt?${query}`, {
-      headers: { Authorization: `Bearer ${this.runtime.config.xaiKey}` },
-    });
-    session.websockets.add(ws);
-    let ready = false;
-    const pending: Buffer[] = [];
-    let buffered = 0;
-    let finished = false,
-      ended = false;
-    let complete!: () => void;
-    const completed = new Promise<void>((resolve) => {
-      complete = resolve;
-    });
-    const finish = () => {
-      if (finished) return;
-      finished = true;
-      complete();
-      session.websockets.delete(ws);
-      opus.destroy();
-      decoder.destroy();
-      ws.close();
-      clearTimeout(timer);
-    };
-    const timer = setTimeout(finish, 120000);
-    decoder.on("data", (pcm: Buffer) => {
-      // Discord is 48 kHz stereo. Average each group of six samples into 16 kHz mono.
-      const mono = Buffer.alloc(Math.floor(pcm.length / 12) * 2);
-      for (let i = 0; i < mono.length / 2; i++) {
-        let sum = 0;
-        for (let j = 0; j < 6; j++) sum += pcm.readInt16LE(i * 12 + j * 2);
-        mono.writeInt16LE(Math.round(sum / 6), i * 2);
-      }
-      if (ready && ws.readyState === WebSocket.OPEN) ws.send(mono);
-      else if (buffered < 1024 * 1024) {
-        pending.push(mono);
-        buffered += mono.length;
-      }
-    });
-    decoder.on("error", finish);
-    opus.on("error", finish);
-    decoder.on("end", () => {
-      ended = true;
-      if (ready && ws.readyState === WebSocket.OPEN) {
-        ws.send(Buffer.alloc(16000));
-        setTimeout(finish, 5000).unref();
-      }
-    });
-    ws.addEventListener("error", () => {
-      this.report(new Error("xAI STT connection failed"));
-      finish();
-    });
-    ws.addEventListener("close", finish, { once: true });
-    ws.addEventListener("message", (event) => {
-      let data: Json;
-      try {
-        data = JSON.parse(String(event.data));
-      } catch {
-        return;
-      }
-      if (data.type === "transcript.created") {
-        ready = true;
-        for (const bytes of pending) ws.send(bytes);
-        pending.length = 0;
-        if (ended) {
-          ws.send(Buffer.alloc(16000));
-          setTimeout(finish, 5000).unref();
+    const stream = streamSpeech({
+      opus,
+      query: conversationQuery(
+        this.runtime.guild(guildId).filler_removal,
+        words,
+      ),
+      key: this.runtime.config.xaiKey,
+      sockets: session.websockets,
+      maxMs: 120000,
+      report: this.report,
+      onMessage: (data) => {
+        if (
+          data.speech_final &&
+          typeof data.text === "string" &&
+          matchesKeyword(data.text, words)
+        ) {
+          const text = data.text;
+          clearTimeout(session.timer);
+          session.timer = setTimeout(() => this.leave(guildId), 1800000);
+          const ctx: Context = {
+            guildId,
+            channelId,
+            userId,
+            botId: this.client.user!.id,
+            thread: false,
+            depth: 0,
+            delivered: false,
+            signal: session.abort.signal,
+          };
+          void session.queue
+            .run(async () => {
+              session.abort.signal.throwIfAborted();
+              if (this.runtime.guild(guildId).voice_mode === "s2s")
+                await this.speak(session, text, ctx);
+              else await this.respond(text, ctx);
+            })
+            .catch(this.report);
         }
-      }
-      if (
-        data.speech_final &&
-        typeof data.text === "string" &&
-        matchesKeyword(data.text, words)
-      ) {
-        const text = data.text;
-        clearTimeout(session.timer);
-        session.timer = setTimeout(() => this.leave(guildId), 1800000);
-        const ctx: Context = {
-          guildId,
-          channelId,
-          userId,
-          botId: this.client.user!.id,
-          thread: false,
-          depth: 0,
-          delivered: false,
-          signal: session.abort.signal,
-        };
-        void session.queue
-          .run(async () => {
-            session.abort.signal.throwIfAborted();
-            if (this.runtime.guild(guildId).voice_mode === "s2s")
-              await this.speak(session, text, ctx);
-            else await this.respond(text, ctx);
-          })
-          .catch(this.report);
-      }
+      },
     });
-    await completed;
+    await stream.done;
   }
   private async speak(session: Session, text: string, ctx: Context) {
     const ws = new WebSocket(

@@ -18,6 +18,8 @@ import {
   emptyGuild,
   emptyUserOverride,
   guildPatchSchema,
+  DEFAULT_TEXT_MODEL,
+  textModelSelection,
   userOverridePatchSchema,
   type GuildRow,
   type GuildPatch,
@@ -300,6 +302,16 @@ export class Runtime {
       return selection;
     return this.budgetFallback();
   }
+  /** The server's Text Generation Model (#118), which summarizes its
+   *  meeting recordings. A preset hidden since it was picked runs as the
+   *  default, as the budget fallback does. Its requests still go through
+   *  `budgetSelection` in the LLM client like every `anthropic` request. */
+  textModel(guildId: string): Selection {
+    let model = this.guild(guildId).text_model;
+    if (this.snapshot.unpublished_presets.includes(model.preset))
+      model = DEFAULT_TEXT_MODEL;
+    return textModelSelection(model);
+  }
   resolve(guildId?: string, userId?: string) {
     const guild = this.guild(guildId);
     // null on a personal field is デフォルト: follow this server, or the
@@ -404,6 +416,8 @@ export class Runtime {
     }))
       if (!this.canSelect(id, userId))
         throw new Error("This subagent model is unavailable for your account");
+    if (patch.text_model && !this.canSelect(patch.text_model.preset, userId))
+      throw new Error("This text model is unavailable for your account");
     return this.serial.run(async () => {
       if (this.config.webApiUrl) {
         await this.remote(`/internal/guilds/${guildId}`, "PATCH", patch);

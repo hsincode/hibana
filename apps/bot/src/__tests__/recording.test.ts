@@ -232,6 +232,7 @@ describe("starting", () => {
       voiceBusy: (guildId) => guildId === "busy",
     });
     s.port.voice.u3 = { id: "vc3", name: "別室", guildName: "別のサーバー" };
+    s.port.members.set("vc3", [{ id: "u3", name: "Sora" }]);
     await expect(s.recorder.start("g1", "t1", "nobody")).rejects.toThrow(
       "ボイスチャンネルに入ってから",
     );

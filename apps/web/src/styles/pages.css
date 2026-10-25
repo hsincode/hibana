@@ -168,6 +168,12 @@
   background: var(--surface);
   box-shadow: var(--card-shadow);
 }
+/* 利用状況の累計（#116）: 見出しの一文と枠を近づける */
+.usage-all-time {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
 .stat {
   min-width: 0;
   display: flex;

@@ -1266,9 +1266,17 @@ export class PostgresStore implements Store {
       GROUP BY provider, model
       ORDER BY turns DESC, provider COLLATE "C", model COLLATE "C"
     `) as UsageReport["models"];
-    const first = (await this.sql`
-      SELECT min(day) AS day FROM usage_daily
-    `) as { day: number | null }[];
+    // Every day kept (#116): the earliest, and the counts over all of them.
+    const all = (await this.sql`
+      SELECT min(day) AS day,
+        coalesce(sum(turns), 0)::int AS turns,
+        coalesce(sum(failed), 0)::int AS failed,
+        count(DISTINCT user_hash)::int AS users,
+        (count(DISTINCT user_hash) FILTER (WHERE NOT (user_hash = ANY (ARRAY(
+          SELECT jsonb_array_elements_text(${exclude}::jsonb))))))::int
+          AS users_excluding_admins
+      FROM usage_daily
+    `) as ({ day: number | null } & UsageReport["totals"])[];
     // Published as the bot judges it (apps/bot/src/tools/sites.ts).
     const sites = (await this.sql`
       SELECT
@@ -1283,8 +1291,14 @@ export class PostgresStore implements Store {
       days: days.map((d) => ({ ...d, day: Number(d.day) })),
       totals: totals[0]!,
       models,
-      first_day: first[0]?.day == null ? null : Number(first[0].day),
+      first_day: all[0]?.day == null ? null : Number(all[0].day),
       sites: sites[0]!,
+      all_time: {
+        turns: all[0]!.turns,
+        failed: all[0]!.failed,
+        users: all[0]!.users,
+        users_excluding_admins: all[0]!.users_excluding_admins,
+      },
     };
   }
 }

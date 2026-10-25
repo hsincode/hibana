@@ -174,8 +174,6 @@ async function loadSnapshot(
   return body;
 }
 
-const COOKIE = "hibana_session";
-
 export type AppHooks = {
   chatgptFetch?: typeof fetch;
   /** Stands in for Anthropic's Admin API (the cost report) in tests. */
@@ -213,6 +211,12 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
     secure: cross || env.publicBaseUrl.startsWith("https://"),
     maxAge: 60 * 60 * 24 * 14,
   };
+  // Public sites run on subdomains of the same registrable domain
+  // (<token>.hsincode.com) and can set cookies for the parent domain. A
+  // __Host- cookie must be Secure, host-only and Path=/, so they can neither
+  // set nor overwrite it (#114). Plain HTTP (local dev) cannot use the prefix.
+  const COOKIE = cookieOpts.secure ? "__Host-hibana_session" : "hibana_session";
+  const dashboard = new URL(env.frontendOrigin).origin;
 
   const effectiveRole = (discordId: string, stored: Role): Role => {
     if (env.adminIds.includes(discordId)) return "administrator";
@@ -269,6 +273,18 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           credentials: true,
         }),
       )
+      // The browser attaches the session cookie to requests from any page,
+      // public sites included (they count as the same site), and CORS only
+      // hides the answer. A form post needs no preflight, so a mutation is
+      // taken only from the dashboard. The bot's /internal routes use a token.
+      .onRequest(({ request, set }) => {
+        if (["GET", "HEAD", "OPTIONS"].includes(request.method)) return;
+        const path = new URL(request.url).pathname;
+        if (!path.startsWith("/api/") && !path.startsWith("/auth/")) return;
+        if (request.headers.get("origin") === dashboard) return;
+        set.status = 403;
+        return { error: "forbidden origin" };
+      })
       .onError(({ error, set }) => {
         if (error instanceof ChatgptError || error instanceof CostReportError) {
           set.status = error.status;
@@ -291,7 +307,7 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
       .get("/version", () => ({ commit: env.commit }))
       .group("/api/chatgpt", (app) =>
         app
-          .onBeforeHandle(async ({ cookie, request, set }) => {
+          .onBeforeHandle(async ({ cookie, set }) => {
             set.headers["cache-control"] = "no-store";
             const s = await requireSession(cookieSid(cookie as never));
             if (!s) {
@@ -301,16 +317,6 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
             if (!canManageUsers(s.role)) {
               set.status = 403;
               return { error: "forbidden" };
-            }
-            // Cross-site session cookies are needed by the dashboard; CORS alone
-            // does not prevent another website from submitting a mutation.
-            if (
-              request.method !== "GET" &&
-              request.headers.get("origin") !==
-                new URL(env.frontendOrigin).origin
-            ) {
-              set.status = 403;
-              return { error: "forbidden origin" };
             }
           })
           .get("/accounts", async () => ({ accounts: await chatgpt.list() }))
@@ -403,7 +409,14 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
       .post("/auth/logout", async ({ cookie, set }) => {
         const sid = cookieSid(cookie as never);
         if (sid) await store.deleteSession(sid);
-        cookie[COOKIE]?.remove();
+        // remove() leaves out Secure and Path, and the browser ignores a
+        // __Host- cookie set without them.
+        cookie[COOKIE]?.set({
+          ...cookieOpts,
+          value: "",
+          maxAge: 0,
+          expires: new Date(0),
+        });
         set.status = 204;
       })
       .get("/api/me", async ({ cookie, set }) => {

@@ -49,7 +49,10 @@ async function setup() {
       new Request(`http://localhost${path}`, {
         method: body === undefined ? "GET" : "POST",
         headers: {
-          ...(authenticated ? { cookie: "hibana_session=skills-session" } : {}),
+          ...(authenticated
+            ? { cookie: "__Host-hibana_session=skills-session" }
+            : {}),
+          origin: "http://127.0.0.1:5173",
           ...(internal ? { authorization: `Bearer ${env.internalToken}` } : {}),
           "content-type": "application/json",
         },

@@ -249,7 +249,9 @@ export class Recorder {
       throw error;
     }
     if (this.shutdown.signal.aborted) {
+      // Shut down while connecting: nothing was recorded to deliver later.
       await session.handle.leave(false);
+      await rm(session.file, { force: true }).catch(() => {});
       throw new Error("bot を終了しています。");
     }
     session.timer = setTimeout(
@@ -327,10 +329,10 @@ export class Recorder {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
       throw error;
     }
-    const open = new Set([...this.sessions.values()].map((s) => s.file));
     for (const name of names.filter((n) => n.endsWith(".jsonl"))) {
       const file = join(this.o.dir, name);
-      if (open.has(file)) continue;
+      // A recording started since this process came up is not a leftover.
+      if ([...this.sessions.values()].some((s) => s.file === file)) continue;
       const saved = parseRecording(await readFile(file, "utf8"));
       if (!saved) {
         this.o.log.warn({ file: name }, "Unreadable recording removed");

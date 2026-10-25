@@ -37,6 +37,12 @@ export class DiscordRecordingPort implements RecordingPort {
     private client: Client,
     private runtime: Runtime,
     private report: (error: unknown) => void,
+    /** Tests replace the voice connection and the xAI stream. */
+    private deps: {
+      joinVoiceChannel?: typeof joinVoiceChannel;
+      entersState?: typeof entersState;
+      streamSpeech?: typeof streamSpeech;
+    } = {},
   ) {}
 
   async voiceChannelOf(guildId: string, userId: string) {
@@ -107,8 +113,11 @@ export class DiscordRecordingPort implements RecordingPort {
     channelId: string,
     events: RecordingEvents,
   ): Promise<VoiceHandle> {
+    const join = this.deps.joinVoiceChannel ?? joinVoiceChannel;
+    const waitFor = this.deps.entersState ?? entersState;
+    const stream = this.deps.streamSpeech ?? streamSpeech;
     const guild = await this.client.guilds.fetch(guildId);
-    const connection = joinVoiceChannel({
+    const connection = join({
       channelId,
       guildId,
       adapterCreator: guild.voiceAdapterCreator,
@@ -117,17 +126,20 @@ export class DiscordRecordingPort implements RecordingPort {
       selfMute: true,
     });
     try {
-      await entersState(connection, VoiceConnectionStatus.Ready, 30000);
+      await waitFor(connection, VoiceConnectionStatus.Ready, 30000);
     } catch (error) {
       connection.destroy();
       throw error;
     }
     const abort = new AbortController();
     const sockets = new Set<{ close(): void }>();
-    const speakers = new Map<
-      string,
-      { stream?: SpeechStream; task: Promise<void> }
-    >();
+    // Speakers whose speech is being received now. A speaker's slot is the
+    // Discord receive stream, not the xAI stream: once the receive stream
+    // ends at a pause, the utterance is still being finished (up to five
+    // seconds), and the speaker may already be talking again.
+    const speakers = new Map<string, { stream?: SpeechStream }>();
+    /** Every utterance still being received or finished. */
+    const tasks = new Set<Promise<void>>();
     // Other bots (a music bot) are not part of the meeting.
     const bots = new Set<string>();
     const listen = (userId: string) => {
@@ -138,11 +150,22 @@ export class DiscordRecordingPort implements RecordingPort {
         speakers.size >= MAX_SPEAKERS
       )
         return;
-      const entry: { stream?: SpeechStream; task: Promise<void> } = {
-        task: Promise.resolve(),
-      };
+      const entry: { stream?: SpeechStream } = {};
       speakers.set(userId, entry);
-      entry.task = (async () => {
+      const release = (again: boolean) => {
+        if (speakers.get(userId) !== entry) return;
+        speakers.delete(userId);
+        // Still talking when the receive stream closed (it reached its
+        // limit): carry on in a new one. Deferred, so the receiver has let
+        // go of the stream that closed before a new one is asked for.
+        if (
+          again &&
+          !abort.signal.aborted &&
+          connection.receiver.speaking.users.has(userId)
+        )
+          setTimeout(() => listen(userId), 0);
+      };
+      const task = (async () => {
         const member = await guild.members.fetch(userId);
         if (member.user.bot) {
           bots.add(userId);
@@ -152,6 +175,7 @@ export class DiscordRecordingPort implements RecordingPort {
         const opus = connection.receiver.subscribe(userId, {
           end: { behavior: EndBehaviorType.AfterSilence, duration: 1200 },
         });
+        opus.once("close", () => release(true));
         const startedAt = Date.now();
         const assembler = new UtteranceAssembler();
         const emit = (u: { text: string; start: number } | undefined) => {
@@ -163,7 +187,7 @@ export class DiscordRecordingPort implements RecordingPort {
               u.text,
             );
         };
-        entry.stream = streamSpeech({
+        entry.stream = stream({
           opus,
           query: recordingQuery(this.runtime.guild(guildId).filler_removal),
           key: this.runtime.config.xaiKey,
@@ -176,17 +200,13 @@ export class DiscordRecordingPort implements RecordingPort {
         emit(assembler.flush());
       })()
         .catch(this.report)
+        // Never listens again from here: a lookup that keeps failing would
+        // loop.
         .finally(() => {
-          speakers.delete(userId);
-          // Still talking (past the stream's limit, or again right after a
-          // pause): carry on in a new stream. Deferred so the receive stream
-          // just destroyed is gone before a new one is asked for.
-          if (
-            !abort.signal.aborted &&
-            connection.receiver.speaking.users.has(userId)
-          )
-            setTimeout(() => listen(userId), 0);
+          release(false);
+          tasks.delete(task);
         });
+      tasks.add(task);
     };
     connection.receiver.speaking.on("start", listen);
     connection.on("error", this.report);
@@ -194,8 +214,8 @@ export class DiscordRecordingPort implements RecordingPort {
       // A move between channels, or a short drop, reconnects by itself.
       try {
         await Promise.race([
-          entersState(connection, VoiceConnectionStatus.Signalling, 5000),
-          entersState(connection, VoiceConnectionStatus.Connecting, 5000),
+          waitFor(connection, VoiceConnectionStatus.Signalling, 5000),
+          waitFor(connection, VoiceConnectionStatus.Connecting, 5000),
         ]);
       } catch {
         if (!abort.signal.aborted) events.disconnected();
@@ -208,10 +228,7 @@ export class DiscordRecordingPort implements RecordingPort {
         connection.receiver.speaking.off("start", listen);
         if (flush) {
           for (const s of speakers.values()) s.stream?.end();
-          await Promise.race([
-            Promise.allSettled([...speakers.values()].map((s) => s.task)),
-            sleep(FLUSH_MS),
-          ]);
+          await Promise.race([Promise.allSettled([...tasks]), sleep(FLUSH_MS)]);
         }
         for (const ws of sockets) ws.close();
         if (connection.state.status !== VoiceConnectionStatus.Destroyed)

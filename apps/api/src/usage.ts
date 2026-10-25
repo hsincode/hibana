@@ -57,6 +57,8 @@ export type UsageReport = {
   models: { provider: string; model: string; turns: number }[];
   /** Earliest day kept, over every month: when counting started. */
   first_day: number | null;
+  /** Every day kept, whatever the month (#116): a person in two months is one user. */
+  all_time: UsageCounts;
   sites: { published: number; created: number };
 };
 
@@ -190,6 +192,7 @@ export function usageResponse(
     totals: report.totals,
     models: report.models,
     sites: report.sites,
+    all_time: report.all_time,
   };
 }
 
@@ -239,6 +242,7 @@ export function reportFromRows(
         (a.model < b.model ? -1 : a.model > b.model ? 1 : 0),
     ),
     first_day: rows.length ? Math.min(...rows.map((r) => r.day)) : null,
+    all_time: counts(rows),
     sites: {
       published: sites.filter((s) => sitePublished(s, q.nowUnix)).length,
       created: created.filter((c) => c >= q.fromUnix && c < q.toUnix).length,

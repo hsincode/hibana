@@ -84,6 +84,8 @@ type UsageMonth = {
   totals: UsageCounts;
   models: { provider: string; model: string; turns: number }[];
   sites: { published: number; created: number };
+  /** 残っている全期間の数（#116）。月の切り替えでは変わらない。旧 API は返さない。 */
+  all_time?: UsageCounts;
 };
 /** 今日の推計。取得に失敗しても、月の表示は出す。 */
 type TodayState = { data: CostToday | null; error: string | null };
@@ -323,6 +325,11 @@ export function AnalyticsPage({
 const countFormat = new Intl.NumberFormat("ja-JP");
 const count = (n: number) => countFormat.format(n);
 
+/** API が利用状況を数え始めた時刻（#112 の配信）。それより前の分は #116 で一度だけ足した。 */
+const COUNT_STARTED = "2026-10-24 16:16";
+/** #116 で足した分のうち、これより前は Discord の履歴から推定した数。 */
+const ESTIMATED_BEFORE = "2026-10-11";
+
 /** 利用状況（#110）。見出しの月と同じ期間を、API が数えたとおりに出す。 */
 function UsagePanel({
   month,
@@ -356,6 +363,7 @@ function UsagePanel({
   // 料金の欄と同じく、読み込み中は前の表示を薄くして残し、終わったら違う月の数字を出さない。
   const shown = data && (loading || data.month === month) ? data : null;
   const t = shown?.totals;
+  const all = shown?.all_time;
   return (
     <Section
       title="利用状況"
@@ -381,8 +389,16 @@ function UsagePanel({
             {shown.first_day
               ? `${shown.first_day} から記録しています。それより前の利用は数えていません。`
               : "まだ記録がありません。"}
+            {shown.first_day &&
+              shown.first_day < COUNT_STARTED.slice(0, 10) &&
+              `${COUNT_STARTED}（UTC）より前は、残っていたログと Discord の履歴から足した数です。${ESTIMATED_BEFORE} より前は推定で、モデルは「不明」、失敗は 0 としています。`}
           </p>
-          <div className="stats" style={{ "--cols": 3 } as CSSProperties}>
+          <div
+            className="stats"
+            role="group"
+            aria-label="この月"
+            style={{ "--cols": 3 } as CSSProperties}
+          >
             <Stat label="利用ユーザー数" value={`${count(t.users)} 人`}>
               <p className="stat-note">
                 Administrator を除くと {count(t.users_excluding_admins)} 人
@@ -450,6 +466,25 @@ function UsagePanel({
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+          {all && shown.first_day && (
+            <div className="usage-all-time" role="group" aria-label="累計">
+              <p className="note">
+                累計（{shown.first_day}{" "}
+                から今まで。月を切り替えても変わりません）
+              </p>
+              <div className="stats" style={{ "--cols": 2 } as CSSProperties}>
+                <Stat label="利用ユーザー数" value={`${count(all.users)} 人`}>
+                  <p className="stat-note">
+                    Administrator を除くと {count(all.users_excluding_admins)}{" "}
+                    人
+                  </p>
+                </Stat>
+                <Stat label="ターン数" value={count(all.turns)}>
+                  <p className="stat-note">うち失敗 {count(all.failed)}</p>
+                </Stat>
+              </div>
             </div>
           )}
         </div>

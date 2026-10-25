@@ -698,6 +698,8 @@ function usageFixture(month: string) {
         ]
       : [{ provider: "anthropic", model: "claude-haiku-5-5", turns: 5 }],
     sites: { published: 6, created: october ? 2 : 1 },
+    // Every day kept, the same whichever month is asked for (#116).
+    all_time: { turns: 120, failed: 3, users: 9, users_excluding_admins: 8 },
   };
 }
 
@@ -715,8 +717,9 @@ test.describe("usage (#110)", () => {
     await page.goto("/analytics");
     const section = usageSection(page);
     await expect(section).toBeVisible();
+    const month = section.getByRole("group", { name: "この月" });
     const stat = (label: string) =>
-      section
+      month
         .locator(".stat")
         .filter({ has: page.locator(".stat-label", { hasText: label }) });
     await expect(stat("利用ユーザー数")).toContainText("5 人");
@@ -737,6 +740,19 @@ test.describe("usage (#110)", () => {
     await expect(models.first()).toContainText("claude-opus-5-5");
     await expect(models.first()).toContainText("35");
     await expect(section).toContainText("2026-09-20 から記録");
+    // The days before the count started were added once from what was left
+    // (#116), and the page says which of them are estimates.
+    await expect(section).toContainText(
+      "2026-10-24 16:16（UTC）より前は、残っていたログと Discord の履歴から足した数です",
+    );
+    await expect(section).toContainText("2026-10-11 より前は推定");
+    // All time, apart from the month (#116).
+    const all = section.getByRole("group", { name: "累計" });
+    await expect(all).toContainText("2026-09-20 から今まで");
+    await expect(all).toContainText("9 人");
+    await expect(all).toContainText("Administrator を除くと 8 人");
+    await expect(all).toContainText("120");
+    await expect(all).toContainText("うち失敗 3");
     // The page never shows who: the API sends no IDs, and nothing here lists people.
     await expect(section).not.toContainText("owner");
     await expect(section.locator(".analytics-report")).toHaveAttribute(
@@ -751,10 +767,29 @@ test.describe("usage (#110)", () => {
     // The section follows the month the cost report shows.
     await page.getByRole("button", { name: "前の月" }).click();
     await expect(stat("ターン数")).toContainText("5");
+    await expect(all).toContainText("120");
     await expect(stat("公開サイト")).toContainText("この月に作られたサイト 1");
     // The section always names the month it shows (the cost report's).
     // The dev server's StrictMode runs the first load twice, hence the set.
     expect([...new Set(usageMonths)]).toEqual(["2026-10", "2026-09"]);
+  });
+
+  test("counting that began with the API says nothing of added days, and an older API shows no all-time block", async ({
+    page,
+  }) => {
+    await mockApi(page, byMonth, {
+      me: { can_view_usage: true },
+      usage: (month) => {
+        const { all_time: _, ...rest } = usageFixture(month ?? "2026-10");
+        return { json: { ...rest, first_day: "2026-10-24" } };
+      },
+    });
+    await page.goto("/analytics");
+    const section = usageSection(page);
+    await expect(section).toContainText("2026-10-24 から記録");
+    await expect(section).not.toContainText("足した数");
+    await expect(section.getByRole("group", { name: "この月" })).toBeVisible();
+    await expect(section.getByRole("group", { name: "累計" })).toHaveCount(0);
   });
 
   test("a failed read of the usage keeps the cost report and says so", async ({

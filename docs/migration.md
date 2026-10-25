@@ -59,7 +59,7 @@ Vercelの両プロジェクトではRoot Directory外のソースをビルド対
 
 静的サイトは `STATIC_SITE_ENABLED=true` と `STATIC_SITE_BASE_URL`、公開用リバースプロキシが必要です。`/s/` をAPIやダッシュボードと別オリジンで配信します。
 
-`STATIC_SITE_ORIGIN_TEMPLATE`（例: `https://{token}.example.com`）を設定すると、サイトごとに別のオリジンで配信し、CSP の sandbox に `allow-same-origin` を足します。これでサイトのスクリプトが cookie と localStorage を使えます（#87）。設定しない場合は、全サイトが同じオリジンを共有するので、sandbox のオリジンは opaque のままで、cookie と localStorage は使えません。設定すると、`STATIC_SITE_BASE_URL` の `/s/<token>/` へのアクセスは新しいオリジンへ 308 で転送し、公開済みのサイトの URL も次の起動から新しい形になります。ワイルドカードの DNS と証明書、`Host` を保ったまま bot へ渡すリバースプロキシが要ります。サイトは API やダッシュボードと別の登録ドメインに置きます。同じ登録ドメインだと、サイトのスクリプトが親ドメイン付きの cookie を書いて、API のセッション cookie を上書きできてしまいます。サイト同士も、親ドメイン付きの cookie は共有します（localStorage は分かれます）。botログは日付ごとに保存し、14日で回収します。
+`STATIC_SITE_ORIGIN_TEMPLATE`（例: `https://{token}.example.com`）を設定すると、サイトごとに別のオリジンで配信し、CSP の sandbox に `allow-same-origin` を足します。これでサイトのスクリプトが cookie と localStorage を使えます（#87）。設定しない場合は、全サイトが同じオリジンを共有するので、sandbox のオリジンは opaque のままで、cookie と localStorage は使えません。設定すると、`STATIC_SITE_BASE_URL` の `/s/<token>/` へのアクセスは新しいオリジンへ 308 で転送し、公開済みのサイトの URL も次の起動から新しい形になります。ワイルドカードの DNS と証明書、`Host` を保ったまま bot へ渡すリバースプロキシが要ります。サイトは API やダッシュボードと同じ登録ドメインに置けます（例: `https://{token}.hsincode.com`、#114）。ブラウザはそれらを同じサイトとして扱うので、サイトのスクリプトからのリクエストにもセッション cookie が付き、親ドメイン付きの cookie も書けます。そのため API は、HTTPS ではセッション cookie を `__Host-hibana_session` にして上書きを防ぎ、変更系のリクエスト（`/api/*` と `/auth/*` の GET・HEAD・OPTIONS 以外）は `FRONTEND_ORIGIN` の Origin からだけ受け付けます。防げないこともあります。サイトのスクリプトが親ドメイン付きの大きな cookie を大量に書くと、そのブラウザからダッシュボードと API へのリクエストがヘッダーの上限を超え、cookie を消すまで使えなくなります。サイト同士も、親ドメイン付きの cookie は共有します（localStorage は分かれます）。botログは日付ごとに保存し、14日で回収します。
 
 ## 検証範囲
 

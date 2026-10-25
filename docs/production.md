@@ -21,7 +21,7 @@
 
 APIには新しいNeon DBを使用し（2026-10 に Supabase へ移した。[database.md](database.md)）、VPSに残っていた16サーバー分の設定・個人設定を取り込みました。旧APIはHTTP 402で取得できず、旧DB固有のユーザーロール・セッション・利用停止リスト・監査ログはこの取り込みに含まれません。管理者にはDiscordアプリ所有者を設定しています。ユーザーは新Webで再ログインしてください。
 
-Discord OAuth2 Redirectsには `https://api.bot.hsincode.com/auth/discord/callback` を登録します。VPSのSSH接続先・サービス名・設定パスはgit管理対象外の `.local/deployment.json` を参照します。Botはリダイレクトを拒否するため、VPSの `/etc/hibana/bot.env` の `WEB_API_URL` も `https://api.bot.hsincode.com` に合わせます。APIの `WEB_PUBLIC_BASE_URL` / `FRONTEND_ORIGIN` と Webの `VITE_API_BASE_URL` / `VITE_SITE_URL` は上記カスタムドメインに合わせます。
+Discord OAuth2 Redirectsには `https://api.bot.hsincode.com/auth/discord/callback` を登録します。VPSのSSH接続先・サービス名・設定パスはgit管理対象外の `.local/deployment.json` を参照します。Botはリダイレクトを拒否するため、VPSの `/etc/hibana/bot.env` の `WEB_API_URL` も `https://api.bot.hsincode.com` に合わせます。APIの `WEB_PUBLIC_BASE_URL` / `FRONTEND_ORIGIN` と Webの `VITE_API_BASE_URL` / `VITE_SITE_URL` は上記カスタムドメインに合わせます。APIは変更系のリクエスト（`/api/*` と `/auth/*` のGET・HEAD・OPTIONS以外）を `FRONTEND_ORIGIN` のOriginからだけ受け付け、セッションCookieは `__Host-hibana_session` です（#114）。
 
 ## ドメイン移行の検証（2026-09-20）
 

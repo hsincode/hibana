@@ -52,7 +52,10 @@ async function setup(envOverrides: Partial<WebEnv> = {}) {
 
 function req(path: string, init: RequestInit & { cookie?: string } = {}) {
   const headers = new Headers(init.headers);
-  if (init.cookie) headers.set("cookie", `hibana_session=${init.cookie}`);
+  if (init.cookie)
+    headers.set("cookie", `__Host-hibana_session=${init.cookie}`);
+  // Mutations are taken only from the dashboard (cross-site.test.ts).
+  if (!headers.has("origin")) headers.set("origin", "http://127.0.0.1:5173");
   if (init.body && !headers.has("content-type"))
     headers.set("content-type", "application/json");
   return new Request(`http://127.0.0.1${path}`, { ...init, headers });

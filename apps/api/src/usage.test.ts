@@ -51,8 +51,9 @@ async function setup(now = NOW) {
         method: init.method ?? "GET",
         headers: {
           ...(init.session
-            ? { cookie: `hibana_session=sess-${init.session}` }
+            ? { cookie: `__Host-hibana_session=sess-${init.session}` }
             : {}),
+          origin: "http://127.0.0.1:5173",
           ...(init.body !== undefined
             ? { "content-type": "application/json" }
             : {}),

@@ -591,7 +591,9 @@ describe("GET /api/analytics/cost", () => {
     const get = (path: string, session?: string) =>
       app.handle(
         new Request(`http://127.0.0.1${path}`, {
-          headers: session ? { cookie: `hibana_session=sess-${session}` } : {},
+          headers: session
+            ? { cookie: `__Host-hibana_session=sess-${session}` }
+            : {},
         }),
       );
     return { get, calls: api.calls };

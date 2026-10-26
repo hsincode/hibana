@@ -656,9 +656,7 @@ export class Recorder {
     participants: Map<string, string>,
     signal: AbortSignal,
   ) {
-    const stored = this.o.runtime.textModel(header.guild_id);
-    // What the request will run as: the budget fallback may take it (#89).
-    const selection = this.o.runtime.budgetSelection(stored);
+    const selection = this.o.runtime.textModel(header.guild_id);
     const rows = lines.map(
       (l) => `${elapsed(l.at - header.started_at)} ${l.name}: ${l.text}`,
     );
@@ -677,7 +675,7 @@ export class Recorder {
         { role: "system", content: system },
         { role: "user", content: user },
       ];
-      const reply = await this.o.llm.complete(stored, messages, [], {
+      const reply = await this.o.llm.complete(selection, messages, [], {
         signal,
         // A one-off request: no later request repeats its prefix (#109).
         cache: false,

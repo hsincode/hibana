@@ -196,14 +196,14 @@ export function routeHeader(selection: Selection): string {
   return `Auto Routing: **${modelName(selection, routedEffort(selection.effort) ?? "")}**`;
 }
 
-/** Notice posted in a channel the first time one of its turns runs on the
- *  budget fallback (#89). Discord only, like `routeHeader`. The threshold is
- *  the one the settings API decided with (#95). */
+/** Notice posted in a channel the first time one of its turns runs on what
+ *  the budget switch wrote (#121). Discord only, like `routeHeader`. The
+ *  threshold is the one the settings API decided with (#95). */
 export function budgetHeader(
   selection: Selection,
   thresholdUsd = DEFAULT_BUDGET_FALLBACK_THRESHOLD_USD,
 ): string {
-  return `今月の利用料の残りが ${formatThreshold(thresholdUsd)} を切ったため、**${modelName(selection, selection.effort ?? "")}** で応答します`;
+  return `今月の利用料の残りが ${formatThreshold(thresholdUsd)} を切ったため、Anthropic のモデルを **${modelName(selection, selection.effort ?? "")}** に切り替えました。設定から変更できます`;
 }
 
 type Route = { selection: Selection; at: number };

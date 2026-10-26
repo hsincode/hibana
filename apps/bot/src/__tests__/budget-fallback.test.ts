@@ -1,5 +1,7 @@
-// The budget fallback (#89): while the settings API says this month's budget
-// is low, every `anthropic` request runs on the fallback model.
+// The budget fallback (#89, #121): once the settings API says this month's
+// budget is low, it switches the stored settings to the fallback (tested in
+// apps/api). The bot runs turns on what is stored, and says so once per
+// channel on a turn still on what the switch wrote.
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -8,7 +10,7 @@ import pino from "pino";
 import { budgetHeader } from "../auto-route";
 import { Hibana } from "../bot";
 import { loadConfig } from "../config";
-import { LlmClient, type RequestRecord } from "../llm";
+import { LlmClient } from "../llm";
 import { Runtime, type BudgetState } from "../runtime";
 import type { Context, Json, Message } from "../types";
 
@@ -35,56 +37,40 @@ const opus = {
   effort: "medium",
 };
 
-describe("Runtime.budgetSelection", () => {
-  test("leaves every request alone until the API has said the budget is low", async () => {
+describe("Runtime.onBudgetFallback (#121)", () => {
+  const haikuHigh = {
+    provider: "anthropic",
+    model: "claude-haiku-5-5",
+    effort: "high",
+  };
+  test("false until the API has said the budget is low", async () => {
     const runtime = new Runtime(config());
-    expect(runtime.budgetSelection(opus)).toBe(opus);
+    expect(runtime.onBudgetFallback(haikuHigh)).toBe(false);
     await runtime.setBudget({ ...low, low: false });
-    expect(runtime.budgetSelection(opus)).toBe(opus);
+    expect(runtime.onBudgetFallback(haikuHigh)).toBe(false);
   });
 
-  test("while low, an Anthropic API request of any model, effort or route runs on the default fallback", async () => {
+  test("while low, true only for what the switch writes: the fallback, or its model on Workspace", async () => {
     const runtime = new Runtime(config());
     await runtime.setBudget(low);
-    const haikuHigh = {
-      provider: "anthropic",
-      model: "claude-haiku-5-5",
-      effort: "high",
-    };
-    expect(runtime.budgetSelection(opus)).toEqual(haikuHigh);
+    expect(runtime.onBudgetFallback(haikuHigh)).toBe(true);
     expect(
-      runtime.budgetSelection({ provider: "anthropic", model: "auto" }),
-    ).toEqual(haikuHigh);
-    expect(
-      runtime.budgetSelection({
-        provider: "anthropic",
-        model: "claude-opus-5-5",
-        effort: "high",
-        routed: true,
+      runtime.onBudgetFallback({
+        ...haikuHigh,
+        provider: "anthropic_workspace",
       }),
-    ).toEqual(haikuHigh);
-    expect(
-      runtime.budgetSelection({
-        provider: "anthropic",
-        model: "claude-haiku-5-5",
-        effort: "low",
-      }),
-    ).toEqual(haikuHigh);
-  });
-
-  test("other providers are not switched, Anthropic Workspace and Claude Max included", async () => {
-    const runtime = new Runtime(config());
-    await runtime.setBudget(low);
+    ).toBe(true);
+    // Picked after the switch: no notice, it runs as picked.
     for (const selection of [
-      { provider: "anthropic_workspace", model: "claude-opus-5-5" },
-      { provider: "claude_max", model: "claude-opus-5-5" },
-      { provider: "claude_kiro", model: "claude-sonnet-5" },
-      { provider: "deepseek", model: "deepseek-flash" },
+      { ...haikuHigh, effort: "xhigh" },
+      opus,
+      { provider: "anthropic", model: "auto" },
+      { provider: "claude_max", model: "claude-haiku-5-5", effort: "high" },
     ])
-      expect(runtime.budgetSelection(selection)).toBe(selection);
+      expect(runtime.onBudgetFallback(selection)).toBe(false);
   });
 
-  test("runs the model the dashboard chose, or the default when that one was hidden since", async () => {
+  test("names the model the dashboard chose, or the default when that one was hidden since", async () => {
     const runtime = new Runtime(config());
     await runtime.setBudget(low);
     runtime.replace(
@@ -94,20 +80,19 @@ describe("Runtime.budgetSelection", () => {
       },
       false,
     );
-    expect(runtime.budgetSelection(opus)).toEqual({
+    const sonnet = {
       provider: "anthropic",
       model: "claude-sonnet-5-5",
       effort: "medium",
-    });
+    };
+    expect(runtime.budgetFallback()).toEqual(sonnet);
+    expect(runtime.onBudgetFallback(sonnet)).toBe(true);
+    expect(runtime.onBudgetFallback(haikuHigh)).toBe(false);
     runtime.replace(
       { ...runtime.snapshot, unpublished_presets: ["anthropic-sonnet-5-5"] },
       false,
     );
-    expect(runtime.budgetSelection(opus)).toEqual({
-      provider: "anthropic",
-      model: "claude-haiku-5-5",
-      effort: "high",
-    });
+    expect(runtime.budgetFallback()).toEqual(haikuHigh);
     // A value the catalog no longer knows is the default too.
     runtime.replace(
       {
@@ -117,11 +102,7 @@ describe("Runtime.budgetSelection", () => {
       },
       false,
     );
-    expect(runtime.budgetSelection(opus)).toEqual({
-      provider: "anthropic",
-      model: "claude-haiku-5-5",
-      effort: "high",
-    });
+    expect(runtime.budgetFallback()).toEqual(haikuHigh);
   });
 
   test("a snapshot from the API does not carry the budget, so it keeps the bot's last answer", async () => {
@@ -154,60 +135,26 @@ describe("Runtime.budgetSelection", () => {
     const second = new Runtime(config(path));
     await second.load();
     expect(second.budgetLow()).toBe(true);
-    expect(second.budgetSelection(opus).model).toBe("claude-haiku-5-5");
   });
 });
 
-describe("LlmClient budget hook", () => {
-  test("swaps the model and effort that are sent and recorded; other providers are sent as they were", async () => {
-    const runtime = new Runtime(config());
-    await runtime.setBudget(low);
-    const bodies: Json[] = [];
-    const records: RequestRecord[] = [];
-    const client = new LlmClient(
-      config(),
-      async (_url, init) => {
-        bodies.push(JSON.parse(String(init?.body)));
-        return Response.json({
-          content: [{ type: "text", text: "ok" }],
-          stop_reason: "end_turn",
-          usage: { input_tokens: 3, output_tokens: 1 },
-        });
-      },
-      {
-        budgetSelection: (s) => runtime.budgetSelection(s),
-        onCompletion: (r) => records.push(r),
-      },
-    );
-    await client.complete(opus, [{ role: "user", content: "Hi" }], []);
-    expect(bodies[0].model).toBe("claude-haiku-5-5");
-    expect(bodies[0].output_config).toEqual({ effort: "high" });
-    expect(records[0]).toMatchObject({
-      provider: "anthropic",
-      model: "claude-haiku-5-5",
+test("while low, LlmClient sends the model and effort it is given (#121)", async () => {
+  const bodies: Json[] = [];
+  const client = new LlmClient(config(), async (_url, init) => {
+    bodies.push(JSON.parse(String(init?.body)));
+    return Response.json({
+      content: [{ type: "text", text: "ok" }],
+      stop_reason: "end_turn",
+      usage: { input_tokens: 3, output_tokens: 1 },
     });
-
-    // The auto preset is not a wire id; it is replaced before the swap.
-    await client.complete(
-      { provider: "anthropic", model: "auto" },
-      [{ role: "user", content: "Hi" }],
-      [],
-    );
-    expect(bodies[1].model).toBe("claude-haiku-5-5");
-
-    await client.complete(
-      { provider: "claude_max", model: "claude-opus-5-5", effort: "medium" },
-      [{ role: "user", content: "Hi" }],
-      [],
-    );
-    expect(bodies[2].model).toBe("claude-opus-5-5");
-    expect(bodies[2].output_config).toEqual({ effort: "medium" });
-
-    // Back above the threshold: the stored model again.
-    await runtime.setBudget({ ...low, low: false });
-    await client.complete(opus, [{ role: "user", content: "Hi" }], []);
-    expect(bodies[3].model).toBe("claude-opus-5-5");
   });
+  await client.complete(
+    { provider: "anthropic", model: "claude-haiku-5-5", effort: "xhigh" },
+    [{ role: "user", content: "Hi" }],
+    [],
+  );
+  expect(bodies[0].model).toBe("claude-haiku-5-5");
+  expect(bodies[0].output_config).toEqual({ effort: "xhigh" });
 });
 
 test("the Discord notice names the threshold and the model", () => {
@@ -218,7 +165,7 @@ test("the Discord notice names the threshold and the model", () => {
       effort: "high",
     }),
   ).toBe(
-    "今月の利用料の残りが $10 を切ったため、**Haiku 5.5 High** で応答します",
+    "今月の利用料の残りが $10 を切ったため、Anthropic のモデルを **Haiku 5.5 High** に切り替えました。設定から変更できます",
   );
   expect(
     budgetHeader({
@@ -227,7 +174,7 @@ test("the Discord notice names the threshold and the model", () => {
       effort: "max",
     }),
   ).toBe(
-    "今月の利用料の残りが $10 を切ったため、**Opus 5.5 Max** で応答します",
+    "今月の利用料の残りが $10 を切ったため、Anthropic のモデルを **Opus 5.5 Max** に切り替えました。設定から変更できます",
   );
   // The threshold an Administrator stored (#95).
   expect(
@@ -236,7 +183,7 @@ test("the Discord notice names the threshold and the model", () => {
       25,
     ),
   ).toBe(
-    "今月の利用料の残りが $25 を切ったため、**Haiku 5.5 High** で応答します",
+    "今月の利用料の残りが $25 を切ったため、Anthropic のモデルを **Haiku 5.5 High** に切り替えました。設定から変更できます",
   );
   expect(
     budgetHeader(
@@ -244,23 +191,23 @@ test("the Discord notice names the threshold and the model", () => {
       7.5,
     ),
   ).toBe(
-    "今月の利用料の残りが $7.50 を切ったため、**Haiku 5.5 High** で応答します",
+    "今月の利用料の残りが $7.50 を切ったため、Anthropic のモデルを **Haiku 5.5 High** に切り替えました。設定から変更できます",
   );
 });
 
-test("a turn on the auto preset skips routing, says so once, and keeps its conversation for afterwards", async () => {
+function turnBot(env: Record<string, string>) {
   const dir = mkdtempSync(join(tmpdir(), "hibana-budget-turn-"));
   dirs.push(dir);
   const bot = new Hibana(
     loadConfig({
       HIBANA_DATA_DIR: dir,
       PROVIDER: "anthropic",
-      LLM_MODEL: "auto",
       ANTHROPIC_API_KEY: "anthropic-fixture",
       JEV_API_KEY: "jev-fixture",
       SANDBOX_ENABLED: "false",
       SKILLS_ENABLED: "false",
       LOG_DIR: "",
+      ...env,
     }),
     pino({ enabled: false }),
   );
@@ -316,33 +263,48 @@ test("a turn on the auto preset skips routing, says so once, and keeps its conve
     };
   };
   const notices = () => sent.filter((text) => text.startsWith("今月の利用料"));
-  await bot.runtime.setBudget(low);
-  await bot.respond("難しい設計の相談", { ...ctx });
-  await bot.respond("続けて", { ...ctx });
-  expect(used).toEqual(["claude-haiku-5-5/high", "claude-haiku-5-5/high"]);
-  // Jev is not asked for a route the request would not use.
-  expect(routings).toBe(0);
-  expect(notices()).toEqual([
-    "今月の利用料の残りが $10 を切ったため、**Haiku 5.5 High** で応答します",
+  return { bot, ctx, sent, used, seen, notices, routings: () => routings };
+}
+
+test("while low, a model picked after the switch runs as picked, without a notice", async () => {
+  const t = turnBot({ LLM_MODEL: "claude-haiku-5-5", LLM_EFFORT: "xhigh" });
+  await t.bot.runtime.setBudget(low);
+  await t.bot.respond("こんにちは", { ...t.ctx });
+  expect(t.used).toEqual(["claude-haiku-5-5/xhigh"]);
+  expect(t.notices()).toEqual([]);
+});
+
+test("while low, the auto preset picked again routes as usual", async () => {
+  const t = turnBot({ LLM_MODEL: "auto" });
+  await t.bot.runtime.setBudget(low);
+  await t.bot.respond("難しい設計の相談", { ...t.ctx });
+  expect(t.routings()).toBe(1);
+  expect(t.used).toEqual(["claude-opus-5-5/high"]);
+  expect(t.notices()).toEqual([]);
+});
+
+test("a turn on what the switch wrote says so once per channel, and again after the next switch", async () => {
+  const t = turnBot({ LLM_MODEL: "claude-haiku-5-5", LLM_EFFORT: "high" });
+  await t.bot.runtime.setBudget(low);
+  await t.bot.respond("難しい設計の相談", { ...t.ctx });
+  await t.bot.respond("続けて", { ...t.ctx });
+  expect(t.used).toEqual(["claude-haiku-5-5/high", "claude-haiku-5-5/high"]);
+  expect(t.notices()).toEqual([
+    "今月の利用料の残りが $10 を切ったため、Anthropic のモデルを **Haiku 5.5 High** に切り替えました。設定から変更できます",
   ]);
-  expect(sent.some((text) => text.startsWith("Auto Routing"))).toBe(false);
+  // The same conversation continues: the notice is not in the history.
+  expect(JSON.stringify(t.seen.at(-1))).toContain("難しい設計の相談");
+  expect(JSON.stringify(t.seen.at(-1))).not.toContain("今月の利用料");
 
-  // The budget is back: the auto preset routes again, and the conversation
-  // filed under it is the one the fallback turns added to.
-  await bot.runtime.setBudget({ ...low, low: false });
-  await bot.respond("Opus でまとめて", { ...ctx });
-  expect(routings).toBe(1);
-  expect(used.at(-1)).toBe("claude-opus-5-5/high");
-  const history = JSON.stringify(seen.at(-1));
-  expect(history).toContain("難しい設計の相談");
-  expect(history).toContain("続けて");
-
-  // A later fallback is announced again, with the threshold the API decided
-  // with (#95).
-  await bot.runtime.setBudget({ ...low, threshold_usd: 25 });
-  await bot.respond("もう一度", { ...ctx });
-  expect(notices()).toHaveLength(2);
-  expect(notices().at(-1)).toBe(
-    "今月の利用料の残りが $25 を切ったため、**Haiku 5.5 High** で応答します",
+  // The budget is back, then low again, with the threshold the API decided
+  // with (#95): announced again.
+  await t.bot.runtime.setBudget({ ...low, low: false });
+  await t.bot.respond("まだ続く", { ...t.ctx });
+  expect(t.notices()).toHaveLength(1);
+  await t.bot.runtime.setBudget({ ...low, threshold_usd: 25 });
+  await t.bot.respond("もう一度", { ...t.ctx });
+  expect(t.notices()).toHaveLength(2);
+  expect(t.notices().at(-1)).toBe(
+    "今月の利用料の残りが $25 を切ったため、Anthropic のモデルを **Haiku 5.5 High** に切り替えました。設定から変更できます",
   );
 });

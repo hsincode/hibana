@@ -5,6 +5,12 @@ import { describe, expect, test } from "bun:test";
 import { createApp } from "./create-app";
 import { loadTestEnv } from "./env";
 import { MemoryStore } from "./store";
+import {
+  applyPatch,
+  applyUserOverridePatch,
+  emptyUserOverride,
+  type GuildPatch,
+} from "@hibana/shared/settings";
 
 const ADMIN_KEY = "sk-ant-admin01-test-key";
 const NOW = Date.parse("2026-10-09T03:00:00Z");
@@ -486,5 +492,165 @@ describe("budget threshold (#95)", () => {
     expect(
       await (await call("/internal/budget", { headers: INTERNAL })).json(),
     ).toMatchObject({ threshold_usd: 10, low: true });
+  });
+});
+
+describe("the settings switch once the budget is low (#121)", () => {
+  // $9 left after today: below the default $10.
+  const low = () => setup(ADMIN_KEY, anthropic("18500", 1_500_000));
+  const poll = async (call: Awaited<ReturnType<typeof setup>>["call"]) => {
+    const res = await call("/internal/budget", { headers: INTERNAL });
+    expect(res.status).toBe(200);
+    return res.json();
+  };
+  const seed = async (store: MemoryStore, id: string, patch: GuildPatch) =>
+    store.putGuild(id, applyPatch(await store.getGuild(id), patch));
+
+  test("going below the threshold rewrites Anthropic API and Workspace choices, once", async () => {
+    const { call, store } = await low();
+    // The Workspace presets ship unpublished; the owner publishes them.
+    await store.setMeta(
+      "preset_visibility",
+      JSON.stringify({
+        "anthropic-workspace-haiku-5-5": true,
+        "anthropic-workspace-opus-5-5": true,
+      }),
+    );
+    await seed(store, "api", { preset: "anthropic-opus-5-5", effort: "max" });
+    await seed(store, "workspace", {
+      preset: "anthropic-workspace-opus-5-5",
+      effort: "max",
+      ultra_mode: true,
+    });
+    await seed(store, "other", { preset: "opus-5-5", effort: "max" });
+    await store.putUserOverride(
+      "123456789012",
+      applyUserOverridePatch(emptyUserOverride(), {
+        preset: "anthropic-sonnet-5-5",
+        effort: "xhigh",
+      }),
+    );
+    const before = await store.version();
+    expect((await poll(call)).low).toBe(true);
+    expect(await store.version()).toBeGreaterThan(before);
+    expect((await store.getGuild("api")).selection).toEqual({
+      provider: "anthropic",
+      model: "claude-haiku-5-5",
+      effort: "high",
+    });
+    const workspace = await store.getGuild("workspace");
+    expect(workspace.selection).toEqual({
+      provider: "anthropic_workspace",
+      model: "claude-haiku-5-5",
+      effort: "high",
+    });
+    expect(workspace.ultra_mode).toBe(false);
+    const other = await store.getGuild("other");
+    expect(other.selection?.model).toBe("claude-opus-5-5");
+    expect(other.effort).toBe("max");
+    expect((await store.getUserOverride("123456789012")).selection).toEqual({
+      provider: "anthropic",
+      model: "claude-haiku-5-5",
+      effort: "high",
+    });
+
+    // Picked afterwards, while still low: kept, and not swapped by a later poll.
+    await seed(store, "api", {
+      preset: "anthropic-haiku-5-5",
+      effort: "xhigh",
+    });
+    const picked = await store.version();
+    expect((await poll(call)).low).toBe(true);
+    expect((await store.getGuild("api")).effort).toBe("xhigh");
+    expect(await store.version()).toBe(picked);
+  });
+
+  test("with the Workspace preset of the fallback unpublished, a Workspace server takes the fallback itself", async () => {
+    const { call, store } = await low();
+    await seed(store, "workspace", {
+      preset: "anthropic-workspace-opus-5-5",
+      ultra_mode: true,
+    });
+    await poll(call);
+    const row = await store.getGuild("workspace");
+    expect(row.selection).toEqual({
+      provider: "anthropic",
+      model: "claude-haiku-5-5",
+      effort: "high",
+    });
+    expect(row.ultra_mode).toBe(false);
+  });
+
+  test("the stored fallback is what the settings take", async () => {
+    const { call, store } = await low();
+    await store.setMeta(
+      "budget_fallback",
+      JSON.stringify({ preset: "anthropic-sonnet-5-5", effort: "medium" }),
+    );
+    await seed(store, "api", { preset: "anthropic-opus-5-5" });
+    await poll(call);
+    expect((await store.getGuild("api")).selection).toEqual({
+      provider: "anthropic",
+      model: "claude-sonnet-5-5",
+      effort: "medium",
+    });
+  });
+
+  test("not put back when the budget recovers; going below again switches again", async () => {
+    const { call, store } = await low();
+    await seed(store, "api", { preset: "anthropic-opus-5-5" });
+    await poll(call);
+    // An Administrator lowers the threshold: $9 left is no longer low.
+    await store.setMeta("budget_fallback_threshold", "5");
+    await seed(store, "api", { preset: "anthropic-opus-5-5" });
+    expect((await poll(call)).low).toBe(false);
+    expect((await store.getGuild("api")).selection?.model).toBe(
+      "claude-opus-5-5",
+    );
+    await store.setMeta("budget_fallback_threshold", "10");
+    expect((await poll(call)).low).toBe(true);
+    expect((await store.getGuild("api")).selection?.model).toBe(
+      "claude-haiku-5-5",
+    );
+  });
+
+  test("no decision, no switch: without an Admin API key or with a failed report", async () => {
+    const none = await setup(null);
+    await seed(none.store, "api", { preset: "anthropic-opus-5-5" });
+    await poll(none.call);
+    expect((await none.store.getGuild("api")).selection?.model).toBe(
+      "claude-opus-5-5",
+    );
+    const failed = await setup(
+      ADMIN_KEY,
+      anthropic("0", 0, new Response("{}", { status: 500 })),
+    );
+    await seed(failed.store, "api", { preset: "anthropic-opus-5-5" });
+    expect(
+      (await failed.call("/internal/budget", { headers: INTERNAL })).status,
+    ).toBe(502);
+    expect((await failed.store.getGuild("api")).selection?.model).toBe(
+      "claude-opus-5-5",
+    );
+  });
+
+  test("a switch that fails is not marked done, so the next poll tries again", async () => {
+    const { call, store } = await low();
+    await seed(store, "api", { preset: "anthropic-opus-5-5" });
+    const put = store.putGuild.bind(store);
+    let fail = true;
+    store.putGuild = async (id, row) => {
+      if (fail) throw new Error("database down");
+      return put(id, row);
+    };
+    expect((await call("/internal/budget", { headers: INTERNAL })).status).toBe(
+      500,
+    );
+    expect(await store.getMeta("budget_fallback_switched")).toBe("false");
+    fail = false;
+    await poll(call);
+    expect((await store.getGuild("api")).selection?.model).toBe(
+      "claude-haiku-5-5",
+    );
   });
 });

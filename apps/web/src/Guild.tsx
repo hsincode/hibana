@@ -18,10 +18,9 @@ import { AgentSections, guildEffective } from "./Agent";
 import { GuildArtifacts } from "./Artifacts";
 import { Select } from "./controls";
 import { roleAllows } from "./ModelPicker";
-import { contextWindow } from "@hibana/shared/catalog";
 import {
   DEFAULT_TEXT_MODEL,
-  DEFAULT_THREAD_COMPACTION_PERCENT,
+  DEFAULT_THREAD_COMPACTION_TOKENS,
   TEXT_MODEL_EFFORTS,
   THREAD_COMPACTION_MODES,
   isTextModelPreset,
@@ -267,18 +266,6 @@ const COMPACTION_LABELS: Record<ThreadCompactionMode, string> = {
   off: "要約しない",
 };
 
-/** このサーバーのモデルで、要約を始める大きさ。 */
-function compactionHint(
-  percent: number,
-  selection: { provider: string; model: string } | undefined,
-): string {
-  const window = contextWindow(selection);
-  if (!window)
-    return "このモデルはウィンドウの大きさが分からないので、10 万トークン（THREAD_COMPACTION_TOKENS）で要約します。";
-  const tokens = Math.floor((window * percent) / 100);
-  return `1〜100。このモデルでは ${tokens.toLocaleString("ja-JP")} トークン（ウィンドウ ${window.toLocaleString("ja-JP")} の ${percent}%）を超えたら要約します。`;
-}
-
 const DEFAULT_MCP_URL = "https://ww.hsincode.com/api/mcp";
 
 /** ツールと挙動: チューニング・MCP・挙動・トリガー。 */
@@ -315,7 +302,7 @@ function ToolsSections({
     field:
       | "temperature"
       | "thread_history_max_age_secs"
-      | "thread_compaction_percent",
+      | "thread_compaction_tokens",
     row: string,
   ) => {
     // Empty input has no saved meaning; restore the visible
@@ -425,33 +412,28 @@ function ToolsSections({
             </Select>
           </Row>
           <Row
-            k="g-compaction-percent"
-            name="要約を始める大きさ（ウィンドウの %）"
-            htmlFor="g-compaction-percent-in"
-            hint={compactionHint(
-              s.thread_compaction_percent ?? DEFAULT_THREAD_COMPACTION_PERCENT,
-              s.selection?.provider && s.selection.model
-                ? { provider: s.selection.provider, model: s.selection.model }
-                : undefined,
-            )}
+            k="g-compaction-tokens"
+            name="要約を始める大きさ（トークン）"
+            htmlFor="g-compaction-tokens-in"
+            hint={`1,000〜1,000,000。履歴（システムとツールの定義を除く）の推定がこれを超えたら要約し、新しい方の半分をそのまま残します。既定 ${DEFAULT_THREAD_COMPACTION_TOKENS.toLocaleString("ja-JP")}。`}
           >
             <input
               className="input mono"
-              id="g-compaction-percent-in"
+              id="g-compaction-tokens-in"
               type="number"
               inputMode="numeric"
-              min={1}
-              max={100}
-              step={1}
+              min={1000}
+              max={1_000_000}
+              step={1000}
               disabled={s.thread_compaction === "off"}
               defaultValue={
-                s.thread_compaction_percent ?? DEFAULT_THREAD_COMPACTION_PERCENT
+                s.thread_compaction_tokens ?? DEFAULT_THREAD_COMPACTION_TOKENS
               }
               onBlur={(e) =>
                 saveNumber(
                   e.target,
-                  "thread_compaction_percent",
-                  "g-compaction-percent",
+                  "thread_compaction_tokens",
+                  "g-compaction-tokens",
                 )
               }
             />

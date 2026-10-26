@@ -1167,7 +1167,7 @@ export class ToolRegistry {
         // The summary fields change only themselves (#124); the retention is
         // written when asked for, or when nothing else is.
         const summary =
-          a.compaction !== undefined || a.compaction_percent !== undefined;
+          a.compaction !== undefined || a.compaction_tokens !== undefined;
         const age =
           a.reset ||
           a.seconds !== undefined ||
@@ -1187,9 +1187,9 @@ export class ToolRegistry {
                 thread_compaction:
                   a.compaction === "reset" ? null : a.compaction,
               }),
-          ...(a.compaction_percent === undefined
+          ...(a.compaction_tokens === undefined
             ? {}
-            : { thread_compaction_percent: Number(a.compaction_percent) }),
+            : { thread_compaction_tokens: Number(a.compaction_tokens) }),
         };
       }
       if (name === "set_triggers") {

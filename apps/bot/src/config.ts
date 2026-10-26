@@ -401,7 +401,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
       Math.floor(numberEnv(env, "HISTORY_MAX_TOKENS", 160000, 1000) / 2),
     ),
     threadHistoryAge: numberEnv(env, "THREAD_HISTORY_MAX_AGE_SECS", 3600),
-    compactionTokens: numberEnv(env, "THREAD_COMPACTION_TOKENS", 100000, 1000),
+    // The summary size of a DM and of a server row created by the bot; a
+    // server's own setting wins (#124). Estimated tokens of the history.
+    compactionTokens: numberEnv(
+      env,
+      "THREAD_COMPACTION_TOKENS",
+      30000,
+      1000,
+      1_000_000,
+    ),
     extraTriggers: (env.EXTRA_TRIGGERS || "")
       .split(",")
       .map((x) => x.trim())

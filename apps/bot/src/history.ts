@@ -1,8 +1,6 @@
-import { compactionThreshold } from "@hibana/shared/catalog";
-import {
-  DEFAULT_THREAD_COMPACTION_PERCENT,
-  type ServiceTier,
-  type ThreadCompactionMode,
+import type {
+  ServiceTier,
+  ThreadCompactionMode,
 } from "@hibana/shared/settings";
 import type { Config, Selection } from "./config";
 import type { ConversationStore } from "./conversation-store";
@@ -30,28 +28,22 @@ export type CompactionPrefix = {
 /** How a thread is summarized, and at what size (#124). */
 export type CompactionPolicy = {
   mode: ThreadCompactionMode;
-  /** Tokens. Compared with the size of the conversation's last request. */
+  /** Estimated tokens of the history, as `info().estimated_tokens` counts. */
   threshold: number;
 };
 
-/** A server's setting and the turn's model give the policy. A model without
- *  a known window is summarized at `fallback` tokens
+/** A server's setting gives the policy; an unset size is `fallback`
  *  (`THREAD_COMPACTION_TOKENS`). */
 export function compactionPolicy(
   settings: {
     thread_compaction?: ThreadCompactionMode | null;
-    thread_compaction_percent?: number | null;
+    thread_compaction_tokens?: number | null;
   },
-  selection: { provider: string; model: string } | null | undefined,
   fallback: number,
 ): CompactionPolicy {
   return {
     mode: settings.thread_compaction ?? "cache",
-    threshold: compactionThreshold(
-      selection,
-      settings.thread_compaction_percent ?? DEFAULT_THREAD_COMPACTION_PERCENT,
-      fallback,
-    ),
+    threshold: settings.thread_compaction_tokens ?? fallback,
   };
 }
 
@@ -247,11 +239,10 @@ export class History {
   ) {
     if (policy.mode === "off") return;
     const e = this.entry(channelId);
-    if (!e) return;
-    // The provider's count for the last request (system, tools and history)
-    // when there is one; otherwise the estimate of the history alone.
-    const size = e.usage?.context_tokens || total(e.turns);
-    if (size <= policy.threshold) return;
+    // The estimate of the history alone. The system part and the tool
+    // definitions (about 38,000 tokens on Anthropic) are not in it, so a small
+    // size does not summarize on every turn (#124).
+    if (!e || total(e.turns) <= policy.threshold) return;
     // Keep the newest turns within half the budget (estimated), so the thread
     // can grow for many turns before the next summary rewrites its head.
     let from = e.turns.length - 1;
@@ -332,13 +323,7 @@ export class History {
       summary: true,
     };
     e.turns = [{ ...head, messages }, ...e.turns.slice(from)];
-    // The measured size was of the conversation before the summary. Until the
-    // next turn measures again, the estimate stands in (#124).
-    if (e.usage) {
-      const { context_tokens: _before, ...rest } = e.usage;
-      e.usage = rest;
-    }
-    this.store?.replaceHead(channelId, { ...head, json }, e.usage);
+    this.store?.replaceHead(channelId, { ...head, json });
     // Backstop for a thread whose newest turns alone exceed the limit.
     this.trim(channelId, e);
   }

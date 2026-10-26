@@ -153,9 +153,9 @@ export type GuildSettings = Record<string, unknown> & {
   temperature?: number | null;
   exa_mode?: string | null;
   thread_history_max_age_secs?: number | null;
-  /** スレッドの要約の方式と、始める大きさ（ウィンドウの %）（#124）。旧 API は返さない。 */
+  /** スレッドの要約の方式と、始める大きさ（履歴の推定トークン数）（#124）。旧 API は返さない。 */
   thread_compaction?: ThreadCompactionMode | null;
-  thread_compaction_percent?: number | null;
+  thread_compaction_tokens?: number | null;
   extra_triggers?: string[] | null;
   disabled_triggers?: string[];
   context?: { text: string; persona_override: boolean } | null;

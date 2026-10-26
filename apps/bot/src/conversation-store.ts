@@ -267,19 +267,14 @@ export class ConversationStore {
         .run(channelId, seq),
     );
   }
-  /** Compaction: everything older than the summary's slot becomes the
-   *  summary. `usage` replaces the channel's figure when given. */
-  replaceHead(channelId: string, summary: NewTurn, usage?: Usage) {
+  /** Compaction: everything older than the summary's slot becomes the summary. */
+  replaceHead(channelId: string, summary: NewTurn) {
     this.guard((db) =>
       db.transaction(() => {
         db.query(
           "DELETE FROM history_turns WHERE channel_id = ? AND seq <= ?",
         ).run(channelId, summary.seq);
         this.insertTurn(db, channelId, summary);
-        if (usage)
-          db.query(
-            "UPDATE history_channels SET usage = ? WHERE channel_id = ?",
-          ).run(JSON.stringify(usage), channelId);
       })(),
     );
   }

@@ -40,9 +40,14 @@ export const exaSchema = z.enum(EXA_MODES);
 export const THREAD_COMPACTION_MODES = ["cache", "transcript", "off"] as const;
 export type ThreadCompactionMode = (typeof THREAD_COMPACTION_MODES)[number];
 export const threadCompactionSchema = z.enum(THREAD_COMPACTION_MODES);
-/** The share of the model's context window at which a thread is summarized. */
-export const threadCompactionPercentSchema = z.number().int().min(1).max(100);
-export const DEFAULT_THREAD_COMPACTION_PERCENT = 90;
+/** The size of a thread's history (estimated tokens, without the system part
+ *  and the tool definitions) above which it is summarized. */
+export const threadCompactionTokensSchema = z
+  .number()
+  .int()
+  .min(1000)
+  .max(1_000_000);
+export const DEFAULT_THREAD_COMPACTION_TOKENS = 30_000;
 
 // A subagent or a Multi-Agent role is one of Hibana's own children, which is
 // a single model request. Anthropic Workspace only runs as a Managed Agents
@@ -291,9 +296,9 @@ export const guildPatchSchema = z
     temperature: z.number().min(0).max(2).nullable(),
     exa_mode: exaSchema.nullable(),
     thread_history_max_age_secs: z.number().int().min(0).nullable(),
-    // null returns to the default (`cache`, 90%).
+    // null returns to the default (`cache`, 30,000 tokens).
     thread_compaction: threadCompactionSchema.nullable(),
-    thread_compaction_percent: threadCompactionPercentSchema.nullable(),
+    thread_compaction_tokens: threadCompactionTokensSchema.nullable(),
     extra_triggers: z
       .array(triggerWordSchema)
       .max(TRIGGER_EXTRA_MAX)
@@ -336,7 +341,7 @@ export type GuildRow = {
   exa_mode: string | null;
   thread_history_max_age_secs: number | null;
   thread_compaction: ThreadCompactionMode;
-  thread_compaction_percent: number;
+  thread_compaction_tokens: number;
 };
 
 export const emptyGuild = (): GuildRow => ({
@@ -367,7 +372,7 @@ export const emptyGuild = (): GuildRow => ({
   exa_mode: "auto",
   thread_history_max_age_secs: 3600,
   thread_compaction: "cache",
-  thread_compaction_percent: DEFAULT_THREAD_COMPACTION_PERCENT,
+  thread_compaction_tokens: DEFAULT_THREAD_COMPACTION_TOKENS,
 });
 
 export function modelEffort(model: string): string {
@@ -434,6 +439,9 @@ export function settingsDefaults(
   row.thread_history_max_age_secs = env.THREAD_HISTORY_MAX_AGE_SECS?.trim()
     ? Number(env.THREAD_HISTORY_MAX_AGE_SECS)
     : 3600;
+  row.thread_compaction_tokens = env.THREAD_COMPACTION_TOKENS?.trim()
+    ? Number(env.THREAD_COMPACTION_TOKENS)
+    : DEFAULT_THREAD_COMPACTION_TOKENS;
   row.extra_triggers = (env.EXTRA_TRIGGERS || "")
     .split(",")
     .map((x) => x.trim())
@@ -442,6 +450,7 @@ export function settingsDefaults(
   guildPatchSchema.parse({
     temperature: row.temperature,
     thread_history_max_age_secs: row.thread_history_max_age_secs,
+    thread_compaction_tokens: row.thread_compaction_tokens,
     effort: row.effort,
   });
   return row;
@@ -582,9 +591,9 @@ export function applyPatch(
   if (patch.thread_compaction !== undefined)
     next.thread_compaction =
       patch.thread_compaction ?? defaults.thread_compaction;
-  if (patch.thread_compaction_percent !== undefined)
-    next.thread_compaction_percent =
-      patch.thread_compaction_percent ?? defaults.thread_compaction_percent;
+  if (patch.thread_compaction_tokens !== undefined)
+    next.thread_compaction_tokens =
+      patch.thread_compaction_tokens ?? defaults.thread_compaction_tokens;
   if (
     patch.extra_triggers !== undefined ||
     patch.disabled_triggers !== undefined
@@ -877,12 +886,12 @@ export function normalizeGuild(
     threadCompactionSchema.safeParse(raw?.thread_compaction).data ??
     threadCompactionSchema.safeParse(defaults.thread_compaction).data ??
     "cache";
-  row.thread_compaction_percent =
-    threadCompactionPercentSchema.safeParse(raw?.thread_compaction_percent)
+  row.thread_compaction_tokens =
+    threadCompactionTokensSchema.safeParse(raw?.thread_compaction_tokens)
       .data ??
-    threadCompactionPercentSchema.safeParse(defaults.thread_compaction_percent)
+    threadCompactionTokensSchema.safeParse(defaults.thread_compaction_tokens)
       .data ??
-    DEFAULT_THREAD_COMPACTION_PERCENT;
+    DEFAULT_THREAD_COMPACTION_TOKENS;
   return normalizeMode(row);
 }
 

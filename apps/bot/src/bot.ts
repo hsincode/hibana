@@ -825,11 +825,10 @@ export class Hibana {
         // An auto preset has no model until it is routed below, so its
         // summary cannot repeat the conversation's requests.
         const reuse = !isAutoRoute(selection);
-        const summarizer = reuse ? selection : settings.selection;
         await this.history.compact(
           ctx.channelId,
           this.llm,
-          summarizer,
+          reuse ? selection : settings.selection,
           ctx.signal,
           reuse
             ? {
@@ -849,9 +848,8 @@ export class Hibana {
                 },
               }
             : undefined,
-          // The server's mode, and its share of the window of the model the
-          // summary is written with (#124).
-          compactionPolicy(settings, summarizer, this.config.compactionTokens),
+          // The server's mode and size (#124).
+          compactionPolicy(settings, this.config.compactionTokens),
         );
         failurePhase = "history_read";
         prior = this.history.get(

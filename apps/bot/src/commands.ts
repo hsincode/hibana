@@ -89,10 +89,10 @@ export function commands(runtime: Runtime) {
       ),
       {
         type: 4,
-        name: "compaction_percent",
-        description: "要約を始める大きさ（モデルのウィンドウの %、既定 90）",
-        min_value: 1,
-        max_value: 100,
+        name: "compaction_tokens",
+        description: "要約を始める大きさ（履歴の推定トークン数、既定 30000）",
+        min_value: 1000,
+        max_value: 1_000_000,
       },
     ]),
     ...["server-context", "user-context"].map((name) =>
@@ -293,11 +293,11 @@ export async function handleCommand(
       case "thread-history": {
         const seconds = i.options.getInteger("seconds");
         const mode = s("compaction");
-        const percent = i.options.getInteger("compaction_percent");
+        const tokens = i.options.getInteger("compaction_tokens");
         // Without any option it resets the retention, as before. The summary
         // options change only themselves (#124).
         patch =
-          mode === null && percent === null
+          mode === null && tokens === null
             ? { thread_history_max_age_secs: seconds }
             : {
                 ...(seconds === null
@@ -311,9 +311,9 @@ export async function handleCommand(
                           ? null
                           : (mode as ThreadCompactionMode),
                     }),
-                ...(percent === null
+                ...(tokens === null
                   ? {}
-                  : { thread_compaction_percent: percent }),
+                  : { thread_compaction_tokens: tokens }),
               };
         break;
       }

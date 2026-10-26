@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, setSystemTime, test } from "bun:test";
 import { Agent } from "../agent";
 import { loadConfig } from "../config";
-import { History } from "../history";
+import { History, compactionPolicy } from "../history";
+import { MODEL_PRESETS } from "@hibana/shared/catalog";
 import { jevTaskModeMessage } from "../jev-task";
 import { LlmClient, type RequestRecord } from "../llm";
 import { MultiAgentSession } from "../multi-agent";
@@ -339,7 +340,8 @@ describe("a thread summary reuses the conversation's cache (#109)", () => {
         choices: [
           { message: { role: "assistant", content: `answer ${call}` } },
         ],
-        usage: { prompt_tokens: 10, completion_tokens: 2 },
+        // Past the limit as measured: the summary runs on the request's size.
+        usage: { prompt_tokens: 2000, completion_tokens: 2 },
       });
     });
     const history = new History(config(big));
@@ -458,6 +460,207 @@ describe("a thread summary reuses the conversation's cache (#109)", () => {
     await h.compact("1", llm as never, selection);
     expect(options).toHaveLength(1);
     expect(options[0]!.cache).toBe(false);
+  });
+});
+
+describe("how and when a thread is summarized is a server setting (#124)", () => {
+  const answer = (content: string) => ({
+    message: { role: "assistant" as const, content },
+    usage: emptyUsage(),
+    incomplete: false,
+  });
+  const recorder = () => {
+    const calls: { messages: Message[]; tools: ToolDef[]; options: Json }[] =
+      [];
+    const llm = {
+      complete: async (
+        _s: unknown,
+        messages: Message[],
+        tools: ToolDef[],
+        options: Json,
+      ) => (calls.push({ messages, tools, options }), answer("summary")),
+    };
+    return { calls, llm: llm as never };
+  };
+  /** Nine turns of about 220 estimated tokens each; the last one reports `context`. */
+  const filled = (context?: number) => {
+    const h = new History(config());
+    h.get("1", undefined, "key", true, 3600);
+    for (let i = 0; i < 9; i++)
+      h.put(
+        "1",
+        turn(`t${i}`, 600),
+        i === 8 && context !== undefined
+          ? { ...emptyUsage(), context_tokens: context }
+          : emptyUsage(),
+      );
+    return h;
+  };
+  const reuse = (h: History) => ({
+    prefix,
+    history: h.get("1", undefined, "key", true, 3600),
+    tools: [tool],
+    options: {},
+  });
+
+  test("off sends no summary, however large the thread", async () => {
+    const { calls, llm } = recorder();
+    const h = filled(1_000_000);
+    await h.compact("1", llm, selection, undefined, reuse(h), {
+      mode: "off",
+      threshold: 1000,
+    });
+    expect(calls).toHaveLength(0);
+    expect(h.get("1", undefined, "key", true, 3600)[0]!.content).toBe("t0");
+  });
+  test("transcript sends the old turns as JSON without the conversation's prefix or a cache write", async () => {
+    const { calls, llm } = recorder();
+    const h = filled(5000);
+    await h.compact("1", llm, selection, undefined, reuse(h), {
+      mode: "transcript",
+      threshold: 1000,
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.messages[0]!.role).toBe("system");
+    expect(calls[0]!.tools).toEqual([]);
+    expect(calls[0]!.options.cache).toBe(false);
+    expect(h.get("1", undefined, "key", true, 3600)[0]!.content).toBe(
+      "Conversation summary:\nsummary",
+    );
+  });
+  test("cache repeats the conversation's prefix, as before", async () => {
+    const { calls, llm } = recorder();
+    const h = filled(5000);
+    await h.compact("1", llm, selection, undefined, reuse(h), {
+      mode: "cache",
+      threshold: 1000,
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.messages.slice(0, prefix.length)).toEqual(prefix);
+    expect(calls[0]!.tools).toEqual([tool]);
+    expect(calls[0]!.options.cache).toBeUndefined();
+  });
+  test("the size compared is the last request's, not the estimate", async () => {
+    // Over the limit by the estimate, but the provider counted less.
+    const under = recorder();
+    const small = filled(1000);
+    expect(small.info("1").estimated_tokens).toBeGreaterThan(1500);
+    await small.compact("1", under.llm, selection, undefined, undefined, {
+      mode: "cache",
+      threshold: 1500,
+    });
+    expect(under.calls).toHaveLength(0);
+    // The estimate is far below the limit, but the provider counted more:
+    // the system part and the tools are in the request too.
+    const over = recorder();
+    const large = filled(3000);
+    expect(large.info("1").estimated_tokens).toBeLessThan(2500);
+    await large.compact("1", over.llm, selection, undefined, undefined, {
+      mode: "cache",
+      threshold: 2500,
+    });
+    expect(over.calls).toHaveLength(1);
+  });
+  test("without a measured size, the estimate is compared", async () => {
+    const { calls, llm } = recorder();
+    const h = filled();
+    await h.compact("1", llm, selection, undefined, undefined, {
+      mode: "cache",
+      threshold: 1000,
+    });
+    expect(calls).toHaveLength(1);
+  });
+  test("after a summary the measured size no longer applies", async () => {
+    const { calls, llm } = recorder();
+    const h = filled(9000);
+    await h.compact("1", llm, selection, undefined, undefined, {
+      mode: "cache",
+      threshold: 1000,
+    });
+    expect(calls).toHaveLength(1);
+    expect(h.info("1").usage?.context_tokens).toBeUndefined();
+  });
+  test("the setting and the model give the mode and the threshold", () => {
+    const fallback = 100_000;
+    const opus = MODEL_PRESETS.find(
+      (p): p is (typeof MODEL_PRESETS)[number] & { context_window: number } =>
+        "context_window" in p && typeof p.context_window === "number",
+    )!;
+    const known = { provider: opus.provider, model: opus.model };
+    expect(
+      compactionPolicy(
+        { thread_compaction: "transcript", thread_compaction_percent: 50 },
+        known,
+        fallback,
+      ),
+    ).toEqual({
+      mode: "transcript",
+      threshold: Math.floor(opus.context_window / 2),
+    });
+    // Unset values are the defaults: the cache form at 90%.
+    expect(
+      compactionPolicy(
+        { thread_compaction: null, thread_compaction_percent: null },
+        known,
+        fallback,
+      ),
+    ).toEqual({
+      mode: "cache",
+      threshold: Math.floor((opus.context_window * 90) / 100),
+    });
+    // A model without a known window uses the configured token count.
+    expect(
+      compactionPolicy(
+        { thread_compaction: "cache", thread_compaction_percent: 90 },
+        selection,
+        fallback,
+      ),
+    ).toEqual({ mode: "cache", threshold: fallback });
+  });
+});
+
+describe("a turn's usage says how large its last request was (#124)", () => {
+  test("the context is the last request's, while the totals add every request", async () => {
+    let call = 0;
+    const client = new LlmClient(config(), async () => {
+      call++;
+      return Response.json({
+        choices: [
+          {
+            message:
+              call === 1
+                ? {
+                    role: "assistant",
+                    content: "",
+                    tool_calls: [
+                      {
+                        id: "c1",
+                        type: "function",
+                        function: { name: "lookup", arguments: "{}" },
+                      },
+                    ],
+                  }
+                : { role: "assistant", content: "done" },
+          },
+        ],
+        usage:
+          call === 1
+            ? { prompt_tokens: 100, completion_tokens: 5 }
+            : { prompt_tokens: 140, completion_tokens: 9 },
+      });
+    });
+    const result = await new Agent(client).run({
+      selection,
+      messages: [{ role: "user", content: "go", turnStart: true }],
+      tools: [tool],
+      context: ctx,
+      maxRounds: 4,
+      temperature: 0.7,
+      nativeSearch: false,
+      execute: async () => "found",
+    });
+    expect(result.usage.prompt_tokens).toBe(240);
+    expect(result.usage.context_tokens).toBe(149);
   });
 });
 

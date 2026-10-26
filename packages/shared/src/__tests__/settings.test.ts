@@ -756,3 +756,63 @@ test("Text Generation Model is a server setting: Haiku 5.5 medium by default, An
   ]);
   expect(patchPresetIds({ text_model: null })).toEqual([]);
 });
+
+test("a server picks how threads are summarized and at what share of the window (#124)", () => {
+  // Defaults: the summary that reads the conversation's cache, at 90%.
+  expect(emptyGuild().thread_compaction).toBe("cache");
+  expect(emptyGuild().thread_compaction_percent).toBe(90);
+  for (const mode of ["cache", "transcript", "off", null])
+    expect(
+      guildPatchSchema.safeParse({ thread_compaction: mode }).success,
+    ).toBe(true);
+  expect(
+    guildPatchSchema.safeParse({ thread_compaction: "fast" }).success,
+  ).toBe(false);
+  for (const percent of [1, 50, 100, null])
+    expect(
+      guildPatchSchema.safeParse({ thread_compaction_percent: percent })
+        .success,
+    ).toBe(true);
+  for (const percent of [0, 101, 12.5, "90"])
+    expect(
+      guildPatchSchema.safeParse({ thread_compaction_percent: percent })
+        .success,
+    ).toBe(false);
+
+  // Writing one changes nothing else; null returns to the default.
+  const base = emptyGuild();
+  const off = applyPatch(base, {
+    thread_compaction: "off",
+    thread_compaction_percent: 70,
+  });
+  expect(off.thread_compaction).toBe("off");
+  expect(off.thread_compaction_percent).toBe(70);
+  expect({
+    ...off,
+    thread_compaction: base.thread_compaction,
+    thread_compaction_percent: base.thread_compaction_percent,
+  }).toEqual(normalizeGuild(base));
+  const reset = applyPatch(off, {
+    thread_compaction: null,
+    thread_compaction_percent: null,
+  });
+  expect(reset.thread_compaction).toBe("cache");
+  expect(reset.thread_compaction_percent).toBe(90);
+  expect(applyPatch(off, { temperature: 1 }).thread_compaction).toBe("off");
+
+  // A row stored before the settings existed, or holding a value that is no
+  // longer valid, reads as the default.
+  const {
+    thread_compaction: _mode,
+    thread_compaction_percent: _percent,
+    ...legacy
+  } = emptyGuild();
+  expect(normalizeGuild(legacy).thread_compaction).toBe("cache");
+  expect(normalizeGuild(legacy).thread_compaction_percent).toBe(90);
+  const broken = normalizeGuild({
+    thread_compaction: "fast",
+    thread_compaction_percent: 0,
+  } as never);
+  expect(broken.thread_compaction).toBe("cache");
+  expect(broken.thread_compaction_percent).toBe(90);
+});

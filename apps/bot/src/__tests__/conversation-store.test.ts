@@ -276,6 +276,43 @@ describe("a restart keeps the conversation", () => {
   });
 });
 
+describe("a summary's measured size is not read back after a restart (#124)", () => {
+  test("the size of the request before the summary is dropped on disk too", async () => {
+    const bot = startBot(await dbPath(), config());
+    const llm = {
+      complete: async () => ({
+        message: { role: "assistant", content: "summary" },
+        usage: emptyUsage(),
+        incomplete: false,
+      }),
+    };
+    bot.history.get("thread", undefined, "key", true, 3600);
+    for (let i = 0; i < 9; i++)
+      bot.history.put("thread", turn(`t${i}`, 600), {
+        ...emptyUsage(),
+        prompt_tokens: 7,
+        context_tokens: 9000,
+      });
+    await bot.history.compact(
+      "thread",
+      llm as never,
+      selection,
+      undefined,
+      undefined,
+      {
+        mode: "cache",
+        threshold: 1000,
+      },
+    );
+    bot.restart();
+    bot.history.get("thread", undefined, "key", true, 3600);
+    const usage = bot.history.info("thread").usage;
+    expect(usage?.context_tokens).toBeUndefined();
+    // The rest of the turn's usage is kept.
+    expect(usage?.prompt_tokens).toBe(7);
+  });
+});
+
 describe("what ends a conversation also removes it from disk", () => {
   test("/clear and a deleted channel", async () => {
     const bot = startBot(await dbPath());

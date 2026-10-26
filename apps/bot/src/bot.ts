@@ -24,7 +24,7 @@ import {
 } from "./checkpoint";
 import { Agent, type AgentOptions } from "./agent";
 import { MultiAgentSession } from "./multi-agent";
-import { History } from "./history";
+import { History, compactionPolicy } from "./history";
 import { ConversationStore } from "./conversation-store";
 import { ToolRegistry } from "./tools";
 import { WebSync } from "./sync";
@@ -825,10 +825,11 @@ export class Hibana {
         // An auto preset has no model until it is routed below, so its
         // summary cannot repeat the conversation's requests.
         const reuse = !isAutoRoute(selection);
+        const summarizer = reuse ? selection : settings.selection;
         await this.history.compact(
           ctx.channelId,
           this.llm,
-          reuse ? selection : settings.selection,
+          summarizer,
           ctx.signal,
           reuse
             ? {
@@ -848,6 +849,9 @@ export class Hibana {
                 },
               }
             : undefined,
+          // The server's mode, and its share of the window of the model the
+          // summary is written with (#124).
+          compactionPolicy(settings, summarizer, this.config.compactionTokens),
         );
         failurePhase = "history_read";
         prior = this.history.get(

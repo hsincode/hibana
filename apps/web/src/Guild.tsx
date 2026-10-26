@@ -18,10 +18,14 @@ import { AgentSections, guildEffective } from "./Agent";
 import { GuildArtifacts } from "./Artifacts";
 import { Select } from "./controls";
 import { roleAllows } from "./ModelPicker";
+import { contextWindow } from "@hibana/shared/catalog";
 import {
   DEFAULT_TEXT_MODEL,
+  DEFAULT_THREAD_COMPACTION_PERCENT,
   TEXT_MODEL_EFFORTS,
+  THREAD_COMPACTION_MODES,
   isTextModelPreset,
+  type ThreadCompactionMode,
 } from "@hibana/shared/settings";
 import { GUILD_PAGES, LEGACY_SECTION_PAGE, guildPath } from "./nav";
 import { Row, SaveMarksContext, useReportSave, useRowTarget } from "./save";
@@ -257,6 +261,24 @@ function secsHint(v: number | null | undefined): string {
   return `= ${h > 0 ? `${h} 時間 ` : ""}${m} 分`;
 }
 
+const COMPACTION_LABELS: Record<ThreadCompactionMode, string> = {
+  cache: "会話のキャッシュを使う（既定）",
+  transcript: "古いターンを JSON で渡す（キャッシュなし）",
+  off: "要約しない",
+};
+
+/** このサーバーのモデルで、要約を始める大きさ。 */
+function compactionHint(
+  percent: number,
+  selection: { provider: string; model: string } | undefined,
+): string {
+  const window = contextWindow(selection);
+  if (!window)
+    return "このモデルはウィンドウの大きさが分からないので、10 万トークン（THREAD_COMPACTION_TOKENS）で要約します。";
+  const tokens = Math.floor((window * percent) / 100);
+  return `1〜100。このモデルでは ${tokens.toLocaleString("ja-JP")} トークン（ウィンドウ ${window.toLocaleString("ja-JP")} の ${percent}%）を超えたら要約します。`;
+}
+
 const DEFAULT_MCP_URL = "https://ww.hsincode.com/api/mcp";
 
 /** ツールと挙動: チューニング・MCP・挙動・トリガー。 */
@@ -290,7 +312,10 @@ function ToolsSections({
   /** 数値はフォーカスを外した時点で保存する。値が変わっていなければ何も送らない。 */
   const saveNumber = (
     input: HTMLInputElement,
-    field: "temperature" | "thread_history_max_age_secs",
+    field:
+      | "temperature"
+      | "thread_history_max_age_secs"
+      | "thread_compaction_percent",
     row: string,
   ) => {
     // Empty input has no saved meaning; restore the visible
@@ -373,6 +398,61 @@ function ToolsSections({
               defaultValue={s.thread_history_max_age_secs ?? ""}
               onBlur={(e) =>
                 saveNumber(e.target, "thread_history_max_age_secs", "g-history")
+              }
+            />
+          </Row>
+          <Row
+            k="g-compaction"
+            name="スレッドの要約"
+            htmlFor="g-compaction-sel"
+            hint="長くなったスレッドの古いターンを要約に置き換える方式。「要約しない」では、モデルに長すぎると断られたときに古い半分を落とします。"
+          >
+            <Select
+              id="g-compaction-sel"
+              value={s.thread_compaction ?? "cache"}
+              onValueChange={(e) =>
+                patch(
+                  { thread_compaction: e as ThreadCompactionMode },
+                  "g-compaction",
+                )
+              }
+            >
+              {THREAD_COMPACTION_MODES.map((x) => (
+                <option key={x} value={x}>
+                  {COMPACTION_LABELS[x]}
+                </option>
+              ))}
+            </Select>
+          </Row>
+          <Row
+            k="g-compaction-percent"
+            name="要約を始める大きさ（ウィンドウの %）"
+            htmlFor="g-compaction-percent-in"
+            hint={compactionHint(
+              s.thread_compaction_percent ?? DEFAULT_THREAD_COMPACTION_PERCENT,
+              s.selection?.provider && s.selection.model
+                ? { provider: s.selection.provider, model: s.selection.model }
+                : undefined,
+            )}
+          >
+            <input
+              className="input mono"
+              id="g-compaction-percent-in"
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={100}
+              step={1}
+              disabled={s.thread_compaction === "off"}
+              defaultValue={
+                s.thread_compaction_percent ?? DEFAULT_THREAD_COMPACTION_PERCENT
+              }
+              onBlur={(e) =>
+                saveNumber(
+                  e.target,
+                  "thread_compaction_percent",
+                  "g-compaction-percent",
+                )
               }
             />
           </Row>

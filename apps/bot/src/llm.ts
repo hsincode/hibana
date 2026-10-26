@@ -341,12 +341,25 @@ export function normalizeUsage(raw: Json = {}): Usage {
           (raw.cache_read_input_tokens !== undefined ? cacheRead : 0) +
           cacheWrite,
     completion = Number(raw.completion_tokens ?? raw.output_tokens ?? 0);
+  // Anthropic adds every iteration of a server tool loop (native search) into
+  // the totals, which can then be several times the window. The last
+  // iteration is what the window held (#124).
+  const last = Array.isArray(raw.iterations)
+    ? (raw.iterations as Json[]).at(-1)
+    : undefined;
+  const context = last
+    ? Number(last.input_tokens ?? 0) +
+      Number(last.cache_read_input_tokens ?? 0) +
+      Number(last.cache_creation_input_tokens ?? 0) +
+      Number(last.output_tokens ?? 0)
+    : prompt + completion;
   return {
     prompt_tokens: prompt,
     completion_tokens: completion,
     total_tokens: Number(raw.total_tokens ?? prompt + completion),
     cached_tokens: cacheRead,
     cache_write_tokens: cacheWrite,
+    context_tokens: context,
     ...(byTtl && {
       cache_write_5m_tokens: Number(byTtl.ephemeral_5m_input_tokens ?? 0),
       cache_write_1h_tokens: Number(byTtl.ephemeral_1h_input_tokens ?? 0),
@@ -812,6 +825,9 @@ export class LlmClient {
       );
       const usage = { ...completion.usage };
       addUsage(usage, next.usage);
+      // The resumed request carries the whole turn, so it is the size.
+      if (next.usage.context_tokens !== undefined)
+        usage.context_tokens = next.usage.context_tokens;
       return {
         ...next,
         usage,

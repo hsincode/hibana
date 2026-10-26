@@ -675,6 +675,7 @@ test("Claude Max caches the system prefix and reports cache reads and writes", a
     total_tokens: 1005,
     cached_tokens: 900,
     cache_write_tokens: 90,
+    context_tokens: 1005,
   });
 });
 

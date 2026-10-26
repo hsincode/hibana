@@ -375,7 +375,7 @@
     "type": "function",
     "function": {
       "name": "set_thread_history",
-      "description": "Set how long Discord **thread** conversation history is kept (process-wide; default 3600s / 1 hour). A thread that stays idle longer than this starts over; an active thread keeps all its turns. Regular channels do not expire by time and are trimmed by size only. seconds=0 disables the idle reset (keep until token compaction). reset=true restores env THREAD_HISTORY_MAX_AGE_SECS. Does not wipe history; the new window applies on the next snapshot. Only call this when the user explicitly asks to change thread history TTL. Discord `/thread-history` is the same setting.",
+      "description": "Set how long Discord **thread** conversation history is kept (process-wide; default 3600s / 1 hour), and how a long thread is summarized. A thread that stays idle longer than this starts over; an active thread keeps all its turns. Regular channels do not expire by time and are trimmed by size only. seconds=0 disables the idle reset (keep until token compaction). reset=true restores env THREAD_HISTORY_MAX_AGE_SECS. compaction picks the summary: cache (default; reuses the conversation's prompt cache), transcript (old turns as JSON, no cache write), off (never summarize; only halved when the model rejects it as too long), reset (default). compaction_percent (1-100, default 90) is the share of the model's context window at which a thread is summarized; models without a known window use env THREAD_COMPACTION_TOKENS. Each field changes only itself. Does not wipe history; the new values apply on the next snapshot. Only call this when the user explicitly asks to change these. Discord `/thread-history` is the same setting.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -390,6 +390,17 @@
           "reset": {
             "type": "boolean",
             "description": "Restore env THREAD_HISTORY_MAX_AGE_SECS"
+          },
+          "compaction": {
+            "type": "string",
+            "enum": ["cache", "transcript", "off", "reset"],
+            "description": "How a long thread is summarized; reset = default (cache)"
+          },
+          "compaction_percent": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Share of the model's context window (%) at which a thread is summarized"
           }
         },
         "additionalProperties": false

@@ -2,12 +2,20 @@
  * Shared model catalogs.
  * Imported by both the bot and settings API.
  */
+// `context_window` (tokens) is set only where an official source states it
+// for the surface the provider uses, as of 2026-10-27 (#124): the Anthropic
+// API, Kiro's model list, Claude's paid plans (Claude Max) and DeepSeek's API.
+// The others have none, and their threads are summarized at
+// `THREAD_COMPACTION_TOKENS`: Grok, ChatGPT/Codex and the Gemini gateway
+// publish no limit for these accounts, Refuseless does not state what it
+// serves, and unreleased SKUs have no documentation.
 export const MODEL_PRESETS = [
   {
     id: "ds-deepseek-flash",
     provider: "deepseek",
     model: "deepseek-flash",
     label: "DeepSeek official / DeepSeek V4.1 Flash",
+    context_window: 1_000_000,
   },
   {
     id: "grok-4.5",
@@ -47,6 +55,7 @@ export const MODEL_PRESETS = [
     provider: "claude_kiro",
     model: "claude-opus-5",
     label: "Claude Kiro / Claude Opus 5",
+    context_window: 1_000_000,
   },
   {
     id: "opus-5-1",
@@ -62,6 +71,7 @@ export const MODEL_PRESETS = [
     provider: "claude_kiro",
     model: "claude-opus-5-5",
     label: "Claude Kiro / Claude Opus 5.5",
+    context_window: 1_000_000,
     published: false,
   },
   // Gateway wire id is the pinned `claude-sonnet-5` (no date suffix).
@@ -81,6 +91,7 @@ export const MODEL_PRESETS = [
     provider: "claude_kiro",
     model: "claude-sonnet-5-5",
     label: "Claude Kiro / Claude Sonnet 5.5",
+    context_window: 1_000_000,
     published: false,
   },
   // Claude Max: own account/key (`CLAUDE_MAX_API_KEY`). Premium / Moderator /
@@ -93,6 +104,7 @@ export const MODEL_PRESETS = [
     provider: "claude_max",
     model: "claude-fable-5-1",
     label: "Claude Max / Claude Fable 5.1",
+    context_window: 1_000_000,
     min_role: "premium",
   },
   {
@@ -100,6 +112,7 @@ export const MODEL_PRESETS = [
     provider: "claude_max",
     model: "claude-opus-5-5",
     label: "Claude Max / Claude Opus 5.5",
+    context_window: 1_000_000,
     min_role: "premium",
   },
   // Anthropic's own API (`ANTHROPIC_API_KEY`), billed per token. A Premium /
@@ -118,6 +131,7 @@ export const MODEL_PRESETS = [
     provider: "anthropic",
     model: "claude-haiku-5-5",
     label: "Anthropic / Claude Haiku 5.5",
+    context_window: 1_000_000,
     min_role: "premium",
     server_shared: true,
   },
@@ -126,6 +140,7 @@ export const MODEL_PRESETS = [
     provider: "anthropic",
     model: "claude-sonnet-5-5",
     label: "Anthropic / Claude Sonnet 5.5",
+    context_window: 1_000_000,
     min_role: "premium",
     server_shared: true,
   },
@@ -134,6 +149,7 @@ export const MODEL_PRESETS = [
     provider: "anthropic",
     model: "claude-opus-5-5",
     label: "Anthropic / Claude Opus 5.5",
+    context_window: 1_000_000,
     min_role: "premium",
     server_shared: true,
   },
@@ -695,4 +711,30 @@ export function anthropicCost(
       usage.output * price.output) /
     1_000_000
   );
+}
+
+/** The context window of a catalog model in tokens, or `undefined` for a
+ *  model the catalog does not size (custom endpoints, Auto Routing, presets
+ *  whose window no official source states) (#124). */
+export function contextWindow(
+  selection: { provider: string; model: string } | null | undefined,
+): number | undefined {
+  if (!selection) return undefined;
+  const preset = MODEL_PRESETS.find(
+    (p) => p.provider === selection.provider && p.model === selection.model,
+  );
+  return preset && "context_window" in preset
+    ? (preset.context_window as number)
+    : undefined;
+}
+
+/** Where a thread is summarized: `percent` of the model's window, or
+ *  `fallback` tokens when the window is unknown (#124). */
+export function compactionThreshold(
+  selection: { provider: string; model: string } | null | undefined,
+  percent: number,
+  fallback: number,
+): number {
+  const window = contextWindow(selection);
+  return window ? Math.floor((window * percent) / 100) : fallback;
 }

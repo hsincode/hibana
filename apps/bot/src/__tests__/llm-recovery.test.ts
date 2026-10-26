@@ -403,6 +403,7 @@ describe("stream protocol adapters", () => {
       total_tokens: 15,
       cached_tokens: 4,
       cache_write_tokens: 0,
+      context_tokens: 15,
     });
   });
   test("Responses uses completed blocks for encrypted reasoning and tool replay", async () => {
@@ -517,6 +518,7 @@ describe("stream protocol adapters", () => {
       total_tokens: 21,
       cached_tokens: 6,
       cache_write_tokens: 0,
+      context_tokens: 21,
     });
   });
   test("HTTP 200 API errors use their type to distinguish retryable overload from quota", async () => {

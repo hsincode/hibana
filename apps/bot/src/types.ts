@@ -46,9 +46,12 @@ export type Usage = {
    *  bill at different rates (#109). Absent when the response does not say. */
   cache_write_5m_tokens?: number;
   cache_write_1h_tokens?: number;
-  /** Anthropic Workspace (#76): input plus output of the turn's last model
-   *  request, which is how large the session's conversation has grown. The
-   *  totals above add every request of a turn together and cannot tell. */
+  /** Input plus output of the last model request, which is how large the
+   *  conversation has grown: the next request starts from it. The totals
+   *  above add every request of a turn together and cannot tell. For an
+   *  Anthropic server tool loop it is the last iteration's (#124); for an
+   *  Anthropic Workspace session, the session's last request (#76). Absent
+   *  when no request reported usage. */
   context_tokens?: number;
 };
 export const emptyUsage = (): Usage => ({

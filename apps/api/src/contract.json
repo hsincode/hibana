@@ -83,6 +83,8 @@
     "suppress_embeds",
     "temperature",
     "text_model",
+    "thread_compaction",
+    "thread_compaction_percent",
     "thread_history_max_age_secs",
     "thread_only",
     "ultra_mode",

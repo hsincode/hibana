@@ -146,6 +146,9 @@ export class Agent {
         throw error;
       }
       addUsage(usage, completion.usage);
+      // The size of the conversation so far, not a total (#124).
+      if (completion.usage.context_tokens !== undefined)
+        usage.context_tokens = completion.usage.context_tokens;
       o.recordUsage?.(completion.usage);
       const msg = completion.message;
       if (deferred.length) {

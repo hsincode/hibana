@@ -209,6 +209,7 @@ export class Runtime {
       exa_mode: this.config.exaMode,
       extra_triggers: [...this.config.extraTriggers],
       thread_history_max_age_secs: this.config.threadHistoryAge,
+      thread_compaction_tokens: this.config.compactionTokens,
     };
   }
   role(userId: string) {

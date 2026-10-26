@@ -24,7 +24,7 @@ import {
 } from "./checkpoint";
 import { Agent, type AgentOptions } from "./agent";
 import { MultiAgentSession } from "./multi-agent";
-import { History } from "./history";
+import { History, compactionPolicy } from "./history";
 import { ConversationStore } from "./conversation-store";
 import { ToolRegistry } from "./tools";
 import { WebSync } from "./sync";
@@ -848,6 +848,8 @@ export class Hibana {
                 },
               }
             : undefined,
+          // The server's mode and size (#124).
+          compactionPolicy(settings, this.config.compactionTokens),
         );
         failurePhase = "history_read";
         prior = this.history.get(

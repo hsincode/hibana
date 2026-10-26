@@ -756,3 +756,69 @@ test("Text Generation Model is a server setting: Haiku 5.5 medium by default, An
   ]);
   expect(patchPresetIds({ text_model: null })).toEqual([]);
 });
+
+test("a server picks how threads are summarized and at what size (#124)", () => {
+  // Defaults: the summary that reads the conversation's cache, at 30,000
+  // estimated tokens of history.
+  expect(emptyGuild().thread_compaction).toBe("cache");
+  expect(emptyGuild().thread_compaction_tokens).toBe(30_000);
+  for (const mode of ["cache", "transcript", "off", null])
+    expect(
+      guildPatchSchema.safeParse({ thread_compaction: mode }).success,
+    ).toBe(true);
+  expect(
+    guildPatchSchema.safeParse({ thread_compaction: "fast" }).success,
+  ).toBe(false);
+  for (const tokens of [1000, 50_000, 1_000_000, null])
+    expect(
+      guildPatchSchema.safeParse({ thread_compaction_tokens: tokens }).success,
+    ).toBe(true);
+  for (const tokens of [999, 1_000_001, 1500.5, "30000"])
+    expect(
+      guildPatchSchema.safeParse({ thread_compaction_tokens: tokens }).success,
+    ).toBe(false);
+
+  // Writing one changes nothing else; null returns to the default.
+  const base = emptyGuild();
+  const off = applyPatch(base, {
+    thread_compaction: "off",
+    thread_compaction_tokens: 70_000,
+  });
+  expect(off.thread_compaction).toBe("off");
+  expect(off.thread_compaction_tokens).toBe(70_000);
+  expect({
+    ...off,
+    thread_compaction: base.thread_compaction,
+    thread_compaction_tokens: base.thread_compaction_tokens,
+  }).toEqual(normalizeGuild(base));
+  const reset = applyPatch(off, {
+    thread_compaction: null,
+    thread_compaction_tokens: null,
+  });
+  expect(reset.thread_compaction).toBe("cache");
+  expect(reset.thread_compaction_tokens).toBe(30_000);
+  expect(applyPatch(off, { temperature: 1 }).thread_compaction).toBe("off");
+
+  // A row stored before the settings existed, or holding a value that is no
+  // longer valid, reads as the default.
+  const {
+    thread_compaction: _mode,
+    thread_compaction_tokens: _tokens,
+    ...legacy
+  } = emptyGuild();
+  expect(normalizeGuild(legacy).thread_compaction).toBe("cache");
+  expect(normalizeGuild(legacy).thread_compaction_tokens).toBe(30_000);
+  const broken = normalizeGuild({
+    thread_compaction: "fast",
+    thread_compaction_tokens: 5,
+  } as never);
+  expect(broken.thread_compaction).toBe("cache");
+  expect(broken.thread_compaction_tokens).toBe(30_000);
+
+  // THREAD_COMPACTION_TOKENS seeds new rows, as THREAD_HISTORY_MAX_AGE_SECS does.
+  expect(settingsDefaults({}).thread_compaction_tokens).toBe(30_000);
+  expect(
+    settingsDefaults({ THREAD_COMPACTION_TOKENS: "50000" })
+      .thread_compaction_tokens,
+  ).toBe(50_000);
+});

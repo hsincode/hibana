@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, setSystemTime, test } from "bun:test";
 import { Agent } from "../agent";
 import { loadConfig } from "../config";
-import { History } from "../history";
+import { History, compactionPolicy, estimateTokens } from "../history";
 import { jevTaskModeMessage } from "../jev-task";
 import { LlmClient, type RequestRecord } from "../llm";
 import { MultiAgentSession } from "../multi-agent";
@@ -458,6 +458,115 @@ describe("a thread summary reuses the conversation's cache (#109)", () => {
     await h.compact("1", llm as never, selection);
     expect(options).toHaveLength(1);
     expect(options[0]!.cache).toBe(false);
+  });
+});
+
+describe("how and when a thread is summarized is a server setting (#124)", () => {
+  const answer = (content: string) => ({
+    message: { role: "assistant" as const, content },
+    usage: emptyUsage(),
+    incomplete: false,
+  });
+  const recorder = () => {
+    const calls: { messages: Message[]; tools: ToolDef[]; options: Json }[] =
+      [];
+    const llm = {
+      complete: async (
+        _s: unknown,
+        messages: Message[],
+        tools: ToolDef[],
+        options: Json,
+      ) => (calls.push({ messages, tools, options }), answer("summary")),
+    };
+    return { calls, llm: llm as never };
+  };
+  /** Nine turns of about 220 estimated tokens each. */
+  const filled = () => {
+    const h = new History(config());
+    h.get("1", undefined, "key", true, 3600);
+    for (let i = 0; i < 9; i++) h.put("1", turn(`t${i}`, 600), emptyUsage());
+    return h;
+  };
+  const reuse = (h: History) => ({
+    prefix,
+    history: h.get("1", undefined, "key", true, 3600),
+    tools: [tool],
+    options: {},
+  });
+
+  test("off sends no summary, however large the thread", async () => {
+    const { calls, llm } = recorder();
+    const h = filled();
+    await h.compact("1", llm, selection, undefined, reuse(h), {
+      mode: "off",
+      threshold: 1000,
+    });
+    expect(calls).toHaveLength(0);
+    expect(h.get("1", undefined, "key", true, 3600)[0]!.content).toBe("t0");
+  });
+  test("transcript sends the old turns as JSON without the conversation's prefix or a cache write", async () => {
+    const { calls, llm } = recorder();
+    const h = filled();
+    await h.compact("1", llm, selection, undefined, reuse(h), {
+      mode: "transcript",
+      threshold: 1000,
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.messages[0]!.role).toBe("system");
+    expect(calls[0]!.tools).toEqual([]);
+    expect(calls[0]!.options.cache).toBe(false);
+    expect(h.get("1", undefined, "key", true, 3600)[0]!.content).toBe(
+      "Conversation summary:\nsummary",
+    );
+  });
+  test("cache repeats the conversation's prefix, as before", async () => {
+    const { calls, llm } = recorder();
+    const h = filled();
+    await h.compact("1", llm, selection, undefined, reuse(h), {
+      mode: "cache",
+      threshold: 1000,
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.messages.slice(0, prefix.length)).toEqual(prefix);
+    expect(calls[0]!.tools).toEqual([tool]);
+    expect(calls[0]!.options.cache).toBeUndefined();
+  });
+  test("the server's size is compared with the history's estimate, and half of it is kept", async () => {
+    const { calls, llm } = recorder();
+    const h = filled();
+    const size = h.info("1").estimated_tokens;
+    // At or under the size: nothing is sent.
+    await h.compact("1", llm, selection, undefined, undefined, {
+      mode: "cache",
+      threshold: size,
+    });
+    expect(calls).toHaveLength(0);
+    // Over it: the newest turns within half the size stay word for word.
+    await h.compact("1", llm, selection, undefined, undefined, {
+      mode: "cache",
+      threshold: size - 1,
+    });
+    expect(calls).toHaveLength(1);
+    const after = h.get("1", undefined, "key", true, 3600);
+    expect(after[0]!.content).toBe("Conversation summary:\nsummary");
+    const kept =
+      h.info("1").estimated_tokens - estimateTokens(after.slice(0, 1));
+    expect(kept).toBeLessThanOrEqual((size - 1) / 2);
+    expect(after.filter((m) => m.turnStart).at(-1)!.content).toBe("t8");
+  });
+  test("the setting gives the mode and the size; unset values are the defaults", () => {
+    expect(
+      compactionPolicy(
+        { thread_compaction: "transcript", thread_compaction_tokens: 50_000 },
+        100_000,
+      ),
+    ).toEqual({ mode: "transcript", threshold: 50_000 });
+    expect(
+      compactionPolicy(
+        { thread_compaction: null, thread_compaction_tokens: null },
+        30_000,
+      ),
+    ).toEqual({ mode: "cache", threshold: 30_000 });
   });
 });
 

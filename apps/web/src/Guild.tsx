@@ -20,8 +20,11 @@ import { Select } from "./controls";
 import { roleAllows } from "./ModelPicker";
 import {
   DEFAULT_TEXT_MODEL,
+  DEFAULT_THREAD_COMPACTION_TOKENS,
   TEXT_MODEL_EFFORTS,
+  THREAD_COMPACTION_MODES,
   isTextModelPreset,
+  type ThreadCompactionMode,
 } from "@hibana/shared/settings";
 import { GUILD_PAGES, LEGACY_SECTION_PAGE, guildPath } from "./nav";
 import { Row, SaveMarksContext, useReportSave, useRowTarget } from "./save";
@@ -257,6 +260,12 @@ function secsHint(v: number | null | undefined): string {
   return `= ${h > 0 ? `${h} 時間 ` : ""}${m} 分`;
 }
 
+const COMPACTION_LABELS: Record<ThreadCompactionMode, string> = {
+  cache: "会話のキャッシュを使う（既定）",
+  transcript: "古いターンを JSON で渡す（キャッシュなし）",
+  off: "要約しない",
+};
+
 const DEFAULT_MCP_URL = "https://ww.hsincode.com/api/mcp";
 
 /** ツールと挙動: チューニング・MCP・挙動・トリガー。 */
@@ -290,7 +299,10 @@ function ToolsSections({
   /** 数値はフォーカスを外した時点で保存する。値が変わっていなければ何も送らない。 */
   const saveNumber = (
     input: HTMLInputElement,
-    field: "temperature" | "thread_history_max_age_secs",
+    field:
+      | "temperature"
+      | "thread_history_max_age_secs"
+      | "thread_compaction_tokens",
     row: string,
   ) => {
     // Empty input has no saved meaning; restore the visible
@@ -373,6 +385,56 @@ function ToolsSections({
               defaultValue={s.thread_history_max_age_secs ?? ""}
               onBlur={(e) =>
                 saveNumber(e.target, "thread_history_max_age_secs", "g-history")
+              }
+            />
+          </Row>
+          <Row
+            k="g-compaction"
+            name="スレッドの要約"
+            htmlFor="g-compaction-sel"
+            hint="長くなったスレッドの古いターンを要約に置き換える方式。「要約しない」では、モデルに長すぎると断られたときに古い半分を落とします。"
+          >
+            <Select
+              id="g-compaction-sel"
+              value={s.thread_compaction ?? "cache"}
+              onValueChange={(e) =>
+                patch(
+                  { thread_compaction: e as ThreadCompactionMode },
+                  "g-compaction",
+                )
+              }
+            >
+              {THREAD_COMPACTION_MODES.map((x) => (
+                <option key={x} value={x}>
+                  {COMPACTION_LABELS[x]}
+                </option>
+              ))}
+            </Select>
+          </Row>
+          <Row
+            k="g-compaction-tokens"
+            name="要約を始める大きさ（トークン）"
+            htmlFor="g-compaction-tokens-in"
+            hint={`1,000〜1,000,000。履歴（システムとツールの定義を除く）の推定がこれを超えたら要約し、新しい方の半分をそのまま残します。既定 ${DEFAULT_THREAD_COMPACTION_TOKENS.toLocaleString("ja-JP")}。`}
+          >
+            <input
+              className="input mono"
+              id="g-compaction-tokens-in"
+              type="number"
+              inputMode="numeric"
+              min={1000}
+              max={1_000_000}
+              step={1000}
+              disabled={s.thread_compaction === "off"}
+              defaultValue={
+                s.thread_compaction_tokens ?? DEFAULT_THREAD_COMPACTION_TOKENS
+              }
+              onBlur={(e) =>
+                saveNumber(
+                  e.target,
+                  "thread_compaction_tokens",
+                  "g-compaction-tokens",
+                )
               }
             />
           </Row>

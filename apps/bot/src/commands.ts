@@ -9,6 +9,7 @@ import {
   DEFAULT_TEXT_MODEL,
   TEXT_MODEL_EFFORTS,
   isTextModelPreset,
+  type ThreadCompactionMode,
 } from "@hibana/shared/settings";
 import type { Runtime } from "./runtime";
 import type { ToolRegistry } from "./tools";
@@ -74,12 +75,24 @@ export function commands(runtime: Runtime) {
     command("exa", "検索方式を変更", [
       string("mode", "検索方式", ["on", "off", "auto", "reset"], true),
     ]),
-    command("thread-history", "スレッド履歴の保持期間", [
+    command("thread-history", "スレッド履歴の保持期間と要約", [
       {
         type: 4,
         name: "seconds",
-        description: "0で期限なし。省略でデフォルト値を設定",
+        description: "0で期限なし。全項目を省略するとデフォルト値を設定",
         min_value: 0,
+      },
+      string(
+        "compaction",
+        "要約の方式（cache: キャッシュを使う / transcript: JSON / off: しない）",
+        ["cache", "transcript", "off", "reset"],
+      ),
+      {
+        type: 4,
+        name: "compaction_tokens",
+        description: "要約を始める大きさ（履歴の推定トークン数、既定 30000）",
+        min_value: 1000,
+        max_value: 1_000_000,
       },
     ]),
     ...["server-context", "user-context"].map((name) =>
@@ -277,11 +290,33 @@ export async function handleCommand(
       case "exa":
         patch = { exa_mode: s("mode") === "reset" ? null : s("mode") };
         break;
-      case "thread-history":
-        patch = {
-          thread_history_max_age_secs: i.options.getInteger("seconds"),
-        };
+      case "thread-history": {
+        const seconds = i.options.getInteger("seconds");
+        const mode = s("compaction");
+        const tokens = i.options.getInteger("compaction_tokens");
+        // Without any option it resets the retention, as before. The summary
+        // options change only themselves (#124).
+        patch =
+          mode === null && tokens === null
+            ? { thread_history_max_age_secs: seconds }
+            : {
+                ...(seconds === null
+                  ? {}
+                  : { thread_history_max_age_secs: seconds }),
+                ...(mode === null
+                  ? {}
+                  : {
+                      thread_compaction:
+                        mode === "reset"
+                          ? null
+                          : (mode as ThreadCompactionMode),
+                    }),
+                ...(tokens === null
+                  ? {}
+                  : { thread_compaction_tokens: tokens }),
+              };
         break;
+      }
       case "server-context":
       case "user-context":
         if (i.commandName === "server-context") guild();

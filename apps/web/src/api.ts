@@ -3,6 +3,7 @@ import type {
   SubagentModel,
   SubagentEffort,
   ServiceTier,
+  ThreadCompactionMode,
 } from "@hibana/shared/settings";
 const API =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(
@@ -152,6 +153,9 @@ export type GuildSettings = Record<string, unknown> & {
   temperature?: number | null;
   exa_mode?: string | null;
   thread_history_max_age_secs?: number | null;
+  /** スレッドの要約の方式と、始める大きさ（履歴の推定トークン数）（#124）。旧 API は返さない。 */
+  thread_compaction?: ThreadCompactionMode | null;
+  thread_compaction_tokens?: number | null;
   extra_triggers?: string[] | null;
   disabled_triggers?: string[];
   context?: { text: string; persona_override: boolean } | null;

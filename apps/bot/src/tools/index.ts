@@ -1163,12 +1163,35 @@ export class ToolRegistry {
                 : { effort: a.effort === "default" ? null : a.effort }),
             };
       }
-      if (name === "set_thread_history")
+      if (name === "set_thread_history") {
+        // The summary fields change only themselves (#124); the retention is
+        // written when asked for, or when nothing else is.
+        const summary =
+          a.compaction !== undefined || a.compaction_tokens !== undefined;
+        const age =
+          a.reset ||
+          a.seconds !== undefined ||
+          a.hours !== undefined ||
+          !summary;
         patch = {
-          thread_history_max_age_secs: a.reset
-            ? null
-            : Number(a.seconds ?? Number(a.hours) * 3600),
+          ...(age
+            ? {
+                thread_history_max_age_secs: a.reset
+                  ? null
+                  : Number(a.seconds ?? Number(a.hours) * 3600),
+              }
+            : {}),
+          ...(a.compaction === undefined
+            ? {}
+            : {
+                thread_compaction:
+                  a.compaction === "reset" ? null : a.compaction,
+              }),
+          ...(a.compaction_tokens === undefined
+            ? {}
+            : { thread_compaction_tokens: Number(a.compaction_tokens) }),
         };
+      }
       if (name === "set_triggers") {
         const guild = this.runtime.guild(ctx.guildId);
         const words = (value: unknown) =>

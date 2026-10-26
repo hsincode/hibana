@@ -64,7 +64,6 @@ import {
   routeHeader,
   RouteMemory,
 } from "./auto-route";
-import { BUDGET_FALLBACK_PROVIDER } from "@hibana/shared/budget";
 import {
   hasUltracodeKeyword,
   systemReminder,
@@ -172,7 +171,6 @@ export class Hibana {
       (e) => this.report(e),
     );
     this.llm = new LlmClient(config, fetch, {
-      budgetSelection: (selection) => this.runtime.budgetSelection(selection),
       onRetry: (notice) => this.log.warn(notice, "LLM reconnecting"),
       onCompletion: (record) => {
         this.log.info(record, "LLM request completed");
@@ -746,19 +744,15 @@ export class Hibana {
       workspaceVariant(settings),
     );
     const ultracode = settings.ultracode;
-    // While the month's budget is low, an Anthropic API turn runs on the
-    // fallback (#89), auto preset included: Jev is not asked for a route the
-    // request would not use. LlmClient swaps every request the same way; this
-    // only makes the turn's log and notice say so.
-    const budgetFallback =
-      !workspace &&
-      settings.selection.provider === BUDGET_FALLBACK_PROVIDER &&
-      this.runtime.budgetLow()
-        ? this.runtime.budgetFallback()
-        : undefined;
+    // Once the month's budget is low, the settings API switches the stored
+    // settings to the fallback (#121); a turn runs on what is stored, so a
+    // model picked afterwards runs as picked. A turn still on what the switch
+    // wrote says so, once per channel.
+    const budgetNotice =
+      this.runtime.onBudgetFallback(settings.selection) &&
+      !this.budgetAnnounced.has(ctx.channelId);
     // An auto preset is replaced below, once the history is known.
-    let selection =
-      budgetFallback ?? turnSelection(settings.selection, ultracode);
+    let selection = turnSelection(settings.selection, ultracode);
     const started = Date.now();
     this.log.info(
       {
@@ -775,7 +769,7 @@ export class Hibana {
         workflow_keyword: !!ctx.workflowKeyword,
         jev_enabled: settings.jev_enabled,
         jev_task_enabled: settings.jev_task_enabled,
-        budget_fallback: Boolean(budgetFallback),
+        budget_low: this.runtime.budgetLow(),
       },
       "Turn started",
     );
@@ -865,13 +859,13 @@ export class Hibana {
         );
       }
       let routeUsage: Usage | undefined;
-      if (budgetFallback && !this.budgetAnnounced.has(ctx.channelId)) {
+      if (budgetNotice) {
         this.budgetAnnounced.add(ctx.channelId);
         await send(
-          budgetHeader(budgetFallback, this.runtime.budgetThreshold()),
+          budgetHeader(settings.selection, this.runtime.budgetThreshold()),
         );
       }
-      if (isAutoRoute(settings.selection) && !budgetFallback) {
+      if (isAutoRoute(settings.selection)) {
         const route = await this.autoRoute(ctx, text, prior, pending);
         routeUsage = route.usage;
         selection = turnSelection(route.selection, ultracode);

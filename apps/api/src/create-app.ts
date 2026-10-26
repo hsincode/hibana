@@ -94,6 +94,7 @@ import {
   parseBudgetFallback,
   parseBudgetThreshold,
 } from "@hibana/shared/budget";
+import { observeBudget } from "./budget-switch";
 
 /**
  * What the dashboard saves (#89, #95): the fallback model and effort, and the
@@ -1235,8 +1236,22 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
         }
         if (!costReport.configured) return { configured: false };
         // A CostReportError becomes its status (502/429) in onError; the bot
-        // keeps the last answer it had.
-        return costReport.budget(await loadBudgetThreshold(store));
+        // keeps the last answer it had, and the switch mark stays as it was.
+        const status = await costReport.budget(
+          await loadBudgetThreshold(store),
+        );
+        // Gone below the threshold: the stored settings are switched once
+        // (#121). The bot reads them from the snapshot, like any change.
+        const switched = await observeBudget(
+          store,
+          status.low,
+          await loadUnpublished(store),
+        );
+        if (switched) {
+          console.info("Budget switch:", JSON.stringify(switched));
+          if (switched.guilds || switched.users) await publish();
+        }
+        return status;
       })
       .post("/internal/logs", async ({ request, set, body }) => {
         if (

@@ -48,8 +48,8 @@ export type Snapshot = {
   user_roles: Record<string, string>;
   unpublished_presets: string[];
   premium_presets: string[];
-  /** The model Anthropic API turns switch to while the budget is low (#89).
-   *  The dashboard writes it; absent before the API served one. */
+  /** The model the settings are switched to once the budget is low (#89,
+   *  #121). The dashboard writes it; absent before the API served one. */
   budget_fallback?: BudgetFallback;
   /** Written by the bot, not the API: the last answer of `/internal/budget`.
    *  A snapshot from the API never carries it, so `replace` keeps it, and it
@@ -273,7 +273,9 @@ export class Runtime {
       await this.persist();
     }
   }
-  /** Whether Anthropic API turns run on the fallback now. */
+  /** Whether the settings API last said this month's budget is low. The
+   *  settings were switched to the fallback when it turned low (#121); a turn
+   *  runs on what is stored, so this only decides the Discord notice. */
   budgetLow(): boolean {
     return this.snapshot.budget?.low === true;
   }
@@ -284,28 +286,33 @@ export class Runtime {
       DEFAULT_BUDGET_FALLBACK_THRESHOLD_USD
     );
   }
-  /** The selection the fallback runs as. A stored preset that was hidden
-   *  since (it may not have a live wire id) runs the default instead. */
+  /** The fallback the settings were switched to. A stored preset that was
+   *  hidden since runs the default instead, as the settings API switches to
+   *  it then (`budgetSwitchTarget`). */
   budgetFallback(): Selection {
     let fallback = parseBudgetFallback(this.snapshot.budget_fallback);
     if (this.snapshot.unpublished_presets.includes(fallback.preset))
       fallback = DEFAULT_BUDGET_FALLBACK;
     return budgetFallbackSelection(fallback);
   }
-  /** What an `anthropic` request runs as (#89): the fallback while the budget
-   *  is low, whatever model, effort or route it was going to use. Every other
-   *  provider, Anthropic Workspace included, is returned as given. Only the
-   *  request changes: history and checkpoints stay filed under the stored
-   *  model, so the conversation continues there once the budget is back. */
-  budgetSelection(selection: Selection): Selection {
-    if (selection.provider !== BUDGET_FALLBACK_PROVIDER || !this.budgetLow())
-      return selection;
-    return this.budgetFallback();
+  /** Whether a turn's selection is what the switch writes (#121): the
+   *  fallback, or a Workspace preset of its model at its effort. Such a turn
+   *  says so once per channel while the budget is low. A model picked after
+   *  the switch is not, and runs as picked without a notice. */
+  onBudgetFallback(selection: Selection): boolean {
+    if (!this.budgetLow()) return false;
+    const fallback = this.budgetFallback();
+    return (
+      (selection.provider === BUDGET_FALLBACK_PROVIDER ||
+        selection.provider === WORKSPACE_PROVIDER) &&
+      selection.model === fallback.model &&
+      selection.effort === fallback.effort
+    );
   }
   /** The server's Text Generation Model (#118), which summarizes its
    *  meeting recordings. A preset hidden since it was picked runs as the
-   *  default, as the budget fallback does. Its requests still go through
-   *  `budgetSelection` in the LLM client like every `anthropic` request. */
+   *  default, as the budget fallback does. The budget switch (#121) rewrites
+   *  it with the other settings; nothing swaps it at request time. */
   textModel(guildId: string): Selection {
     let model = this.guild(guildId).text_model;
     if (this.snapshot.unpublished_presets.includes(model.preset))

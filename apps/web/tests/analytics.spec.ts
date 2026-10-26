@@ -502,7 +502,7 @@ test.describe("budget fallback (#89)", () => {
       await expect(panel(page)).toContainText(
         "（今月の残り $151.71 − 今日の推計 $3.21）",
       );
-      await expect(panel(page)).toContainText("$10.00 を切ると");
+      await expect(panel(page)).toContainText("$10.00 を切ったとき");
       const save = panel(page).getByRole("button", { name: "保存" });
       await expect(save).toBeDisabled();
 
@@ -554,7 +554,7 @@ test.describe("budget fallback (#89)", () => {
           effort: "medium",
           threshold_usd: 25.5,
         });
-      await expect(panel(page)).toContainText("$25.50 を切ると");
+      await expect(panel(page)).toContainText("$25.50 を切ったとき");
       await expect(threshold).toHaveValue("25.5");
       await expect(save).toBeDisabled();
 
@@ -587,10 +587,10 @@ test.describe("budget fallback (#89)", () => {
       }),
     });
     await page.goto("/analytics");
-    await expect(panel(page)).toContainText("切り替え中");
+    await expect(panel(page)).toContainText("閾値を下回っています");
     await expect(panel(page)).toContainText("今日の推計を含めた残り $7.50");
     await expect(panel(page)).toContainText(
-      "いまフォールバックモデルで動いています",
+      "設定をフォールバックモデルに書き換えました",
     );
     await expect(panel(page)).toContainText(
       "Anthropic / Claude Haiku 5.5 · High",

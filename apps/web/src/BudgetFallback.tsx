@@ -4,11 +4,13 @@ import { Select } from "./controls";
 import { Badge, Skeleton, ToastArea, useToasts } from "./ui";
 
 /* ============================================================
-   予算が少ないときのモデル（#89、閾値は #95）
-   「今月の残り」から「今日の推計」を引いた額が閾値を切ると、bot は
-   Anthropic API のターンをここで選んだモデルに切り替える。判定は API
-   （apps/api/src/analytics.ts の budget()）が、保存された閾値でする。bot は
-   2 分ごとに同じ判定を読むので、ここに出る状態と bot の切り替えは最大 2 分ずれる。
+   予算が少ないときのモデル（#89、閾値は #95、書き換えは #121）
+   「今月の残り」から「今日の推計」を引いた額が閾値を切ると、API は保存された
+   設定のうち Anthropic API と Anthropic Workspace を選んでいるものを、一度だけ
+   ここで選んだモデルに書き換える（apps/api/src/budget-switch.ts）。判定は
+   apps/api/src/analytics.ts の budget() が、保存された閾値でする。書き換えは
+   bot が 2 分ごとに判定を読みに来たときなので、ここに出る状態とは最大 2 分ずれる。
+   書き換えた後は送る直前の差し替えをしないので、選び直したモデルのまま動く。
    モデル・effort・閾値を変えられるのは Administrator だけ（#95）。
    ============================================================ */
 
@@ -154,9 +156,11 @@ export function BudgetFallbackPanel({ reloadKey }: { reloadKey: string }) {
       </div>
       <p className="budget-desc">
         今日の推計を含めた今月の残りが {data ? usd(data.threshold_usd) : "閾値"}{" "}
-        を切ると、Anthropic API のターン（Auto
-        を含む）をこのモデルに切り替えます。Anthropic Workspace
-        と、ほかのプロバイダーは切り替えません。
+        を切ったとき、すべてのサーバーと個人設定のうち、Anthropic API（Auto
+        を含む）と Anthropic Workspace
+        を選んでいる設定を一度だけこのモデルに書き換えます。サブエージェントのモデルとテキスト生成モデルも含みます。Workspace
+        は同じモデルの Workspace にして、Ultra を off
+        にします。その後は自由に変えられ、予算が戻っても元には戻しません。ほかのプロバイダーは変えません。
       </p>
 
       {err && <p className="stat-note is-error">{err}</p>}
@@ -283,7 +287,7 @@ function StatusBadge({ status }: { status: Status }) {
   if (!status.configured || "error" in status)
     return <Badge>判定できません</Badge>;
   return status.low ? (
-    <Badge tone="danger">切り替え中</Badge>
+    <Badge tone="danger">閾値を下回っています</Badge>
   ) : (
     <Badge tone="ok">通常のモデル</Badge>
   );
@@ -313,8 +317,8 @@ function StatusNote({ status }: { status: Status }) {
       （今月の残り {usd(status.remaining_usd)} − 今日の推計{" "}
       {usd(status.today_usd)}）。
       {status.low
-        ? "Anthropic API のターンは、いまフォールバックモデルで動いています。"
-        : `${usd(status.threshold_usd)} を切るまでは、選ばれたモデルのまま動きます。`}
+        ? "下回ったときに、設定をフォールバックモデルに書き換えました。その後に選び直したモデルは、そのまま動きます。ここでモデルを変えても、書き換え済みの設定は変わりません。"
+        : `${usd(status.threshold_usd)} を切ったときに、設定を書き換えます。`}
       bot は 2 分ごとに確かめます。
     </p>
   );

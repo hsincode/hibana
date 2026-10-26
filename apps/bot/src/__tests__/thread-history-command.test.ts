@@ -44,7 +44,7 @@ async function slash(
   return reply;
 }
 
-test("/thread-history offers the summary's mode and share of the window", () => {
+test("/thread-history offers the summary's mode and size", () => {
   const command = commands(runtime()).find((c) => c.name === "thread-history")!;
   const options = command.options as {
     name: string;
@@ -55,7 +55,7 @@ test("/thread-history offers the summary's mode and share of the window", () => 
   expect(options.map((o) => o.name)).toEqual([
     "seconds",
     "compaction",
-    "compaction_percent",
+    "compaction_tokens",
   ]);
   expect(options[1]!.choices!.map((c) => c.value)).toEqual([
     "cache",
@@ -63,7 +63,9 @@ test("/thread-history offers the summary's mode and share of the window", () => 
     "off",
     "reset",
   ]);
-  expect([options[2]!.min_value, options[2]!.max_value]).toEqual([1, 100]);
+  expect([options[2]!.min_value, options[2]!.max_value]).toEqual([
+    1000, 1_000_000,
+  ]);
 });
 
 test("the summary options leave the retention alone, and no option resets the retention as before", async () => {
@@ -75,17 +77,17 @@ test("the summary options leave the retention alone, and no option resets the re
   expect(rt.guild("g1").thread_compaction).toBe("off");
   expect(rt.guild("g1").thread_history_max_age_secs).toBe(600);
 
-  await slash(rt, { ints: { compaction_percent: 40 } });
-  expect(rt.guild("g1").thread_compaction_percent).toBe(40);
+  await slash(rt, { ints: { compaction_tokens: 40_000 } });
+  expect(rt.guild("g1").thread_compaction_tokens).toBe(40_000);
   expect(rt.guild("g1").thread_compaction).toBe("off");
   expect(rt.guild("g1").thread_history_max_age_secs).toBe(600);
 
   await slash(rt, { strings: { compaction: "reset" } });
   expect(rt.guild("g1").thread_compaction).toBe("cache");
-  expect(rt.guild("g1").thread_compaction_percent).toBe(40);
+  expect(rt.guild("g1").thread_compaction_tokens).toBe(40_000);
 
   await slash(rt, {});
   // Reset to the default retention.
   expect(rt.guild("g1").thread_history_max_age_secs).toBe(3600);
-  expect(rt.guild("g1").thread_compaction_percent).toBe(40);
+  expect(rt.guild("g1").thread_compaction_tokens).toBe(40_000);
 });

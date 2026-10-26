@@ -675,7 +675,6 @@ test("Claude Max caches the system prefix and reports cache reads and writes", a
     total_tokens: 1005,
     cached_tokens: 900,
     cache_write_tokens: 90,
-    context_tokens: 1005,
   });
 });
 
@@ -739,47 +738,7 @@ test("OpenAI-style usage keeps prompt_tokens as the cached-inclusive total", () 
     total_tokens: 103,
     cached_tokens: 60,
     cache_write_tokens: 0,
-    context_tokens: 103,
   });
-});
-
-test("the context of a request is its input and output, or the last server-tool iteration's (#124)", () => {
-  // Anthropic: the uncached tail plus cache reads and writes, plus the output.
-  expect(
-    normalizeUsage({
-      input_tokens: 5,
-      cache_read_input_tokens: 900,
-      cache_creation_input_tokens: 90,
-      output_tokens: 7,
-    }).context_tokens,
-  ).toBe(1002);
-  // A server tool loop (native search) adds every iteration into the totals,
-  // so the totals can be many times the conversation. The last iteration
-  // holds what was actually in the window.
-  const looped = normalizeUsage({
-    input_tokens: 30,
-    cache_read_input_tokens: 2700,
-    cache_creation_input_tokens: 300,
-    output_tokens: 40,
-    iterations: [
-      {
-        type: "message",
-        input_tokens: 10,
-        cache_read_input_tokens: 800,
-        cache_creation_input_tokens: 100,
-        output_tokens: 10,
-      },
-      {
-        type: "message",
-        input_tokens: 20,
-        cache_read_input_tokens: 1900,
-        cache_creation_input_tokens: 200,
-        output_tokens: 30,
-      },
-    ],
-  });
-  expect(looped.prompt_tokens).toBe(3030);
-  expect(looped.context_tokens).toBe(2150);
 });
 describe("prompt cache routing", () => {
   const chatgpt = { provider: "chatgpt", model: "gpt-6-luna", effort: "low" };
@@ -990,8 +949,6 @@ describe("Anthropic server-side web tools (#46)", () => {
     ]);
     expect(out.usage.prompt_tokens).toBe(30);
     expect(out.usage.completion_tokens).toBe(5);
-    // The resumed request carries the whole turn: its size is the context.
-    expect(out.usage.context_tokens).toBe(23);
   });
 });
 

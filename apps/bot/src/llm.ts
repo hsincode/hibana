@@ -11,6 +11,7 @@ import {
 } from "./types";
 import { apiFailure, ProviderError } from "./llm-errors";
 import { concreteSelection, routedEffort } from "./auto-route";
+import { deferTools, toolSearchFor } from "./tool-search";
 import { readCompletion } from "./llm-stream";
 import {
   requestCompletion,
@@ -573,10 +574,21 @@ export class LlmClient {
         body.prompt_cache_key = promptCacheKey(options.trace.channel);
     } else if (protocol === "anthropic") {
       path = "/messages";
-      const { system, messages: turns } = toAnthropic(
+      const { system: leading, messages: turns } = toAnthropic(
         messages,
         midConversationSystem(selection.model),
       );
+      const declared: Json[] = tools.map((t) => ({
+        name: t.function.name,
+        description: t.function.description,
+        input_schema: t.function.parameters,
+      }));
+      // Rarely used tools load on demand (#126). The note goes at the end of
+      // the leading system text, which stays the same while the tool set does.
+      const search = toolSearchFor(selection)
+        ? deferTools(declared)
+        : { tools: declared, note: undefined };
+      const system = [leading, search.note].filter(Boolean).join("\n\n");
       body = {
         model: selection.model,
         // Explicit 1h breakpoint on the stable tools + system prefix, so it
@@ -596,11 +608,7 @@ export class LlmClient {
         messages: turns,
         max_tokens: max,
         stream: true,
-        tools: tools.map((t) => ({
-          name: t.function.name,
-          description: t.function.description,
-          input_schema: t.function.parameters,
-        })),
+        tools: search.tools,
       };
       headers["anthropic-version"] = "2023-06-01";
       headers["x-api-key"] = endpoint.apiKey;

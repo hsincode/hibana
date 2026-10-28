@@ -4,10 +4,10 @@ import { Select } from "./controls";
 import { Badge, Skeleton, ToastArea, useToasts } from "./ui";
 
 /* ============================================================
-   予算が少ないときのモデル（#89、閾値は #95、書き換えは #121）
+   予算が少ないときのモデル（#89、閾値は #95、書き換えは #121、請求月ごとに一度は #128）
    「今月の残り」から「今日の推計」を引いた額が閾値を切ると、API は保存された
-   設定のうち Anthropic API と Anthropic Workspace を選んでいるものを、一度だけ
-   ここで選んだモデルに書き換える（apps/api/src/budget-switch.ts）。判定は
+   設定のうち Anthropic API と Anthropic Workspace を選んでいるものを、請求月ごとに
+   一度だけ、ここで選んだモデルに書き換える（apps/api/src/budget-switch.ts）。判定は
    apps/api/src/analytics.ts の budget() が、保存された閾値でする。書き換えは
    bot が 2 分ごとに判定を読みに来たときなので、ここに出る状態とは最大 2 分ずれる。
    書き換えた後は送る直前の差し替えをしないので、選び直したモデルのまま動く。
@@ -157,8 +157,9 @@ export function BudgetFallbackPanel({ reloadKey }: { reloadKey: string }) {
       <p className="budget-desc">
         今日の推計を含めた今月の残りが {data ? usd(data.threshold_usd) : "閾値"}{" "}
         を切ったとき、すべてのサーバーと個人設定のうち、Anthropic API（Auto
-        を含む）と Anthropic Workspace
-        を選んでいる設定を一度だけこのモデルに書き換えます。サブエージェントのモデルとテキスト生成モデルも含みます。Workspace
+        を含む）と Anthropic Workspace を選んでいる設定を、請求月（毎月 5
+        日〜翌月 4
+        日）ごとに一度だけこのモデルに書き換えます。サブエージェントのモデルとテキスト生成モデルも含みます。Workspace
         は同じモデルの Workspace にして、Ultra を off
         にします。その後は自由に変えられ、予算が戻っても元には戻しません。ほかのプロバイダーは変えません。
       </p>
@@ -318,7 +319,7 @@ function StatusNote({ status }: { status: Status }) {
       {usd(status.today_usd)}）。
       {status.low
         ? "下回ったときに、設定をフォールバックモデルに書き換えました。その後に選び直したモデルは、そのまま動きます。ここでモデルを変えても、書き換え済みの設定は変わりません。"
-        : `${usd(status.threshold_usd)} を切ったときに、設定を書き換えます。`}
+        : `${usd(status.threshold_usd)} を切ったときに、設定を書き換えます（この請求月にもう書き換えていれば、次の請求月まで書き換えません）。`}
       bot は 2 分ごとに確かめます。
     </p>
   );

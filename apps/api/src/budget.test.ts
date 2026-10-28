@@ -22,29 +22,43 @@ const INTERNAL = { authorization: "Bearer test-internal" };
  * tokens ($4 per million). A Response in `fail` answers both instead.
  */
 function anthropic(spentCents: string, opusInput: number, fail?: Response) {
+  return reports({ days: { "2026-10-08": spentCents }, opusInput }, fail);
+}
+
+/**
+ * The same from figures a test changes between polls: the cents the cost
+ * report has for each day, and the uncached Opus 5.5 input of the day the
+ * usage report is asked for.
+ */
+function reports(
+  figures: { days: Record<string, string>; opusInput: number },
+  fail?: Response,
+) {
   const calls: URL[] = [];
+  const at = (ms: number) => new Date(ms).toISOString().replace(".000Z", "Z");
   const fetcher = (async (input: string | URL | Request) => {
     const url = new URL(String(input));
     calls.push(url);
     if (fail) return fail.clone();
     if (url.pathname.endsWith("/cost_report")) {
       return Response.json({
-        data: [
-          {
-            starting_at: "2026-10-08T00:00:00Z",
-            ending_at: "2026-10-09T00:00:00Z",
-            results: [{ amount: spentCents, currency: "USD" }],
-          },
-        ],
+        data: Object.entries(figures.days).map(([day, amount]) => ({
+          starting_at: `${day}T00:00:00Z`,
+          ending_at: at(Date.parse(`${day}T00:00:00Z`) + 86_400_000),
+          results: [{ amount, currency: "USD" }],
+        })),
         has_more: false,
         next_page: null,
       });
     }
+    const { opusInput } = figures;
+    // One minute, an hour into the day asked for.
+    const hour = Date.parse(url.searchParams.get("starting_at")!) + 3_600_000;
     return Response.json({
       data: [
         {
-          starting_at: "2026-10-09T01:00:00Z",
-          ending_at: "2026-10-09T01:01:00Z",
+          starting_at: at(hour),
+          ending_at: at(hour + 60_000),
           results: [
             {
               model: "claude-opus-5-5",
@@ -63,7 +77,11 @@ function anthropic(spentCents: string, opusInput: number, fail?: Response) {
   return { calls, fetcher };
 }
 
-async function setup(adminKey: string | null, api = anthropic("0", 0)) {
+async function setup(
+  adminKey: string | null,
+  api = anthropic("0", 0),
+  now = () => NOW,
+) {
   const env = loadTestEnv({
     adminIds: ["admin-1"],
     anthropicAdminKey: adminKey,
@@ -84,7 +102,7 @@ async function setup(adminKey: string | null, api = anthropic("0", 0)) {
     guildAccess: async () => true,
     listGuilds: async () => [],
     anthropicFetch: api.fetcher,
-    now: () => NOW,
+    now,
   });
   const call = (
     path: string,
@@ -596,10 +614,42 @@ describe("the settings switch once the budget is low (#121)", () => {
     });
   });
 
-  test("not put back when the budget recovers; going below again switches again", async () => {
-    const { call, store } = await low();
+  test("after midnight the cost report catches up and it is low again: the effort picked after the switch is kept", async () => {
+    // $185 spent on the 8th and $6 today: $9 left.
+    const figures = {
+      days: { "2026-10-08": "18500" } as Record<string, string>,
+      opusInput: 1_500_000,
+    };
+    let at = NOW;
+    const { call, store } = await setup(ADMIN_KEY, reports(figures), () => at);
+    await seed(store, "api", { preset: "anthropic-opus-5-5" });
+    expect((await poll(call)).low).toBe(true);
+    expect((await store.getGuild("api")).effort).toBe("high");
+    await seed(store, "api", {
+      preset: "anthropic-haiku-5-5",
+      effort: "xhigh",
+    });
+    // Just after midnight UTC the 9th is in neither figure: $15 left.
+    at = Date.parse("2026-10-10T00:30:00Z");
+    figures.opusInput = 0;
+    expect((await poll(call)).low).toBe(false);
+    // The cost report has the 9th now: $9 left again.
+    at = Date.parse("2026-10-10T06:00:00Z");
+    figures.days["2026-10-09"] = "600";
+    expect((await poll(call)).low).toBe(true);
+    expect((await store.getGuild("api")).effort).toBe("xhigh");
+  });
+
+  test("not put back when the budget recovers; going below again switches again only in the next billing month", async () => {
+    const figures = {
+      days: { "2026-10-08": "18500" } as Record<string, string>,
+      opusInput: 1_500_000,
+    };
+    let at = NOW;
+    const { call, store } = await setup(ADMIN_KEY, reports(figures), () => at);
     await seed(store, "api", { preset: "anthropic-opus-5-5" });
     await poll(call);
+    expect(await store.getMeta("budget_fallback_switched")).toBe("2026-10");
     // An Administrator lowers the threshold: $9 left is no longer low.
     await store.setMeta("budget_fallback_threshold", "5");
     await seed(store, "api", { preset: "anthropic-opus-5-5" });
@@ -607,11 +657,47 @@ describe("the settings switch once the budget is low (#121)", () => {
     expect((await store.getGuild("api")).selection?.model).toBe(
       "claude-opus-5-5",
     );
+    // Raised again: low, but this billing month has switched already.
     await store.setMeta("budget_fallback_threshold", "10");
+    expect((await poll(call)).low).toBe(true);
+    expect((await store.getGuild("api")).selection?.model).toBe(
+      "claude-opus-5-5",
+    );
+    // The billing month from 5 November goes below too.
+    at = Date.parse("2026-11-09T03:00:00Z");
+    figures.days = { "2026-11-08": "18500" };
     expect((await poll(call)).low).toBe(true);
     expect((await store.getGuild("api")).selection?.model).toBe(
       "claude-haiku-5-5",
     );
+    expect(await store.getMeta("budget_fallback_switched")).toBe("2026-11");
+  });
+
+  test('the mark of the first version ("true") counts as this billing month\'s switch', async () => {
+    // Written by #122 when it switched, in the billing month this shipped in.
+    const figures = {
+      days: { "2026-10-08": "18500" } as Record<string, string>,
+      opusInput: 1_500_000,
+    };
+    let at = NOW;
+    const { call, store } = await setup(ADMIN_KEY, reports(figures), () => at);
+    await store.setMeta("budget_fallback_switched", "true");
+    await seed(store, "api", {
+      preset: "anthropic-haiku-5-5",
+      effort: "xhigh",
+    });
+    // The first answer after it ships is not low (just after midnight UTC,
+    // say): it is still this month's switch.
+    await store.setMeta("budget_fallback_threshold", "5");
+    expect((await poll(call)).low).toBe(false);
+    expect(await store.getMeta("budget_fallback_switched")).toBe("2026-10");
+    await store.setMeta("budget_fallback_threshold", "10");
+    expect((await poll(call)).low).toBe(true);
+    expect((await store.getGuild("api")).effort).toBe("xhigh");
+    at = Date.parse("2026-11-09T03:00:00Z");
+    figures.days = { "2026-11-08": "18500" };
+    await poll(call);
+    expect((await store.getGuild("api")).effort).toBe("high");
   });
 
   test("no decision, no switch: without an Admin API key or with a failed report", async () => {
@@ -634,20 +720,72 @@ describe("the settings switch once the budget is low (#121)", () => {
     );
   });
 
-  test("a switch that fails is not marked done, so the next poll tries again", async () => {
+  test("a row that could not be written is tried again on the next poll, and only it", async () => {
+    const { call, store } = await low();
+    await seed(store, "a", { preset: "anthropic-opus-5-5" });
+    await seed(store, "b", { preset: "anthropic-opus-5-5" });
+    await store.putUserOverride(
+      "123456789012",
+      applyUserOverridePatch(emptyUserOverride(), {
+        preset: "anthropic-opus-5-5",
+      }),
+    );
+    const put = store.putGuild.bind(store);
+    const putUser = store.putUserOverride.bind(store);
+    let down = true;
+    store.putGuild = async (id, row) => {
+      if (down && id === "b") throw new Error("database down");
+      return put(id, row);
+    };
+    store.putUserOverride = async (id, row) => {
+      if (down) throw new Error("database down");
+      return putUser(id, row);
+    };
+    const errors = console.error;
+    console.error = () => {};
+    try {
+      expect((await poll(call)).low).toBe(true);
+    } finally {
+      console.error = errors;
+    }
+    expect((await store.getGuild("a")).selection?.model).toBe(
+      "claude-haiku-5-5",
+    );
+    expect((await store.getGuild("b")).selection?.model).toBe(
+      "claude-opus-5-5",
+    );
+    // Picked on "a" before the next poll: not written over.
+    await seed(store, "a", { preset: "anthropic-haiku-5-5", effort: "xhigh" });
+    down = false;
+    await poll(call);
+    expect((await store.getGuild("a")).effort).toBe("xhigh");
+    expect((await store.getGuild("b")).selection?.model).toBe(
+      "claude-haiku-5-5",
+    );
+    expect((await store.getUserOverride("123456789012")).selection?.model).toBe(
+      "claude-haiku-5-5",
+    );
+    expect(await store.getMeta("budget_fallback_switched")).toBe("2026-10");
+    // Nothing is left to try: "b" picked afterwards is kept too.
+    await seed(store, "b", { preset: "anthropic-haiku-5-5", effort: "max" });
+    await poll(call);
+    expect((await store.getGuild("b")).effort).toBe("max");
+  });
+
+  test("settings that cannot be read are not switched, and the next poll switches them", async () => {
     const { call, store } = await low();
     await seed(store, "api", { preset: "anthropic-opus-5-5" });
-    const put = store.putGuild.bind(store);
-    let fail = true;
-    store.putGuild = async (id, row) => {
-      if (fail) throw new Error("database down");
-      return put(id, row);
+    const all = store.allGuilds.bind(store);
+    let down = true;
+    store.allGuilds = async () => {
+      if (down) throw new Error("database down");
+      return all();
     };
     expect((await call("/internal/budget", { headers: INTERNAL })).status).toBe(
       500,
     );
-    expect(await store.getMeta("budget_fallback_switched")).toBe("false");
-    fail = false;
+    expect(await store.getMeta("budget_fallback_switched")).not.toBe("2026-10");
+    down = false;
     await poll(call);
     expect((await store.getGuild("api")).selection?.model).toBe(
       "claude-haiku-5-5",

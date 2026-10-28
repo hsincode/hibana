@@ -2,9 +2,9 @@
 // (decision record: #89), the threshold that counts as nearly spent (#95),
 // and the switch itself (#121). The settings API decides whether it is
 // (`/internal/budget`, from the cost report and today's estimate) and, when it
-// turns so, rewrites the stored settings once; the bot runs what is stored and
-// says so in Discord; the dashboard shows both values and an Administrator
-// edits them.
+// turns so, rewrites the stored settings once a billing month (#128); the bot
+// runs what is stored and says so in Discord; the dashboard shows both values
+// and an Administrator edits them.
 
 import { z } from "zod";
 import {
@@ -148,9 +148,10 @@ export function formatThreshold(usd: number): string {
 
 /**
  * Rewriting the settings once the budget is low (#121). The settings API does
- * it once, when `/internal/budget` turns low; nothing swaps a request after
- * that, so a model picked afterwards (Haiku 5.5 Xhigh, say) runs as picked.
- * Settings are not put back when the budget recovers.
+ * it once a billing month, when `/internal/budget` first turns low in it
+ * (#128); nothing swaps a request after that, so a model picked afterwards
+ * (Haiku 5.5 Xhigh, say) runs as picked. Settings are not put back when the
+ * budget recovers.
  *
  * Every stored choice of an `anthropic` preset (Auto included) or an
  * Anthropic Workspace preset is rewritten (owner's decisions on #121): the

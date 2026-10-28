@@ -1240,11 +1240,13 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
         const status = await costReport.budget(
           await loadBudgetThreshold(store),
         );
-        // Gone below the threshold: the stored settings are switched once
-        // (#121). The bot reads them from the snapshot, like any change.
+        // Gone below the threshold: the stored settings are switched once a
+        // billing month (#121, #128). The bot reads them from the snapshot,
+        // like any change.
         const switched = await observeBudget(
           store,
           status.low,
+          status.month,
           await loadUnpublished(store),
         );
         if (switched) {

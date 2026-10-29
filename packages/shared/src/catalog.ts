@@ -262,6 +262,15 @@ export const MODEL_PRESETS = [
     model: "gpt-6-luna",
     label: "Codex Plus / GPT-6 Luna",
   },
+  // GPT-6.1 Terra (2026-10-26, #132): the mid-tier between Luna and Sol, on
+  // all three GPT accounts. Listed after Luna so no provider's first preset,
+  // and so no default model, changes.
+  {
+    id: "plus-terra",
+    provider: "codex_plus",
+    model: "gpt-6.1-terra",
+    label: "Codex Plus / GPT-6.1 Terra",
+  },
   // Unreleased GPT-6 Astra. Wired now so flipping `published` on the admin
   // screen is enough at launch — no code deploy. Default unpublished.
   {
@@ -286,6 +295,12 @@ export const MODEL_PRESETS = [
     label: "Codex Pro / GPT-6 Luna",
   },
   {
+    id: "pro-terra",
+    provider: "codex_pro",
+    model: "gpt-6.1-terra",
+    label: "Codex Pro / GPT-6.1 Terra",
+  },
+  {
     id: "pro-astra",
     provider: "codex_pro",
     model: "gpt-6-astra",
@@ -305,6 +320,12 @@ export const MODEL_PRESETS = [
     provider: "chatgpt",
     model: "gpt-6-luna",
     label: "ChatGPT / GPT-6 Luna",
+  },
+  {
+    id: "chatgpt-terra",
+    provider: "chatgpt",
+    model: "gpt-6.1-terra",
+    label: "ChatGPT / GPT-6.1 Terra",
   },
   {
     id: "chatgpt-astra",

@@ -54,6 +54,9 @@ test("subagent start notice uses the catalog name and one task line", () => {
     subagentModelTitle({ provider: "codex_pro", model: "gpt-6-luna" }),
   ).toBe("GPT 6 Luna");
   expect(
+    subagentModelTitle({ provider: "chatgpt", model: "gpt-6.1-terra" }),
+  ).toBe("GPT 6.1 Terra");
+  expect(
     subagentModelTitle({ provider: "claude_kiro", model: "claude-opus-5" }),
   ).toBe("Claude Opus 5");
   expect(subagentModelTitle({ provider: "custom", model: "gpt-oss-20b" })).toBe(

@@ -167,6 +167,16 @@ describe("authz", () => {
     expect(ids).toContain("plus-luna");
     expect(ids).toContain("pro-sol");
     expect(ids).toContain("pro-luna");
+    // GPT-6.1 Terra ships published (#132). `chatgpt-terra` is listed only
+    // once a ChatGPT account is linked, like every ChatGPT preset.
+    for (const id of ["plus-terra", "pro-terra"]) {
+      expect(ids).toContain(id);
+      expect(
+        (body.presets as { id: string; model?: string }[]).find(
+          (p) => p.id === id,
+        )?.model,
+      ).toBe("gpt-6.1-terra");
+    }
     expect(ids).not.toContain("sale-sol");
     expect(ids).not.toContain("sale-terra");
     expect(ids).not.toContain("go-spark");
@@ -243,6 +253,8 @@ describe("authz", () => {
     expect(freeIds).toContain("sonnet-5");
     expect(freeIds).toContain("grok-4.6-heavy");
     expect(freeIds).toContain("gemini-3.7-flash");
+    expect(freeIds).toContain("plus-terra");
+    expect(freeIds).toContain("pro-terra");
 
     const admin = await app.handle(
       req("/api/catalog", { cookie: "sess-admin" }),

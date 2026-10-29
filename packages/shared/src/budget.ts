@@ -16,7 +16,7 @@ import {
 } from "./catalog";
 
 /** Turns switch once this month's remaining budget, today's estimate taken
- *  off, is below the threshold. This is the owner's value (#89), used until
+ *  off, is below the threshold. This is the value of #89, used until
  *  an Administrator stores another on the dashboard (#95). */
 export const DEFAULT_BUDGET_FALLBACK_THRESHOLD_USD = 10;
 
@@ -64,7 +64,7 @@ export const budgetFallbackSchema = z
   .strict();
 export type BudgetFallback = z.infer<typeof budgetFallbackSchema>;
 
-/** The owner's default (#89): Anthropic API, Claude Haiku 5.5, effort high. */
+/** The default (#89): Anthropic API, Claude Haiku 5.5, effort high. */
 export const DEFAULT_BUDGET_FALLBACK: BudgetFallback = {
   preset: "anthropic-haiku-5-5",
   effort: "high",
@@ -154,7 +154,7 @@ export function formatThreshold(usd: number): string {
  * budget recovers.
  *
  * Every stored choice of an `anthropic` preset (Auto included) or an
- * Anthropic Workspace preset is rewritten (owner's decisions on #121): the
+ * Anthropic Workspace preset is rewritten (decision record #121): the
  * main model of a server and of a person, a fixed subagent or role model, and
  * a server's Text Generation Model. Other providers are left as they are.
  */

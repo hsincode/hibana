@@ -33,8 +33,7 @@ export const MONTHLY_BUDGET_USD = 200;
 const CACHE_MS = 60_000;
 // Requests to Anthropic per rolling minute and instance, cost and usage report together.
 // With the 1-minute cache, a page load costs at most two; this only binds
-// when someone walks through many months at once (#85, not confirmed by the
-// owner).
+// when someone walks through many months at once (#85).
 export const MAX_CALLS_PER_MINUTE = 10;
 // A billing month is as long as the calendar month it starts in, so it fits
 // in a single page (limit 31). More pages than this means the

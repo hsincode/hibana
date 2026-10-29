@@ -546,8 +546,8 @@ class Turn {
     // status the session reads as: events are taken up in the order they
     // were sent, so the next thing the session does is that message. It is
     // only known where the list was read for the cost (`requireCost`); a
-    // session that reports a cost is not asked. Treating it like work under
-    // way is a choice the owner has not confirmed yet (#76).
+    // session that reports a cost is not asked. It is treated like work
+    // under way (#76).
     const capped = max <= consumed;
     const dirty =
       session.status !== "idle" || capped || this.openRuns.size > 0 || ahead;
@@ -766,9 +766,8 @@ class Turn {
    *  the session does with it is missed. `resumed`: the session was paused at
    *  its budget, so raising it has set the old work going again. An interrupt
    *  goes ahead of the message in the same request: the old work ends, and
-   *  the next thing the session does is this message. Stopping that work,
-   *  rather than showing what it goes on to produce as this turn's, is a
-   *  choice the owner has not confirmed yet (#76). */
+   *  the next thing the session does is this message. That work is
+   *  stopped rather than shown as this turn's (#76). */
   private async post(dirty: boolean, resumed: boolean) {
     const { input } = this;
     if (input.signal.aborted) throw input.signal.reason;

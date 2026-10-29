@@ -6,8 +6,8 @@ import { downloadPublic } from "./network";
 // https://docs.typesafe.ai/images
 export const JEV_IMAGES_HEADER = "TypeSafe-Danger-Zone-Images";
 
-// Hibana's bounds, not the provider's (#83). The owner gave 4 images and 3
-// seconds for an image step before choosing Jev's own image input.
+// Hibana's bounds, not the provider's (#83): 4 images and 3 seconds for an
+// image step, decided before choosing Jev's own image input.
 export const MAX_JEV_IMAGES = 4;
 export const JEV_IMAGE_PREP_TIMEOUT_MS = 3000;
 // Jev takes 32 MiB per request body. Four base64 images of 5 MiB stay well

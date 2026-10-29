@@ -94,7 +94,8 @@ export type Artifact = {
   created_at_unix: number;
   updated_at_unix: number | null;
   expires_at_unix: number;
-  retention: "ttl" | "month" | "permanent";
+  /** "recording": a meeting recording (#138), never extended. */
+  retention: "ttl" | "month" | "permanent" | "recording";
   bytes: number;
   file_count: number;
   permanent: boolean;

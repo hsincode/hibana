@@ -1621,6 +1621,11 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
             set.status = 404;
             return { error: "artifact not found" };
           }
+          // The room for recordings' audio assumes each lives three days.
+          if (site.retention === "recording") {
+            set.status = 409;
+            return { error: "録音は延命・永久化できません" };
+          }
           const cmd = await store.enqueueArtifactCommand(
             token,
             params.id,
@@ -1745,7 +1750,9 @@ function parseArtifactSite(raw: unknown): ArtifactRow | null {
   if (!channel_id) return null;
   const retentionRaw = typeof o.retention === "string" ? o.retention : "ttl";
   const retention: ArtifactRow["retention"] =
-    retentionRaw === "month" || retentionRaw === "permanent"
+    retentionRaw === "month" ||
+    retentionRaw === "permanent" ||
+    retentionRaw === "recording"
       ? retentionRaw
       : "ttl";
   const num = (v: unknown): number => {

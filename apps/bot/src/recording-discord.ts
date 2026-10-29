@@ -14,15 +14,11 @@ import {
   type Client,
   type GuildBasedChannel,
 } from "discord.js";
+import { PassThrough } from "node:stream";
 import { sleep } from "./io";
 import type { RecordingEvents, RecordingPort, VoiceHandle } from "./recording";
 import type { Runtime } from "./runtime";
-import {
-  UtteranceAssembler,
-  recordingQuery,
-  streamSpeech,
-  type SpeechStream,
-} from "./stt";
+import { UtteranceAssembler, recordingQuery, streamSpeech } from "./stt";
 
 /** Speakers received at once in one recording, as in the voice
  *  conversation. */
@@ -151,10 +147,10 @@ export class DiscordRecordingPort implements RecordingPort {
     const abort = new AbortController();
     const sockets = new Set<{ close(): void }>();
     // Speakers whose speech is being received now. A speaker's slot is the
-    // Discord receive stream, not the xAI stream: once the receive stream
-    // ends at a pause, the utterance is still being finished (up to five
-    // seconds), and the speaker may already be talking again.
-    const speakers = new Map<string, { stream?: SpeechStream }>();
+    // Discord receive stream, which ends at a pause; the xAI streams are fed
+    // from it. Once it ends, the utterance is still being finished (up to
+    // five seconds), and the speaker may already be talking again.
+    const speakers = new Map<string, { end?: () => void }>();
     /** Every utterance still being received or finished. */
     const tasks = new Set<Promise<void>>();
     // Other bots (a music bot) are not part of the meeting.
@@ -169,32 +165,10 @@ export class DiscordRecordingPort implements RecordingPort {
         tasks.size >= MAX_STREAMS
       )
         return;
-      const entry: {
-        stream?: SpeechStream;
-        /** xAI took the stream (`transcript.created`). */
-        ready?: boolean;
-        /** xAI sent an error event: the stream counts as failed. */
-        failed?: boolean;
-        /** xAI sent text: it was transcribing speech. */
-        transcribed?: boolean;
-      } = {};
+      const entry: { end?: () => void } = {};
       speakers.set(userId, entry);
-      const release = (again: boolean) => {
-        if (speakers.get(userId) !== entry) return;
-        speakers.delete(userId);
-        // Still talking when the receive stream closed (it reached its
-        // limit): carry on in a new one. Only after a stream xAI was
-        // transcribing: one it refused or closed at once (a bad key, an
-        // outage, a limit) would be retried for as long as the speaker
-        // talks. Deferred, so the receiver has let go of the stream that
-        // closed before a new one is asked for.
-        if (
-          again &&
-          entry.transcribed &&
-          !abort.signal.aborted &&
-          connection.receiver.speaking.users.has(userId)
-        )
-          setTimeout(() => listen(userId), 0);
+      const release = () => {
+        if (speakers.get(userId) === entry) speakers.delete(userId);
       };
       const task = (async () => {
         const member = await guild.members.fetch(userId);
@@ -206,43 +180,98 @@ export class DiscordRecordingPort implements RecordingPort {
         const opus = connection.receiver.subscribe(userId, {
           end: { behavior: EndBehaviorType.AfterSilence, duration: 1200 },
         });
-        opus.once("close", () => release(true));
-        const startedAt = Date.now();
-        const assembler = new UtteranceAssembler();
-        const emit = (u: { text: string; start: number } | undefined) => {
-          if (u)
-            events.utterance(
-              userId,
-              member.displayName,
-              startedAt + Math.round(u.start * 1000),
-              u.text,
-            );
+        let receiving = true;
+        // Until a stream is open, leaving just ends the receive stream.
+        entry.end = () => {
+          if (!opus.destroyed) opus.push(null);
         };
-        entry.stream = stream({
-          opus,
-          query: recordingQuery(this.runtime.guild(guildId).filler_removal),
-          key: this.runtime.config.xaiKey,
-          sockets,
-          maxMs: STREAM_MAX_MS,
-          report: this.report,
-          onMessage: (data) => {
-            if (data.type === "transcript.created") entry.ready = true;
-            if (data.type === "transcript.partial") entry.transcribed = true;
-            if (data.type === "error") entry.failed = true;
-            emit(assembler.push(data));
-          },
-        });
-        await entry.stream.done;
-        emit(assembler.flush());
-        if (entry.ready && !entry.failed) failures = 0;
-        else if (++failures === FAILURES_TO_WARN && !abort.signal.aborted)
-          events.failing();
+        const received = new Promise<void>((resolve) =>
+          opus.once("close", () => {
+            receiving = false;
+            release();
+            resolve();
+          }),
+        );
+        // The audio is kept for as long as the speaker is received (#138),
+        // whatever happens to the transcription.
+        const sink = events.audio?.(userId, member.displayName);
+        if (sink) {
+          opus.on("data", (packet: Buffer) => sink.packet(packet, Date.now()));
+          void received.then(() => sink.end());
+        }
+        // One xAI stream at a time. A stream that reached its limit while
+        // the speaker is still talking is followed by a new one, but only
+        // after one xAI was transcribing: one it refused or closed at once
+        // (a bad key, an outage, a limit) is not retried until the speaker
+        // pauses.
+        while (receiving && !abort.signal.aborted) {
+          const input = new PassThrough({ objectMode: true });
+          let feeding = true;
+          const feed = (packet: Buffer) => {
+            if (feeding && !input.destroyed) input.write(packet);
+          };
+          const stop = () => {
+            if (!feeding) return;
+            feeding = false;
+            if (!input.destroyed) input.end();
+          };
+          opus.on("data", feed);
+          opus.once("close", stop);
+          const startedAt = Date.now();
+          const assembler = new UtteranceAssembler();
+          const emit = (u: { text: string; start: number } | undefined) => {
+            if (u)
+              events.utterance(
+                userId,
+                member.displayName,
+                startedAt + Math.round(u.start * 1000),
+                u.text,
+              );
+          };
+          const state: {
+            /** xAI took the stream (`transcript.created`). */
+            ready?: boolean;
+            /** xAI sent an error event: the stream counts as failed. */
+            failed?: boolean;
+            /** xAI sent text: it was transcribing speech. */
+            transcribed?: boolean;
+          } = {};
+          const speech = stream({
+            opus: input,
+            query: recordingQuery(this.runtime.guild(guildId).filler_removal),
+            key: this.runtime.config.xaiKey,
+            sockets,
+            maxMs: STREAM_MAX_MS,
+            report: this.report,
+            onMessage: (data) => {
+              if (data.type === "transcript.created") state.ready = true;
+              if (data.type === "transcript.partial") state.transcribed = true;
+              if (data.type === "error") state.failed = true;
+              emit(assembler.push(data));
+            },
+          });
+          // Leaving ends the speech as a pause would: what was said is
+          // finished, and the receive stream (and the audio) ends.
+          entry.end = () => {
+            feeding = false;
+            speech.end();
+            if (!opus.destroyed) opus.push(null);
+          };
+          await speech.done;
+          opus.off("data", feed);
+          opus.off("close", stop);
+          feeding = false;
+          emit(assembler.flush());
+          if (state.ready && !state.failed) failures = 0;
+          else if (++failures === FAILURES_TO_WARN && !abort.signal.aborted)
+            events.failing();
+          if (!state.transcribed) break;
+        }
+        await received;
       })()
         .catch(this.report)
-        // Never listens again from here: a lookup that keeps failing would
-        // loop.
         .finally(() => {
-          release(false);
+          release();
           tasks.delete(task);
         });
       tasks.add(task);
@@ -266,7 +295,7 @@ export class DiscordRecordingPort implements RecordingPort {
         abort.abort();
         connection.receiver.speaking.off("start", listen);
         if (flush) {
-          for (const s of speakers.values()) s.stream?.end();
+          for (const s of speakers.values()) s.end?.();
           await Promise.race([Promise.allSettled([...tasks]), sleep(FLUSH_MS)]);
         }
         for (const ws of sockets) ws.close();

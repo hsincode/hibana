@@ -495,6 +495,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     // two at once (apart from the voice conversation's three).
     recordingMaxMinutes: numberEnv(env, "RECORDING_MAX_MINUTES", 180, 1, 1440),
     recordingMaxSessions: numberEnv(env, "RECORDING_MAX_SESSIONS", 2, 1, 10),
+    // A recording's audio, kept as an artifact (#138): 1 GB over every
+    // recording, the one in progress included, each kept three days. 0 keeps
+    // no audio. Needs STATIC_SITE_ENABLED.
+    recordingAudioMaxBytes: numberEnv(
+      env,
+      "RECORDING_AUDIO_MAX_BYTES",
+      1_000_000_000,
+    ),
+    recordingAudioTtlHours: numberEnv(
+      env,
+      "RECORDING_AUDIO_TTL_HOURS",
+      72,
+      1,
+      720,
+    ),
     vpnEnabled: flag(env, "VPN_ENABLED", false),
     vpnProvider: vpn,
     vpnServer: env.VPN_SERVER || (vpn === "vpngate" ? "jp" : "jp-tok"),

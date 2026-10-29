@@ -11,6 +11,7 @@ import type { streamSpeech } from "../stt";
 
 type StreamCall = {
   userId: string;
+  /** What the stream is fed: the speaker's audio while they are received. */
   opus: PassThrough;
   onMessage: (data: Record<string, unknown>) => void;
   finish: () => void;
@@ -40,6 +41,9 @@ function setup(
     users: new Map<string, number>(),
   });
   const subscriptions = new Map<string, PassThrough>();
+  // A stream is opened right after its speaker is subscribed, or again for
+  // the same speaker after its limit.
+  let subscribed = "";
   const lookups: string[] = [];
   const connection = Object.assign(new EventEmitter(), {
     state: { status: "ready" },
@@ -51,7 +55,10 @@ function setup(
     receiver: {
       speaking,
       subscribe(userId: string) {
-        const opus = new PassThrough();
+        const opus = new PassThrough({ objectMode: true });
+        // As Discord's receive stream: once it has ended, it closes.
+        opus.once("end", () => opus.destroy());
+        subscribed = userId;
         subscriptions.set(userId, opus);
         opus.once("close", () => subscriptions.delete(userId));
         return opus;
@@ -79,7 +86,7 @@ function setup(
       resolve = r;
     });
     const call: StreamCall = {
-      userId: [...subscriptions].find(([, s]) => s === o.opus)![0],
+      userId: subscribed,
       opus: o.opus as PassThrough,
       onMessage: o.onMessage as StreamCall["onMessage"],
       finish: resolve,
@@ -88,7 +95,7 @@ function setup(
     streams.push(call);
     if (options.refuse)
       queueMicrotask(() => {
-        // The socket fails at once: the receive stream is torn down too.
+        // The socket fails at once, and the stream drops what it was fed.
         call.opus.destroy();
         resolve();
       });
@@ -131,11 +138,24 @@ function setup(
   const heard: { userId: string; name: string; text: string }[] = [];
   let disconnected = 0;
   let failing = 0;
+  /** Each stretch of speech whose audio was kept, by speaker. */
+  const audio: { userId: string; packets: string[]; ended: boolean }[] = [];
   const events = {
     utterance: (userId: string, name: string, _at: number, text: string) =>
       heard.push({ userId, name, text }),
     disconnected: () => disconnected++,
     failing: () => failing++,
+    audio: (userId: string) => {
+      const kept = { userId, packets: [] as string[], ended: false };
+      audio.push(kept);
+      return {
+        packet: (data: Uint8Array) =>
+          kept.packets.push(Buffer.from(data).toString()),
+        end: () => {
+          kept.ended = true;
+        },
+      };
+    },
   };
   return {
     port,
@@ -146,9 +166,15 @@ function setup(
     heard,
     errors,
     events,
+    audio,
     disconnected: () => disconnected,
     failing: () => failing,
     join: () => port.join("g1", "vc1", events),
+    /** The speaker sends a packet. */
+    say: (userId: string, packet: string) =>
+      subscriptions.get(userId)!.write(Buffer.from(packet)),
+    /** The speaker pauses: Discord's receive stream ends. */
+    pause: (userId: string) => subscriptions.get(userId)?.destroy(),
   };
 }
 const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms));
@@ -179,7 +205,7 @@ describe("DiscordRecordingPort.join", () => {
     s.speaking.emit("start", "u1");
     await tick();
     // The receive stream ends at the pause; the xAI stream is still open.
-    s.streams[0]!.opus.destroy();
+    s.pause("u1");
     await tick();
     s.speaking.emit("start", "u1");
     await tick();
@@ -201,12 +227,17 @@ describe("DiscordRecordingPort.join", () => {
       text: "説明を続けます",
       start: 0,
     });
-    s.streams[0]!.opus.destroy();
+    // The stream reaches its limit; the speaker is still received.
+    s.streams[0]!.finish();
     await tick(20);
     expect(s.streams.length).toBe(2);
+    expect(s.streams[1]!.userId).toBe("u1");
+    // What the speaker says next goes to the new stream.
+    s.say("u1", "next");
+    await tick();
+    expect(s.streams[1]!.opus.read()?.toString()).toBe("next");
     // Not talking any more: no new stream.
-    s.speaking.users.delete("u1");
-    s.streams[1]!.opus.destroy();
+    s.pause("u1");
     await tick(20);
     expect(s.streams.length).toBe(2);
   });
@@ -247,7 +278,7 @@ describe("DiscordRecordingPort.join", () => {
       for (let i = 0; i < 8; i++) s.speaking.emit("start", `u${round}-${i}`);
       await tick();
       // They pause; xAI is still finishing each of them.
-      for (const c of s.streams) if (!c.opus.destroyed) c.opus.destroy();
+      for (let i = 0; i < 8; i++) s.pause(`u${round}-${i}`);
       await tick();
     }
     expect(s.streams.length).toBe(16);
@@ -259,14 +290,60 @@ describe("DiscordRecordingPort.join", () => {
     s.speaking.users.set("u1", 1);
     s.speaking.emit("start", "u1");
     await tick(30);
-    // No reconnect loop.
+    // No reconnect loop, and still received.
     expect(s.streams.length).toBe(1);
+    s.speaking.emit("start", "u1");
+    await tick();
+    expect(s.streams.length).toBe(1);
+    // Each pause ends the speech; the next one is tried again.
     for (let i = 0; i < 6; i++) {
+      s.pause("u1");
+      await tick();
       s.speaking.emit("start", "u1");
       await tick();
     }
     expect(s.streams.length).toBe(7);
     expect(s.failing()).toBe(1);
+  });
+
+  test("the audio is kept for as long as the speaker is received, even when xAI refuses the stream (#138)", async () => {
+    const s = setup({ refuse: true });
+    await s.join();
+    s.speaking.emit("start", "u1");
+    await tick();
+    s.say("u1", "a");
+    await tick();
+    // xAI has refused; the speaker goes on.
+    s.say("u1", "b");
+    s.say("u1", "c");
+    await tick();
+    expect(s.audio).toEqual([
+      { userId: "u1", packets: ["a", "b", "c"], ended: false },
+    ]);
+    s.pause("u1");
+    await tick();
+    expect(s.audio[0]!.ended).toBe(true);
+  });
+
+  test("each stretch of speech is its own audio, and other bots' audio is not kept (#138)", async () => {
+    const s = setup({ bots: ["music"] });
+    await s.join();
+    s.speaking.emit("start", "music");
+    s.speaking.emit("start", "u1");
+    await tick();
+    s.say("u1", "one");
+    s.pause("u1");
+    await tick();
+    s.speaking.emit("start", "u1");
+    await tick();
+    s.say("u1", "two");
+    await tick();
+    expect(s.audio.map((a) => [a.userId, a.packets, a.ended])).toEqual([
+      ["u1", ["one"], true],
+      ["u1", ["two"], false],
+    ]);
+    // The xAI stream got the same packets.
+    expect(s.streams[1]!.opus.read()?.toString()).toBe("two");
   });
 
   test("xAI closing every stream right after it is ready is not retried while someone talks either (second review)", async () => {
@@ -277,7 +354,12 @@ describe("DiscordRecordingPort.join", () => {
       s.speaking.emit("start", "u1");
       await tick(30);
       expect(s.streams.length).toBe(1);
+      s.speaking.emit("start", "u1");
+      await tick();
+      expect(s.streams.length).toBe(1);
       for (let i = 0; i < 5; i++) {
+        s.pause("u1");
+        await tick();
         s.speaking.emit("start", "u1");
         await tick();
       }
@@ -301,6 +383,8 @@ describe("DiscordRecordingPort.join", () => {
     await handle.leave(true);
     expect(s.streams[0]!.ended).toBe(true);
     expect(s.heard.map((h) => h.text)).toEqual(["最後まで"]);
+    // The receive stream ended too, and the audio with it.
+    expect(s.audio[0]!.ended).toBe(true);
     expect(s.connection.destroyed).toBe(true);
     // Nothing more is listened to.
     s.speaking.emit("start", "u2");

@@ -1,7 +1,7 @@
 // Manual check of auto routing against the real Jev API (#35):
 //   cd apps/bot && bun run route-eval
 // It needs JEV_API_KEY and spends a few Decisions calls, so it is not part of
-// `make ci`. The expectations are the owner's routing intent written as
+// `make ci`. The expectations are the routing intent of #35 written as
 // cases; route-eval.test.ts keeps the set itself well-formed.
 import { loadConfig } from "./config";
 import { JevClient } from "./jev";

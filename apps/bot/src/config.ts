@@ -305,8 +305,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     promptFile: resolve(env.PROMPT_FILE || "prompt.md"),
     personaFile: resolve(env.PERSONA_FILE || "persona.md"),
     // Anthropic Workspace (#76): limits of the Managed Agents path. The key
-    // and base URL are `endpoints.anthropic_workspace`. The defaults are the
-    // values proposed in #76, which the owner has yet to confirm.
+    // and base URL are `endpoints.anthropic_workspace`. The defaults are
+    // those of #76.
     anthropicWorkspace: {
       // List cost one turn may add to its session, and what all Workspace
       // turns together may add in one UTC day and month, in cents. A turn's
@@ -491,7 +491,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     xaiKey: env.XAI_API_KEY || "",
     voiceModel: env.VOICE_S2S_MODEL || "grok-voice-latest",
     voiceName: env.VOICE_S2S_VOICE || "eve",
-    // Meeting recording (#118). The owner's limits: three hours a recording,
+    // Meeting recording (#118). Limits: three hours a recording,
     // two at once (apart from the voice conversation's three).
     recordingMaxMinutes: numberEnv(env, "RECORDING_MAX_MINUTES", 180, 1, 1440),
     recordingMaxSessions: numberEnv(env, "RECORDING_MAX_SESSIONS", 2, 1, 10),

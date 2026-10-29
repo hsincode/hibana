@@ -743,7 +743,7 @@ test("Text Generation Model is a server setting: Haiku 5.5 medium by default, An
     { preset: "anthropic-haiku-5-5", effort: "medium", extra: 1 },
   ])
     expect(guildPatchSchema.safeParse({ text_model: bad }).success).toBe(false);
-  // A personal row does not carry it: the owner made it per server.
+  // A personal row does not carry it: it is set per server (#118).
   expect(
     userOverridePatchSchema.safeParse({ text_model: sonnet }).success,
   ).toBe(false);

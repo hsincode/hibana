@@ -222,7 +222,7 @@ describe("/api/budget-fallback", () => {
       expect(res.headers.get("cache-control")).toBe("no-store");
       const body = await res.json();
       expect(body.can_edit).toBe(edit);
-      // The owner's default (#89).
+      // The default (#89).
       expect(body.fallback).toEqual({
         preset: "anthropic-haiku-5-5",
         effort: "high",

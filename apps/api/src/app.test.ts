@@ -1768,6 +1768,42 @@ describe("artifacts", () => {
     expect(cmds2).toEqual([]);
   });
 
+  test("a meeting recording is listed as one, and can be neither extended nor made permanent (#138)", async () => {
+    const { app } = await setup();
+    const recording = { ...site, token: "feedface", retention: "recording" };
+    await app.handle(
+      req("/internal/artifacts", {
+        method: "POST",
+        headers: { authorization: "Bearer test-internal" },
+        body: JSON.stringify({ sites: [recording] }),
+      }),
+    );
+    const listed = (await (
+      await app.handle(req("/api/guilds/g1/artifacts", { cookie: "sess-free" }))
+    ).json()) as { sites: { retention: string; permanent: boolean }[] };
+    expect(listed.sites).toEqual([
+      expect.objectContaining({ retention: "recording", permanent: false }),
+    ]);
+    for (const action of ["month", "permanent", "unpermanent"]) {
+      const res = await app.handle(
+        req("/api/guilds/g1/artifacts/feedface", {
+          method: "PATCH",
+          cookie: "sess-free",
+          body: JSON.stringify({ action }),
+        }),
+      );
+      expect(res.status).toBe(409);
+    }
+    const snap = (await (
+      await app.handle(
+        req("/internal/snapshot", {
+          headers: { authorization: "Bearer test-internal" },
+        }),
+      )
+    ).json()) as { artifact_commands: unknown[] };
+    expect(snap.artifact_commands).toEqual([]);
+  });
+
   test("unknown token is 404", async () => {
     const { app } = await setup();
     const res = await app.handle(

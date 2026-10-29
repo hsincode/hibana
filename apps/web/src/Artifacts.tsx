@@ -16,7 +16,7 @@ import {
 /* ============================================================
    成果物（publish_site）
    ============================================================ */
-type Retention = "all" | "ttl" | "month" | "permanent";
+type Retention = "all" | "ttl" | "month" | "permanent" | "recording";
 type Action = "month" | "permanent" | "unpermanent";
 
 export function ArtifactsPage() {
@@ -49,8 +49,9 @@ export function ArtifactsPage() {
       <header className="page-head">
         <h1>成果物</h1>
         <p className="lead">
-          ボットが公開したサイト。既定は約 48 時間で消えます。1
-          ヶ月延命か永久化できます。永久化の解除もここから。
+          ボットが公開したサイトと、会議の録音。サイトは既定で約 48
+          時間で消え、1 ヶ月延命か永久化できます。永久化の解除もここから。録音は
+          3 日で消え、延命できません。
         </p>
       </header>
       {err && <Alert>{err}</Alert>}
@@ -110,7 +111,7 @@ export function GuildArtifacts({
     <Section
       id="artifacts"
       title="成果物"
-      desc="このサーバーで公開中のサイト。1 ヶ月延命・永久化・永久化解除はボットが次に同期したときに反映されます。"
+      desc="このサーバーで公開中のサイトと会議の録音。1 ヶ月延命・永久化・永久化解除はボットが次に同期したときに反映されます。録音は延命できません。"
     >
       <ArtifactTable
         sites={sites}
@@ -183,6 +184,7 @@ function ArtifactTable({
               ["ttl", "既定"],
               ["month", "1ヶ月"],
               ["permanent", "永久"],
+              ["recording", "録音"],
             ] as const
           ).map(([value, label]) => ({ value, label, count: count(value) }))}
         />
@@ -191,7 +193,7 @@ function ArtifactTable({
       {shown.length === 0 ? (
         <Empty
           title="公開中のサイトはない"
-          body="ボットが publish_site するとここに出ます。"
+          body="ボットが publish_site するか、会議の録音が終わるとここに出ます。"
         />
       ) : (
         <div className="table-wrap">
@@ -244,41 +246,49 @@ function ArtifactTable({
                     )}
                   </td>
                   <td className="full">
-                    <div className="cell-actions">
-                      <button
-                        type="button"
-                        className="btn btn-sm"
-                        disabled={!!busy || s.retention === "permanent"}
-                        onClick={() =>
-                          void act(s, "month", "1ヶ月延命を依頼した")
-                        }
-                      >
-                        1ヶ月
-                      </button>
-                      {s.retention === "permanent" ? (
+                    {s.retention === "recording" ? (
+                      <span className="muted">延命できません</span>
+                    ) : (
+                      <div className="cell-actions">
                         <button
                           type="button"
                           className="btn btn-sm"
-                          disabled={!!busy}
+                          disabled={!!busy || s.retention === "permanent"}
                           onClick={() =>
-                            void act(s, "unpermanent", "永久化の解除を依頼した")
+                            void act(s, "month", "1ヶ月延命を依頼した")
                           }
                         >
-                          永久化解除
+                          1ヶ月
                         </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className="btn btn-sm"
-                          disabled={!!busy}
-                          onClick={() =>
-                            void act(s, "permanent", "永久化を依頼した")
-                          }
-                        >
-                          永久化
-                        </button>
-                      )}
-                    </div>
+                        {s.retention === "permanent" ? (
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            disabled={!!busy}
+                            onClick={() =>
+                              void act(
+                                s,
+                                "unpermanent",
+                                "永久化の解除を依頼した",
+                              )
+                            }
+                          >
+                            永久化解除
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            disabled={!!busy}
+                            onClick={() =>
+                              void act(s, "permanent", "永久化を依頼した")
+                            }
+                          >
+                            永久化
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -302,6 +312,7 @@ function RetentionBadge({ site }: { site: Artifact }) {
         minute: "2-digit",
       })
     : "—";
+  if (site.retention === "recording") return <Badge>録音 · {label}</Badge>;
   return site.retention === "month" ? (
     <Badge>1ヶ月 · {label}</Badge>
   ) : (

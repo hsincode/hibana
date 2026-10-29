@@ -30,7 +30,9 @@ import { ToolRegistry } from "./tools";
 import { WebSync } from "./sync";
 import { Voice } from "./voice";
 import { Recorder } from "./recording";
+import { AudioQuota } from "./recording-audio";
 import { DiscordRecordingPort } from "./recording-discord";
+import { recordingPlayer } from "./recording-player/build";
 import { commands, handleCommand } from "./commands";
 import { imagePrompt, shouldRespond, splitMessage } from "./triggers";
 import { assemblePrompt } from "./harness";
@@ -211,6 +213,14 @@ export class Hibana {
       maxMs: config.recordingMaxMinutes * 60000,
       maxSessions: config.recordingMaxSessions,
       voiceBusy: (id) => this.voice.active(id),
+      audio: {
+        sites: this.tools.sites,
+        quota: new AudioQuota(config.recordingAudioMaxBytes, this.tools.sites),
+        ttlMs: config.recordingAudioTtlHours * 3600_000,
+        player: recordingPlayer,
+      },
+      // The dashboard lists the artifact a recording became (#138).
+      published: () => this.track(this.sync.publishAssets()),
     });
     // A server has one voice connection: a recording keeps `/join` out.
     this.voice.busy = (id) =>

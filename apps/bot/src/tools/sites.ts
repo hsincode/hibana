@@ -1,4 +1,4 @@
-import { mkdir, copyFile, readFile, lstat, rm } from "node:fs/promises";
+import { mkdir, copyFile, lstat, rename, rm } from "node:fs/promises";
 import { join, dirname, extname } from "node:path";
 import type { Server } from "bun";
 import type { Config } from "../config";
@@ -16,7 +16,10 @@ export type Site = {
   created_at_unix: number;
   updated_at_unix: number | null;
   expires_at_unix: number;
-  retention: "ttl" | "month" | "permanent";
+  /** "recording": a meeting recording's audio and transcript (#138). It
+   *  lives until it expires and can be neither extended nor made permanent;
+   *  the recordings' own limit bounds it, not the one for published sites. */
+  retention: "ttl" | "month" | "permanent" | "recording";
   bytes: number;
   file_count: number;
 };
@@ -37,6 +40,24 @@ function parseOrigin(template: string) {
     before: m[2]!.toLowerCase(),
     after: m[3]!.toLowerCase(),
   };
+}
+/** The one byte range asked for, as [first, last]; undefined for none (or
+ *  one this does not serve: several ranges), null for one past the end. */
+export function byteRange(
+  header: string | null,
+  size: number,
+): [number, number] | undefined | null {
+  const m = header && /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!m || (!m[1] && !m[2])) return undefined;
+  if (!m[1]) {
+    const suffix = Number(m[2]);
+    if (!suffix) return null;
+    return [Math.max(0, size - suffix), size - 1];
+  }
+  const first = Number(m[1]);
+  const last = m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;
+  if (first >= size || last < first) return null;
+  return [first, last];
 }
 export class Sites {
   private rows: Site[] = [];
@@ -103,6 +124,80 @@ export class Sites {
   async save() {
     await atomicJson(join(this.root, "sites.json"), this.rows);
   }
+  /** Whether sites are served: a recording's audio needs a place to go. */
+  get serving() {
+    return Boolean(this.server);
+  }
+  /** Bytes the live recordings take (#138). */
+  recordingBytes() {
+    return this.list()
+      .filter((s) => s.retention === "recording")
+      .reduce((n, s) => n + s.bytes, 0);
+  }
+  /** Removes the oldest live recording other than `except`. */
+  async dropOldestRecording(except?: string) {
+    return this.serial.run(async () => {
+      const oldest = this.list()
+        .filter((s) => s.retention === "recording" && s.token !== except)
+        .sort((a, b) => a.created_at_unix - b.created_at_unix)[0];
+      if (!oldest) return false;
+      await rm(join(this.root, oldest.directory ?? oldest.token), {
+        recursive: true,
+        force: true,
+      });
+      this.rows = this.rows.filter((s) => s !== oldest);
+      await this.save();
+      return true;
+    });
+  }
+  /** Lists a meeting recording (#138). `build` fills its directory, which
+   *  becomes visible only once it is complete. */
+  async addRecording(o: {
+    guildId: string;
+    channelId: string;
+    title: string;
+    expiresAt: number;
+    build: (dir: string) => Promise<void>;
+  }) {
+    return this.serial.run(async () => {
+      if (!this.server) throw new Error("Static site hosting is disabled");
+      const token = crypto.randomUUID().replaceAll("-", "");
+      const directory = `${token}-${crypto.randomUUID()}`;
+      const target = join(this.root, directory);
+      const staging = `${target}.staging`;
+      await mkdir(staging, { recursive: true });
+      try {
+        await o.build(staging);
+        await rename(staging, target);
+      } catch (error) {
+        await rm(staging, { recursive: true, force: true });
+        throw error;
+      }
+      const files = await filesUnder(target, 1000);
+      const site: Site = {
+        token,
+        directory,
+        scope: scopeOf({
+          guildId: o.guildId,
+          channelId: o.channelId,
+          thread: false,
+        }),
+        guild_id: o.guildId,
+        channel_id: o.channelId,
+        url: this.urlOf(token),
+        source_path: o.title,
+        created_at_unix: Math.floor(Date.now() / 1000),
+        updated_at_unix: null,
+        expires_at_unix: Math.floor(o.expiresAt / 1000),
+        retention: "recording",
+        bytes: files.reduce((n, f) => n + f.bytes, 0),
+        file_count: files.length,
+      };
+      this.rows.push(site);
+      await this.save();
+      return site;
+    });
+  }
   async start() {
     if (!this.config.siteEnabled) return;
     if (!this.config.siteBase && !this.origin)
@@ -141,8 +236,25 @@ export class Sites {
       const data = Bun.file(file);
       if (!(await data.exists()))
         return new Response("Not found", { status: 404 });
-      return new Response(request.method === "HEAD" ? null : data, {
+      // A recording's page fetches one chunk of a speaker's file at a time
+      // (#138). One range is served; anything else gets the whole file.
+      const range = byteRange(request.headers.get("range"), data.size);
+      if (range === null)
+        return new Response(null, {
+          status: 416,
+          headers: { "Content-Range": `bytes */${data.size}` },
+        });
+      const body = range ? data.slice(range[0], range[1] + 1) : data;
+      return new Response(request.method === "HEAD" ? null : body, {
+        status: range ? 206 : 200,
         headers: {
+          "Accept-Ranges": "bytes",
+          ...(range
+            ? {
+                "Content-Range": `bytes ${range[0]}-${range[1]}/${data.size}`,
+                "Content-Length": String(range[1] - range[0] + 1),
+              }
+            : {}),
           "Content-Type": data.type,
           "X-Content-Type-Options": "nosniff",
           "Referrer-Policy": "no-referrer",
@@ -165,6 +277,8 @@ export class Sites {
         ? this.rows.find((s) => s.token === token && s.scope === scopeOf(ctx))
         : undefined;
       if (token && !old) throw new Error("Site not found in this workspace");
+      if (old?.retention === "recording")
+        throw new Error("A meeting recording cannot be replaced");
       const source = await this.sandbox.path(ctx, path, true),
         st = await lstat(source);
       const files = st.isDirectory()
@@ -177,7 +291,10 @@ export class Sites {
       const bytes = files.reduce((n, f) => n + f.bytes, 0);
       if (bytes > this.config.siteMaxBytes)
         throw new Error("Site exceeds publication size limit");
-      const live = this.list().filter((s) => s.token !== old?.token);
+      // Recordings have their own limit (#138).
+      const live = this.list().filter(
+        (s) => s.token !== old?.token && s.retention !== "recording",
+      );
       if (
         live.filter((s) => s.scope === scopeOf(ctx)).length >=
           this.config.siteMaxCount ||
@@ -248,7 +365,12 @@ export class Sites {
           force: true,
         });
         this.rows = this.rows.filter((s) => s !== site);
-      } else if (mode === "permanent") site.retention = "permanent";
+      } else if (site.retention === "recording")
+        // The room for recordings assumes each lives three days (#138).
+        throw new Error(
+          "A meeting recording can be neither extended nor made permanent",
+        );
+      else if (mode === "permanent") site.retention = "permanent";
       else if (mode === "month" && site.retention === "permanent")
         return { ok: true, note: "Already permanent" };
       else if (mode === "month" || mode === "unpermanent") {

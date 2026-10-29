@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>会議の録音</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --fg: #1d1d1f;
+        --muted: #6e6e73;
+        --line: #d2d2d7;
+        --bg: #fff;
+        --accent: #c2410c;
+        font-family:
+          system-ui,
+          -apple-system,
+          "Hiragino Sans",
+          sans-serif;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --fg: #f5f5f7;
+          --muted: #a1a1a6;
+          --line: #3a3a3c;
+          --bg: #1c1c1e;
+          --accent: #fb923c;
+        }
+      }
+      body {
+        margin: 0 auto;
+        max-width: 860px;
+        padding: 24px 16px 64px;
+        color: var(--fg);
+        background: var(--bg);
+        line-height: 1.6;
+      }
+      h1 {
+        font-size: 1.4rem;
+        margin: 0 0 4px;
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 0.9rem;
+        margin: 0;
+      }
+      section {
+        border-top: 1px solid var(--line);
+        margin-top: 20px;
+        padding-top: 16px;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 12px;
+        align-items: center;
+      }
+      button,
+      select {
+        font: inherit;
+        padding: 6px 12px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      #play {
+        border-color: var(--accent);
+        color: var(--accent);
+        font-weight: 600;
+      }
+      #seek {
+        flex: 1 1 240px;
+        accent-color: var(--accent);
+      }
+      .time {
+        font-variant-numeric: tabular-nums;
+      }
+      #speakers label {
+        white-space: nowrap;
+      }
+      #status {
+        min-height: 1.6em;
+      }
+      #lines {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      #lines li {
+        display: grid;
+        grid-template-columns: auto auto auto 1fr;
+        gap: 4px 10px;
+        align-items: baseline;
+        padding: 6px 4px;
+        border-radius: 6px;
+      }
+      #lines li.playing {
+        background: color-mix(in srgb, var(--accent) 14%, transparent);
+      }
+      .line-play {
+        padding: 0 8px;
+        font-size: 0.8rem;
+      }
+      .t {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+        font-size: 0.85rem;
+      }
+      .name {
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      @media (max-width: 560px) {
+        #lines li {
+          grid-template-columns: auto auto 1fr;
+        }
+        .text {
+          grid-column: 1 / -1;
+        }
+      }
+    </style>
+    <script type="module" src="player.js"></script>
+  </head>
+  <body>
+    <header>
+      <h1 id="title">会議の録音</h1>
+      <p class="muted" id="meta"></p>
+      <p class="muted" id="ending"></p>
+      <p class="muted" id="expires"></p>
+    </header>
+
+    <section aria-label="再生">
+      <div class="row">
+        <button type="button" id="play" aria-pressed="false">▶ 再生</button>
+        <span class="time"
+          ><span id="now">00:00:00</span> /
+          <span id="total">00:00:00</span></span
+        >
+        <input
+          type="range"
+          id="seek"
+          min="0"
+          max="0"
+          step="1000"
+          value="0"
+          aria-label="再生位置"
+        />
+      </div>
+      <p class="row muted" id="speakers">聞く人:</p>
+    </section>
+
+    <section aria-label="ダウンロード">
+      <div class="row">
+        <select id="who" aria-label="ダウンロードする音声"></select>
+        <button type="button" id="download">ダウンロード</button>
+      </div>
+      <p class="muted">
+        音声はこのブラウザの中で重ねて作ります。長い会議では時間がかかります。
+      </p>
+    </section>
+
+    <p id="status" role="status" aria-live="polite"></p>
+
+    <section aria-label="全文">
+      <h2 class="muted">
+        全文（自動の文字起こしです。聞き取りの誤りを含むことがあります）
+      </h2>
+      <ol id="lines"></ol>
+    </section>
+  </body>
+</html>

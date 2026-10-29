@@ -39,7 +39,9 @@ export type SessionRow = {
   expires_at: number;
 };
 
-export type ArtifactRetention = "ttl" | "month" | "permanent";
+/** "recording": a meeting recording's audio and transcript (#138), kept
+ *  until it expires: it can be neither extended nor made permanent. */
+export type ArtifactRetention = "ttl" | "month" | "permanent" | "recording";
 
 export type ArtifactRow = {
   token: string;

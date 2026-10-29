@@ -42,6 +42,27 @@ test("PROVIDER=refuseless seeds new rows with its first preset, like the bot", (
   });
 });
 
+test("GPT-6.1 Terra presets select Terra on each GPT account without changing defaults (#132)", () => {
+  for (const [preset, provider] of [
+    ["plus-terra", "codex_plus"],
+    ["pro-terra", "codex_pro"],
+    ["chatgpt-terra", "chatgpt"],
+  ])
+    expect(applyPatch(emptyGuild(), { preset }).selection).toEqual({
+      provider,
+      model: "gpt-6.1-terra",
+      effort: "max",
+    });
+  // Terra is listed after Luna, so the provider defaults stay where they were.
+  expect(settingsDefaults({}).selection?.model).toBe("gpt-6-luna");
+  expect(settingsDefaults({ PROVIDER: "codex_pro" }).selection?.model).toBe(
+    "gpt-6.1-sol",
+  );
+  expect(settingsDefaults({ PROVIDER: "chatgpt" }).selection?.model).toBe(
+    "gpt-6.1-sol",
+  );
+});
+
 test("new and legacy settings contain concrete values and preserve false, zero and empty lists", () => {
   const defaults = settingsDefaults({
     PROVIDER: "deepseek",

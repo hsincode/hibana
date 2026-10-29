@@ -158,7 +158,7 @@ export class ToolRegistry {
     this.skills = new Skills(runtime.config);
     this.sites = new Sites(runtime.config, this.sandbox);
     this.media = new Media(this.sandbox, log);
-    this.vpn = new Vpn(runtime.config, this.sandbox);
+    this.vpn = new Vpn(runtime.config, this.sandbox, { log });
     this.web = new WebTools(runtime.config, runtime);
     this.image = new ImageTools(runtime.config, this.sandbox);
     this.jev = new JevClient(runtime.config);
@@ -1415,6 +1415,8 @@ export class ToolRegistry {
   }
   async close() {
     clearInterval(this.maintenance);
+    // The hibana-vpn container itself stays up for the next start (#130).
+    this.vpn.close();
     await this.media.close();
     await this.sandbox.close();
     this.sites.stop();

@@ -1,6 +1,7 @@
 import { setPublicProxy } from "../network";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { Logger } from "pino";
 import type { Config } from "../config";
 import type { Context, Json } from "../types";
 import { sleep, readJson, atomicJson } from "../io";
@@ -27,32 +28,106 @@ type VpnStatus = VpnState & {
   status?: string;
 };
 
+type ContainerState = { Running?: boolean; Health?: { Status?: string } };
+
+/** How long a restarted bot waits for a VPN that is not healthy yet. The
+ * longest connect (VPN Gate) waits 90 seconds; this leaves some room. */
+export const VPN_RESTORE_MS = 120_000;
+
+async function inspectVpn(): Promise<ContainerState | undefined> {
+  const r = await processRun(
+    "docker",
+    ["inspect", "-f", "{{json .State}}", "hibana-vpn"],
+    { timeout: 10000, maxOutput: 2000 },
+  ).catch(() => null);
+  if (!r || r.exit_code) return undefined;
+  return JSON.parse(r.stdout);
+}
+
 export class Vpn {
+  /** The background wait of `load`, for tests and for nothing else. */
+  restoring?: Promise<void>;
+  private restore = new AbortController();
+  private log?: Logger;
+  private inspect: () => Promise<ContainerState | undefined>;
+  private restorePollMs: number;
   constructor(
     private config: Config,
     private sandbox: Sandbox,
-  ) {}
+    options: {
+      log?: Logger;
+      // Tests script the container's state instead of running Docker.
+      inspect?: () => Promise<ContainerState | undefined>;
+      restorePollMs?: number;
+    } = {},
+  ) {
+    this.log = options.log;
+    this.inspect = options.inspect ?? inspectVpn;
+    this.restorePollMs = options.restorePollMs ?? 2000;
+  }
+  /** A deploy restarts the bot but leaves the hibana-vpn container running,
+   * so its route is put back here (#130). A container that is still starting
+   * (a connect the restart cut off) or briefly unhealthy is waited for in the
+   * background: startup is not held up, and nothing goes through the
+   * container before its tunnel is up, since until then its own default
+   * route is the direct one. */
   async load() {
-    if (this.config.vpnEnabled && (await this.status()).connected) {
-      this.sandbox.network = "container:hibana-vpn";
-      setPublicProxy(8118);
+    if (!this.config.vpnEnabled) return;
+    const now = await this.status();
+    if (now.connected) {
+      this.attach();
+      this.log?.info({ server: now.server }, "VPN route restored");
+      return;
     }
+    if (now.status !== "starting" && now.status !== "unhealthy") return;
+    this.restoring = this.waitAndAttach(this.restore.signal).catch((error) => {
+      if (!this.restore.signal.aborted)
+        this.log?.error(
+          { error: error instanceof Error ? error.message : String(error) },
+          "VPN route restore failed",
+        );
+    });
+  }
+  /** connect and disconnect decide the route themselves from here on. */
+  stopRestore() {
+    this.restore.abort(new Error("VPN route restore stopped"));
+  }
+  close() {
+    this.stopRestore();
+  }
+  private async waitAndAttach(signal: AbortSignal) {
+    for (const deadline = Date.now() + VPN_RESTORE_MS; Date.now() < deadline;) {
+      await sleep(this.restorePollMs, signal);
+      const now = await this.status();
+      // A disconnect or reconnect may have run while docker inspect did.
+      if (signal.aborted) return;
+      if (now.connected) {
+        this.attach();
+        this.log?.info({ server: now.server }, "VPN route restored");
+        return;
+      }
+      if (now.status !== "starting" && now.status !== "unhealthy") break;
+    }
+    this.log?.warn("VPN did not become healthy after restart; route is direct");
+  }
+  private attach() {
+    this.sandbox.network = "container:hibana-vpn";
+    setPublicProxy(8118);
+  }
+  private detach() {
+    this.sandbox.network = "bridge";
+    setPublicProxy(undefined);
   }
   async status(): Promise<VpnStatus> {
-    const r = await processRun(
-      "docker",
-      ["inspect", "-f", "{{json .State}}", "hibana-vpn"],
-      { timeout: 10000, maxOutput: 2000 },
-    ).catch(() => null);
-    if (!r || r.exit_code)
-      return { connected: false, provider: this.config.vpnProvider };
-    const state = JSON.parse(r.stdout);
+    const state = await this.inspect();
+    if (!state) return { connected: false, provider: this.config.vpnProvider };
     const connected = Boolean(
       state.Running && state.Health?.Status === "healthy",
     );
     const base: VpnStatus = {
       connected,
-      status: state.Health?.Status ?? (state.Running ? "starting" : "stopped"),
+      // A stopped container keeps the health of its last check.
+      status: state.Running ? (state.Health?.Status ?? "starting") : "stopped",
       provider: this.config.vpnProvider,
     };
     if (!connected) return base;
@@ -63,13 +138,18 @@ export class Vpn {
   }
   async execute(name: string, a: Json, ctx: Context) {
     if (!this.config.vpnEnabled) throw new Error("VPN is disabled");
-    if (name === "vpn_status") return this.status();
+    if (name === "vpn_status") {
+      const now = await this.status();
+      // A healthy VPN is always routed to, even one startup missed.
+      if (now.connected) this.attach();
+      return now;
+    }
     if (name === "vpn_disconnect") {
+      this.stopRestore();
       await processRun("docker", ["rm", "-f", "hibana-vpn"], {
         timeout: 15000,
       });
-      this.sandbox.network = "bridge";
-      setPublicProxy(undefined);
+      this.detach();
       return { ok: true };
     }
     const root = join(this.config.dataDir, "vpn");
@@ -82,11 +162,15 @@ export class Vpn {
       return this.surfsharkLogin(root, ctx);
     }
     const server = String(a.server ?? this.config.vpnServer).toLowerCase();
+    this.stopRestore();
     const current = await this.status();
-    if (current.connected && !a.reconnect) return current;
+    if (current.connected && !a.reconnect) {
+      // Startup may have missed it (#130): "connected" must mean routed.
+      this.attach();
+      return current;
+    }
     await processRun("docker", ["rm", "-f", "hibana-vpn"], { timeout: 15000 });
-    this.sandbox.network = "bridge";
-    setPublicProxy(undefined);
+    this.detach();
     const auth = join(root, "auth");
     const dockerArgs = [
       "run",
@@ -165,8 +249,7 @@ export class Vpn {
       await sleep(2000, ctx.signal);
       const now = await this.status();
       if (now.connected) {
-        this.sandbox.network = "container:hibana-vpn";
-        setPublicProxy(8118);
+        this.attach();
         await atomicJson(this.statePath(), info);
         return { connected: true, ...info };
       }

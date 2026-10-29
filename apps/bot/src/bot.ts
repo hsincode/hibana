@@ -697,7 +697,47 @@ export class Hibana {
           flags: suppressEmbeds,
         });
       });
-    ctx.progress = editable({});
+    // Progress stacks instead of being replaced (#134): each text goes under
+    // what is already shown, so the turn's steps stay readable. A line that
+    // would not fit starts the next message. A failed send or edit leaves its
+    // lines to be shown by the next write.
+    const stacked = () => {
+      let message: DiscordMessage | undefined;
+      let lines: string[] = [];
+      let unshown = false;
+      const show = async () => {
+        const content = lines.join("\n");
+        if (message)
+          await message.edit({ content, allowedMentions: { parse: [] } });
+        else
+          message = await channel.send({
+            content,
+            allowedMentions: { parse: [] },
+            flags: suppressEmbeds,
+          });
+        unshown = false;
+      };
+      return (text: string) =>
+        discordPosts.run(async () => {
+          const added = text.trim();
+          if (!added) return;
+          for (const raw of added.split("\n")) {
+            const line = raw.slice(0, 1900);
+            if (
+              lines.length &&
+              lines.join("\n").length + 1 + line.length > 1900
+            ) {
+              if (unshown) await show();
+              message = undefined;
+              lines = [];
+            }
+            lines.push(line);
+            unshown = true;
+          }
+          await show();
+        });
+    };
+    ctx.progress = stacked();
     // Jev task status is its own message so parent thinking edits do not erase
     // it, and later run_jev_task calls in this turn edit instead of stacking.
     ctx.jevTaskProgress = editable({});

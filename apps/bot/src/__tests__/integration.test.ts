@@ -123,13 +123,90 @@ test("Jev start notice survives progress edits and the parent delivers the final
   })) as never;
   try {
     const reply = await bot.respond("この問い合わせを分類して", { ...context });
+    // Progress stacks: the second round's text is added under the first.
     expect(sent.map((m) => m.content)).toEqual([
-      "結果をまとめています。",
+      "内容を確認します。\n結果をまとめています。",
       "サブ: Jev を呼び出します(1回目)",
       reply,
     ]);
     expect(reply).toBe("返金に関する問い合わせです。");
     expect(sent[1]?.allowedMentions).toEqual({ parse: [] });
+  } finally {
+    await bot.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+test("progress stacks in one message and goes on in the next when it would not fit (#134)", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "hibana-progress-stack-"));
+  const bot = new Hibana(
+    loadConfig({
+      HIBANA_DATA_DIR: dir,
+      SANDBOX_ENABLED: "false",
+      SKILLS_ENABLED: "false",
+      LOG_DIR: "",
+    }),
+    pino({ enabled: false }),
+  );
+  const sent: { content: string }[] = [];
+  const edits: string[] = [];
+  const step = (n: number) => `${n}`.repeat(800);
+  let round = 0;
+  bot.llm.complete = async () => {
+    round++;
+    return {
+      message: {
+        role: "assistant",
+        content: round < 4 ? `\n${step(round)}\n` : "終わりました。",
+        tool_calls:
+          round < 4
+            ? [
+                {
+                  id: `call-${round}`,
+                  type: "function",
+                  function: {
+                    name: "mcp__settings__get_bot_settings",
+                    arguments: "{}",
+                  },
+                },
+              ]
+            : [],
+      },
+      usage: {
+        prompt_tokens: 1,
+        completion_tokens: 1,
+        total_tokens: 2,
+        cached_tokens: 0,
+      },
+      incomplete: false,
+    };
+  };
+  bot.client.channels.fetch = (async () => ({
+    id: context.channelId,
+    isSendable: () => true,
+    send: async (value: { content: string }) => {
+      const message = { ...value };
+      sent.push(message);
+      return {
+        id: String(sent.length),
+        edit: async (next: { content: string }) => {
+          edits.push(next.content);
+          message.content = next.content;
+        },
+      };
+    },
+    sendTyping: async () => {},
+  })) as never;
+  try {
+    const reply = await bot.respond("設定を見て", { ...context });
+    expect(reply).toBe("終わりました。");
+    // 800 + 1 + 800 fits in 1,900 characters; the third step does not, so
+    // it starts the next message and the first keeps both earlier steps.
+    expect(sent.map((m) => m.content)).toEqual([
+      `${step(1)}\n${step(2)}`,
+      step(3),
+      reply,
+    ]);
+    expect(edits).toEqual([`${step(1)}\n${step(2)}`]);
   } finally {
     await bot.close();
     await rm(dir, { recursive: true, force: true });
@@ -235,7 +312,10 @@ test("Jev task status edits one Discord message across plans", async () => {
     );
     expect(jev[0]!.content.split("\n").length).toBeLessThanOrEqual(3);
     expect(jev[0]!.content).toContain("候補の実行が終わりました。");
-    expect(sent.some((m) => m.content === "続きを進めます。")).toBe(true);
+    // The parent's progress stacks (#134) and stays apart from Jev's status.
+    expect(
+      sent.some((m) => m.content === "計画します。\n続きを進めます。"),
+    ).toBe(true);
     expect(reply).toBe("一覧を確認しました。");
     round = 0;
     sent.length = 0;

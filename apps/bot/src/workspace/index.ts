@@ -20,6 +20,7 @@ import {
 import {
   applyRunEvent,
   coalesce,
+  gather,
   eventLine,
   runLine,
   waitingLine,
@@ -728,7 +729,8 @@ export class Workspace {
     const stopped = () =>
       this.deps.runtime.snapshot.blocked_users.includes(ctx.userId) ||
       !!this.deps.runtime.guild(ctx.guildId).bot_disabled;
-    const write = ctx.progress && coalesce(ctx.progress);
+    // Progress stacks (#134): every tool line is kept, gathered per edit.
+    const write = ctx.progress && gather(ctx.progress);
     const status = (text: string) => {
       if (!stopped()) write?.(text);
     };

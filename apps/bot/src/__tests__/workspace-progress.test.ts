@@ -4,6 +4,7 @@ import {
   applyRunEvent,
   coalesce,
   eventLine,
+  gather,
   runLine,
   toolLine,
   type RunView,
@@ -689,5 +690,44 @@ describe("coalescing status edits", () => {
     );
     expect(() => thrown("x")).not.toThrow();
     await settle();
+  });
+});
+
+describe("gathering stacked progress lines (#134)", () => {
+  const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  test("writes at once, then every line that arrived meanwhile, in order", async () => {
+    const written: string[] = [];
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const add = gather(async (text) => {
+      written.push(text);
+      if (written.length === 1) await blocked;
+    }, 0);
+    add("Bash: ls");
+    await settle(0);
+    expect(written).toEqual(["Bash: ls"]);
+    for (const text of ["Read: a.ts", "Read: b.ts", "Bash: ls"]) add(text);
+    await settle();
+    expect(written).toEqual(["Bash: ls"]);
+    release();
+    await settle();
+    // Nothing is dropped, a repeated line included.
+    expect(written).toEqual(["Bash: ls", "Read: a.ts\nRead: b.ts\nBash: ls"]);
+  });
+
+  test("a failed write does not stop the next", async () => {
+    const written: string[] = [];
+    const add = gather(async (text) => {
+      written.push(text);
+      if (text === "fails") throw new Error("Unknown Message");
+    }, 0);
+    add("fails");
+    await settle();
+    add("after");
+    await settle();
+    expect(written).toEqual(["fails", "after"]);
   });
 });

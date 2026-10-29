@@ -282,3 +282,36 @@ export function coalesce(
     if (!busy) void drain();
   };
 }
+
+/** `coalesce` for a writer that adds what it is given (the turn's progress,
+ *  which stacks, #134): lines that arrive while a write is in flight, or for
+ *  `minMs` after it, are written together in arrival order, one per line, and
+ *  none is dropped. A failed write is dropped, as in `coalesce`. */
+export function gather(
+  write: (text: string) => Promise<void>,
+  minMs = 1500,
+): (text: string) => void {
+  let pending: string[] = [],
+    busy = false;
+  const drain = async () => {
+    busy = true;
+    try {
+      while (pending.length) {
+        const next = pending.join("\n");
+        pending = [];
+        await Promise.resolve()
+          .then(() => write(next))
+          .catch(() => {});
+        await new Promise<void>((resolve) => {
+          (setTimeout(resolve, minMs) as { unref?: () => void }).unref?.();
+        });
+      }
+    } finally {
+      busy = false;
+    }
+  };
+  return (next) => {
+    pending.push(next);
+    if (!busy) void drain();
+  };
+}

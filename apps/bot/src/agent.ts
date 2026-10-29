@@ -158,8 +158,9 @@ export class Agent {
       messages.push(msg);
       const calls = msg.tool_calls ?? [];
       if (calls.length) {
-        // Keep long tool-driven turns visible. The Discord transport edits one
-        // shared progress message, so retries and parallel subagents do not spam.
+        // Keep long tool-driven turns visible. The Discord transport stacks
+        // progress in one message (#134), so retries and parallel subagents
+        // add lines instead of a message each.
         if (msg.content?.trim()) await o.context.progress?.(msg.content);
         // Journal the whole requested batch before side effects. A crash can
         // leave unknown outcomes, which /retry must inspect instead of replay.

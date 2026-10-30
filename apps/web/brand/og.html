@@ -1,0 +1,120 @@
+<!doctype html>
+<!-- OGP 画像（1200×630）の元。render.ts が Chromium で開いて public/og.png に書き出す。
+     配色は src/styles/tokens.css の墨（ダーク）と琥珀。色のグラデーションは使わない（#142） -->
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      @font-face {
+        font-family: "Outfit";
+        font-weight: 300 600;
+        src: url("../src/fonts/outfit-latin-wght.woff2") format("woff2");
+      }
+      html,
+      body {
+        margin: 0;
+        width: 1200px;
+        height: 630px;
+        overflow: hidden;
+        background: #100f0c;
+        color: #f3f0e8;
+        font-family: "Outfit", "Noto Sans CJK JP", "Noto Sans JP", sans-serif;
+      }
+      .card {
+        position: absolute;
+        left: 96px;
+        top: 150px;
+        display: grid;
+        gap: 28px;
+      }
+      .mark {
+        width: 104px;
+        height: 104px;
+        border-radius: 24px;
+        background: #f3f0e8;
+        display: grid;
+        place-items: center;
+      }
+      h1 {
+        margin: 0;
+        font-size: 112px;
+        font-weight: 300;
+        letter-spacing: -0.02em;
+        line-height: 1;
+      }
+      p {
+        margin: 0;
+        font-size: 32px;
+        color: #aba498;
+      }
+      svg.dial {
+        position: absolute;
+        left: 660px;
+        top: -45px;
+        width: 720px;
+        height: 720px;
+      }
+      .ring {
+        fill: none;
+        stroke: #56524b;
+        stroke-width: 0.18;
+      }
+      .ticks {
+        fill: none;
+        stroke: #aba498;
+        stroke-width: 0.18;
+        opacity: 0.7;
+      }
+      .ray {
+        stroke: #d0cabf;
+        stroke-width: 0.24;
+        stroke-linecap: round;
+      }
+    </style>
+  </head>
+  <body>
+    <svg class="dial" viewBox="0 0 100 100" aria-hidden="true">
+      <circle class="ring" cx="50" cy="50" r="48" />
+      <circle class="ring" cx="50" cy="50" r="34" />
+      <circle class="ring" cx="50" cy="50" r="21" />
+      <path class="ticks" id="ticks" />
+      <circle id="pip" r="0.8" fill="#f0a63c" />
+      <g id="rays"></g>
+      <path
+        transform="translate(50 50) scale(0.8) translate(-16 -16.9)"
+        d="M16 6.5l2.9 7.5 7.5 2.9-7.5 2.9L16 27.3l-2.9-7.5L5.6 16.9l7.5-2.9L16 6.5z"
+        fill="#f0a63c"
+      />
+    </svg>
+    <div class="card">
+      <div class="mark">
+        <svg width="56" height="56" viewBox="5 5.9 22 22" aria-hidden="true">
+          <path
+            d="M16 6.5l2.9 7.5 7.5 2.9-7.5 2.9L16 27.3l-2.9-7.5L5.6 16.9l7.5-2.9L16 6.5z"
+            fill="#100f0c"
+          />
+        </svg>
+      </div>
+      <h1>Hibana</h1>
+      <p>Discord ボットの設定ダッシュボード</p>
+    </div>
+    <script>
+      // ログイン画面の図版（src/Login.tsx）と同じ並べ方
+      const at = (r, deg) => {
+        const a = (deg * Math.PI) / 180;
+        return [50 + Math.cos(a) * r, 50 + Math.sin(a) * r];
+      };
+      let d = "";
+      for (let i = 0; i < 72; i++)
+        d += `M${at(40, i * 5)}L${at(i % 6 ? 41.6 : 43.6, i * 5)}`;
+      document.getElementById("ticks").setAttribute("d", d);
+      const [px, py] = at(34, -40);
+      document.getElementById("pip").setAttribute("cx", px);
+      document.getElementById("pip").setAttribute("cy", py);
+      let rays = "";
+      for (let i = 0; i < 12; i++)
+        rays += `<path class="ray" d="M${at(11, i * 30)}L${at(17.5, i * 30)}"/>`;
+      document.getElementById("rays").innerHTML = rays;
+    </script>
+  </body>
+</html>

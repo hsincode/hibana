@@ -10,7 +10,9 @@ import { Runtime } from "../runtime";
 import { createApp } from "../../../api/src/create-app";
 import { loadTestEnv } from "../../../api/src/env";
 import { MemoryStore } from "../../../api/src/store";
-import type { Context, Json } from "../types";
+import { ProviderError } from "../llm-errors";
+import type { Completion } from "../llm";
+import type { Context, Json, Message } from "../types";
 const context: Context = {
   channelId: "10000",
   userId: "20000",
@@ -211,6 +213,154 @@ test("progress stacks in one message and goes on in the next when it would not f
     await bot.close();
     await rm(dir, { recursive: true, force: true });
   }
+});
+// #140: the reconnect line of a request goes once the request is over.
+const reconnecting = (attempt: number) =>
+  `応答を再接続しています（${attempt}/5・送信時・HTTP 529）。進捗は保持しています。`;
+/** A turn whose model requests are `rounds`, in order: each may reconnect
+ *  a number of times first, then answers, or fails. What the channel shows
+ *  at the end and everything done to it are kept. */
+async function reconnectTurn(
+  rounds: {
+    reconnects?: number;
+    content?: string;
+    tool?: boolean;
+    fail?: boolean;
+  }[],
+) {
+  const dir = await mkdtemp(join(tmpdir(), "hibana-reconnect-"));
+  const bot = new Hibana(
+    loadConfig({
+      HIBANA_DATA_DIR: dir,
+      SANDBOX_ENABLED: "false",
+      SKILLS_ENABLED: "false",
+      LOG_DIR: "",
+    }),
+    pino({ enabled: false }),
+  );
+  let round = 0;
+  bot.llm.complete = async (_selection, _messages, _tools, options) => {
+    const step = rounds[round++]!;
+    for (let attempt = 1; attempt <= (step.reconnects ?? 0); attempt++)
+      await options?.onRetry?.({
+        phase: "request",
+        attempt,
+        maxRetries: 5,
+        delayMs: 0,
+        status: 529,
+        diagnostics: { phase: "request" },
+      });
+    if (step.fail) {
+      const error = new ProviderError("transient", true, 529);
+      error.diagnostics = { phase: "request", retries: step.reconnects };
+      throw error;
+    }
+    const message: Message = {
+      role: "assistant",
+      content: step.content ?? "",
+      tool_calls: step.tool
+        ? [
+            {
+              id: `call-${round}`,
+              type: "function",
+              function: {
+                name: "mcp__settings__get_bot_settings",
+                arguments: "{}",
+              },
+            },
+          ]
+        : [],
+    };
+    return {
+      message,
+      usage: {
+        prompt_tokens: 1,
+        completion_tokens: 1,
+        total_tokens: 2,
+        cached_tokens: 0,
+      },
+      incomplete: false,
+    } satisfies Completion;
+  };
+  const shown = new Map<string, string>();
+  const log: string[] = [];
+  bot.client.channels.fetch = (async () => ({
+    id: context.channelId,
+    isSendable: () => true,
+    send: async (value: { content: string }) => {
+      const id = String(log.filter((l) => l.startsWith("send")).length + 1);
+      shown.set(id, value.content);
+      log.push(`send ${id}: ${value.content}`);
+      return {
+        id,
+        edit: async (next: { content: string }) => {
+          shown.set(id, next.content);
+          log.push(`edit ${id}: ${next.content}`);
+        },
+        delete: async () => {
+          shown.delete(id);
+          log.push(`delete ${id}`);
+        },
+      };
+    },
+    sendTyping: async () => {},
+  })) as never;
+  try {
+    const reply = await bot.respond("設定を見て", { ...context });
+    return { reply, shown: [...shown.values()], log };
+  } finally {
+    await bot.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+test("a reconnect notice goes once the response arrives (#140)", async () => {
+  const { reply, shown, log } = await reconnectTurn([
+    { reconnects: 2, content: "内容を確認します。", tool: true },
+    { content: "終わりました。" },
+  ]);
+  expect(reply).toBe("終わりました。");
+  // The lines stack while it reconnects. Nothing else was in the message,
+  // so it is deleted, and the model's text starts a message of its own.
+  expect(log).toEqual([
+    `send 1: ${reconnecting(1)}`,
+    `edit 1: ${reconnecting(1)}\n${reconnecting(2)}`,
+    "delete 1",
+    "send 2: 内容を確認します。",
+    "send 3: 終わりました。",
+  ]);
+  expect(shown).toEqual(["内容を確認します。", "終わりました。"]);
+});
+test("a reconnect notice between steps is cut out of the stacked progress (#140)", async () => {
+  const { shown, log } = await reconnectTurn([
+    { content: "計画します。", tool: true },
+    { reconnects: 1, content: "続けます。", tool: true },
+    { content: "終わりました。" },
+  ]);
+  expect(log).toEqual([
+    "send 1: 計画します。",
+    `edit 1: 計画します。\n${reconnecting(1)}`,
+    "edit 1: 計画します。",
+    "edit 1: 計画します。\n続けます。",
+    "send 2: 終わりました。",
+  ]);
+  expect(shown).toEqual(["計画します。\n続けます。", "終わりました。"]);
+});
+test("a request that fails after reconnecting takes its notice back before the failure notice (#140)", async () => {
+  const { reply, shown, log } = await reconnectTurn([
+    { content: "計画します。", tool: true },
+    { reconnects: 2, fail: true },
+  ]);
+  expect(reply).toBe("");
+  const failure =
+    "プロバイダとの通信を再試行しましたが、応答を完了できませんでした。（送信時・HTTP 529・再試行 2 回） 進捗を保存しました。`/retry` または次のメッセージで再開できます。";
+  expect(log).toEqual([
+    "send 1: 計画します。",
+    `edit 1: 計画します。\n${reconnecting(1)}`,
+    `edit 1: 計画します。\n${reconnecting(1)}\n${reconnecting(2)}`,
+    "edit 1: 計画します。",
+    `send 2: ${failure}`,
+  ]);
+  expect(shown).toEqual(["計画します。", failure]);
 });
 test("Jev task status edits one Discord message across plans", async () => {
   const dir = await mkdtemp(join(tmpdir(), "hibana-jev-task-e2e-"));

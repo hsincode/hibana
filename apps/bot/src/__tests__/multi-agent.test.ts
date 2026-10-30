@@ -456,6 +456,52 @@ test("mailbox-only messages, followups, interrupts, capacity and task isolation"
   );
 });
 
+test("a child's reconnect line keeps its key on the root's progress, so the child can take it back (#140)", async () => {
+  const runtime = new Runtime(config());
+  const shown: { text: string; transient?: object }[] = [];
+  const retractProgress = async () => {};
+  const ctx: Context = {
+    ...context(),
+    progress: async (text, transient) => {
+      shown.push({ text, transient });
+    },
+    retractProgress,
+  };
+  const key = {};
+  const agent = {
+    run: async (o: AgentOptions) => {
+      o.observeMessages?.(o.messages);
+      const c = o.context;
+      if (c.agentPath === "/root") {
+        await c.team!.execute(
+          "spawn_agent",
+          { task_name: "worker", message: "work", notice: "作業を進めます" },
+          c,
+        );
+        await c.team!.execute("wait_agent", { timeout_ms: 60000 }, c);
+      } else {
+        await c.progress?.("応答を再接続しています（1/5）。", key);
+        // The root's own: the key names the lines wherever they went.
+        expect(c.retractProgress).toBe(retractProgress);
+      }
+      return {
+        text: "done",
+        messages: o.messages,
+        usage: emptyUsage(),
+        rounds: 1,
+      };
+    },
+  } as Agent;
+  await new MultiAgentSession(runtime, agent, () => []).runRoot(
+    options(ctx, runtime),
+  );
+  const line = shown.find((s) =>
+    s.text.endsWith("応答を再接続しています（1/5）。"),
+  );
+  expect(line?.text).toStartWith("サブエージェント: ");
+  expect(line?.transient).toBe(key);
+});
+
 test("root cancellation wakes waits, stops descendants and retains root context identity for cleanup", async () => {
   const runtime = new Runtime(config());
   const shutdown = new AbortController();

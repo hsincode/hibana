@@ -690,6 +690,7 @@ const WORKER: Partial<Context> = {
   depth: 1,
   agentRole: "worker",
   progress: undefined,
+  retractProgress: undefined,
   notify: undefined,
   jevTaskProgress: undefined,
   openStatus: undefined,

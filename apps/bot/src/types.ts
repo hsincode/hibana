@@ -101,7 +101,13 @@ export type Context = {
   openStatus?: () => (text: string) => Promise<void>;
   delivered: boolean;
   signal?: AbortSignal;
-  progress?: (text: string) => Promise<void>;
+  /** Adds `text` to the turn's progress. With a `transient` key, the lines
+   *  can be taken back by `retractProgress` (#140); a writer that cannot
+   *  take lines back ignores the key. */
+  progress?: (text: string, transient?: object) => Promise<void>;
+  /** Takes back the progress lines shown under this key (#140): a reconnect
+   *  notice once its request is over. */
+  retractProgress?: (transient: object) => Promise<void>;
   /** A persistent notice: progress edits must not erase which evaluator ran. */
   notify?: (text: string) => Promise<void>;
   /** One Jev task message per turn; later updates edit it instead of posting again. */

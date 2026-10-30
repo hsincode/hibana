@@ -331,10 +331,14 @@ export class MultiAgentSession {
     // Home connection ownership uses object identity. Keep the root Context
     // itself so the transport's finally block can always revoke its connection.
     if (!parent) member.context = Object.assign(parentContext, member.context);
+    // The key goes along with the text, so a child's reconnect notice is
+    // taken back with its label line by the root's `retractProgress`, which
+    // the child keeps from the spread above (#140).
     if (parent)
-      member.context.progress = (text) =>
+      member.context.progress = (text, transient) =>
         this.rootOptions.context.progress?.(
           `${subagentLabel(selection, role)}\n${text}`,
+          transient,
         ) ?? Promise.resolve();
     this.members.set(path, member);
     return member;

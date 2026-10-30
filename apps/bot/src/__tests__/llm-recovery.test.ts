@@ -847,4 +847,73 @@ describe("failure detail", () => {
       "応答を再接続しています（1/5・受信中・overloaded_error）。進捗は保持しています。",
     );
   });
+
+  // #140: the reconnect lines of a request are shown under one key, and
+  // taken back once the request is over, whichever way it ended.
+  const reconnectRun = (llm: LlmClient) => {
+    const events: string[] = [];
+    const keys: object[] = [];
+    const run = new Agent(llm).run({
+      selection,
+      messages: [{ role: "user", content: "hi" }],
+      tools: [],
+      context: {
+        channelId: "1",
+        userId: "2",
+        botId: "3",
+        thread: false,
+        depth: 0,
+        delivered: false,
+        progress: async (text: string, transient?: object) => {
+          if (transient && !keys.includes(transient)) keys.push(transient);
+          events.push(transient ? `${keys.indexOf(transient)}: ${text}` : text);
+        },
+        retractProgress: async (transient: object) => {
+          events.push(`retract ${keys.indexOf(transient)}`);
+        },
+      },
+      maxRounds: 2,
+      temperature: 0.7,
+      nativeSearch: false,
+      execute: async () => "",
+    });
+    return { run, events };
+  };
+  const line = (attempt: number, of = 5) =>
+    `応答を再接続しています（${attempt}/${of}・受信中・overloaded_error）。進捗は保持しています。`;
+
+  test("the reconnect lines are taken back once the response arrives (#140)", async () => {
+    let requests = 0;
+    const { run, events } = reconnectRun(
+      new LlmClient(
+        config(),
+        async () => (++requests <= 2 ? overloaded() : ok()),
+        { sleep: noWait },
+      ),
+    );
+    expect((await run).text).toBe("ok");
+    expect(events).toEqual([`0: ${line(1)}`, `0: ${line(2)}`, "retract 0"]);
+  });
+
+  test("a request that fails after reconnecting takes its lines back before it fails (#140)", async () => {
+    const { run, events } = reconnectRun(
+      new LlmClient(
+        config({ LLM_STREAM_MAX_RETRIES: "1" }),
+        async () => overloaded(),
+        {
+          sleep: noWait,
+        },
+      ),
+    );
+    await expect(run).rejects.toBeInstanceOf(ProviderError);
+    expect(events).toEqual([`0: ${line(1, 1)}`, "retract 0"]);
+  });
+
+  test("a request that did not reconnect takes nothing back (#140)", async () => {
+    const { run, events } = reconnectRun(
+      new LlmClient(config(), async () => ok(), { sleep: noWait }),
+    );
+    await run;
+    expect(events).toEqual([]);
+  });
 });

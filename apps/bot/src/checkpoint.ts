@@ -18,6 +18,7 @@ export function checkpointSnapshot(
   const {
     signal,
     progress,
+    retractProgress,
     notify,
     jevTaskProgress,
     jevExecutions,

@@ -114,6 +114,11 @@ export class Agent {
         ];
       }
       let completion;
+      // This request's reconnect lines, taken back once it is over (#140):
+      // the response arrived, or it failed and the failure notice says how
+      // often it reconnected.
+      const reconnect = {};
+      let reconnected = false;
       try {
         completion = await this.llm.complete(o.selection, outgoing, tools, {
           serviceTier: o.serviceTier,
@@ -128,9 +133,11 @@ export class Agent {
           },
           onRetry: async ({ attempt, maxRetries, status, diagnostics }) => {
             const detail = failureDetail(diagnostics, status);
+            reconnected = true;
             await o.context
               .progress?.(
                 `応答を再接続しています（${attempt}/${maxRetries}${detail ? `・${detail}` : ""}）。進捗は保持しています。`,
+                reconnect,
               )
               .catch(() => {});
           },
@@ -144,6 +151,9 @@ export class Agent {
           }
         }
         throw error;
+      } finally {
+        if (reconnected)
+          await o.context.retractProgress?.(reconnect).catch(() => {});
       }
       addUsage(usage, completion.usage);
       o.recordUsage?.(completion.usage);

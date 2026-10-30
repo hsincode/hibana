@@ -132,20 +132,20 @@
 .row-mark .m.is-saving {
   width: 7px;
   height: 7px;
-  border: 1px solid var(--hot-ink);
+  border: 1px solid var(--accent);
   border-radius: 50%;
 }
+/* 保存できた印: 琥珀のチェックのまわりに火花が 1 回散る（.spark、controls.css） */
 .row-mark .m.is-saved {
-  color: var(--ok);
-  filter: drop-shadow(0 0 5px color-mix(in oklch, var(--ok) 70%, transparent));
+  color: var(--accent-ink);
 }
 .row-mark .m.is-failed {
   color: var(--danger);
 }
 /* コマンドパレットから設定項目へ飛んだときの目印 */
 .row.is-target {
-  background: color-mix(in oklch, var(--f2) 9%, transparent);
-  box-shadow: 0 0 0 8px color-mix(in oklch, var(--f2) 9%, transparent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 8px var(--accent-soft);
   border-radius: 4px;
 }
 /* マイ設定で、サーバー設定を上書きしている項目 */
@@ -163,110 +163,29 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--foil);
-  box-shadow: 0 0 8px -1px var(--f2);
+  background: var(--accent);
 }
 
-/* 値を変えた部品: 縁を箔の光が 1 周する（輪 = ::after、にじみ = ::before）。失敗は赤が逆に回る */
+/* 値を変えた部品を包む。保存の合図は行の右端の印から散る火花が担い、部品そのものは光らせない
+   （#142）。サブエージェントのモードだけは、選んだカードの縁と色づけが短く現れる（下の .mode） */
 .trace {
   position: relative;
   display: block;
-  isolation: isolate;
   border-radius: var(--r-sm);
-  --trace-r: calc(var(--r-sm) + 3px);
 }
 .trace.is-inline {
   display: inline-block;
   max-width: 100%;
 }
-.trace::after,
-.trace.is-traced::before {
-  content: "";
-  position: absolute;
-  pointer-events: none;
-  opacity: 0;
-  background: conic-gradient(
-    from var(--a),
-    transparent 0 56%,
-    var(--f1) 68%,
-    var(--f2) 82%,
-    var(--f3) 93%,
-    var(--f4) 100%
-  );
-}
-.trace::after {
-  inset: -3px;
-  padding: 2px;
-  border-radius: var(--trace-r);
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-}
-.trace.is-traced::before {
-  inset: -5px;
-  z-index: -1;
-  border-radius: calc(var(--trace-r) + 2px);
-  filter: blur(9px);
-}
-.trace.is-traced::after {
-  animation: trace 840ms cubic-bezier(0.35, 0.1, 0.25, 1) 1;
-}
-.trace.is-traced::before {
-  animation: trace-glow 840ms cubic-bezier(0.35, 0.1, 0.25, 1) 1;
-}
-.trace.is-traced.is-failed::before,
-.trace.is-traced.is-failed::after {
-  background: conic-gradient(
-    from calc(360deg - var(--a)),
-    var(--danger) 0,
-    color-mix(in oklch, var(--danger) 40%, transparent) 14%,
-    transparent 30% 100%
-  );
-}
-@keyframes trace {
-  0% {
-    --a: 0deg;
-    opacity: 1;
-  }
-  78% {
-    opacity: 1;
-  }
-  100% {
-    --a: 360deg;
-    opacity: 0;
-  }
-}
-@keyframes trace-glow {
-  0% {
-    --a: 0deg;
-    opacity: 0.75;
-  }
-  78% {
-    opacity: 0.75;
-  }
-  100% {
-    --a: 360deg;
-    opacity: 0;
-  }
-}
-/* 横並びの小さな部品（ON / OFF など）では、光が部品の縁を回るよう、trace を部品の幅に合わせる */
+/* 横並びの小さな部品（ON / OFF など）は、部品の幅のまま上に寄せる */
 @media (min-width: 761px) {
   .row-control > .trace.is-inline {
     align-self: flex-start;
   }
 }
-/* 角の大きい部品（モデルのカード）では、光の輪も同じ丸みにする */
-[data-row$="-preset"] .trace {
-  --trace-r: calc(var(--r-md) + 3px);
-}
 
 /* いまは使われない設定: 部品は操作できるまま、斜線の地と理由を添える */
-.row.is-unused .trace .seg {
-  background: var(--line-strong);
-}
-.row.is-unused .trace .seg button:not([aria-pressed="true"]),
+.row.is-unused .trace .seg,
 .row.is-unused .trace .select-trigger,
 .row.is-unused .trace .input {
   background:
@@ -298,7 +217,7 @@
   margin-right: 4px;
 }
 
-/* ============ 実際の動作: 上縁に箔の線が入った読み取り板 ============ */
+/* ============ 実際の動作: 読み取り板 ============ */
 .effective {
   position: relative;
   display: flex;
@@ -309,17 +228,6 @@
   border-radius: var(--r-md);
   background: var(--surface);
   box-shadow: var(--card-shadow);
-}
-.effective::before {
-  content: "";
-  position: absolute;
-  left: 14px;
-  right: 14px;
-  top: -1px;
-  height: 2px;
-  border-radius: 2px;
-  background: var(--foil);
-  box-shadow: var(--glow-line-soft);
 }
 .effective-head {
   display: flex;
@@ -360,16 +268,14 @@
   color: var(--muted);
 }
 .eff-value {
-  font-family: var(--font-mono);
   font-size: var(--fs-md);
   color: var(--ink);
   overflow-wrap: anywhere;
   line-height: 1.5;
 }
-/* 日本語の値は等幅にしない */
+/* 文で書いた値（「Jev が会話ごとに選ぶ」など）は少し太くする */
 .eff-value.is-text,
 .model-id.is-text {
-  font-family: var(--font-ui);
   font-weight: 500;
 }
 .eff-note {
@@ -385,6 +291,16 @@
 .eff-item.is-warn .eff-value,
 .eff-item.is-warn .eff-note {
   color: var(--warn);
+}
+/* 注意は琥珀と色が近いので、▲ の形も添える（#142） */
+.eff-item.is-warn .eff-note::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 7px;
+  margin-right: 5px;
+  background: currentColor;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
 }
 
 /* ============ モデル ============ */
@@ -402,7 +318,6 @@
   min-width: 0;
 }
 .model-id {
-  font-family: var(--font-mono);
   font-size: var(--fs-lg);
   line-height: 1.4;
   letter-spacing: -0.01em;
@@ -457,12 +372,12 @@
 }
 .chip-f:hover {
   color: var(--ink);
-  border-color: color-mix(in oklch, var(--f1) 60%, var(--line-strong));
+  border-color: color-mix(in oklch, var(--ink) 40%, var(--line-strong));
 }
 .chip-f[aria-pressed="true"] {
   position: relative;
   border-color: transparent;
-  background: var(--sel-fill);
+  background: var(--accent-soft);
   color: var(--ink);
   font-weight: 600;
 }
@@ -497,9 +412,8 @@
 }
 .picker-row[aria-pressed="true"] {
   background:
-    linear-gradient(var(--f3), var(--f2) 50%, var(--f1)) 0 50% / 2px 64%
-      no-repeat,
-    var(--sel-wash);
+    linear-gradient(var(--accent), var(--accent)) 0 50% / 2px 64% no-repeat,
+    var(--surface-2);
 }
 .picker-row[aria-pressed="true"] .p-model {
   font-weight: 600;
@@ -508,20 +422,13 @@
   color: var(--muted);
 }
 .picker-row .p-model {
-  font-family: var(--font-mono);
   overflow-wrap: anywhere;
-}
-.picker-row .p-model.is-text {
-  font-family: var(--font-ui);
 }
 .picker-row .p-prov,
 .picker-row .p-id {
   color: var(--muted);
   font-size: var(--fs-xs);
   overflow-wrap: anywhere;
-}
-.picker-row .p-id {
-  font-family: var(--font-mono);
 }
 .picker-row .p-tags {
   display: flex;
@@ -531,7 +438,7 @@
   flex-wrap: wrap;
 }
 .picker-row .p-tags .ic {
-  color: var(--hot-ink);
+  color: var(--accent-ink);
 }
 
 /* ============ サブエージェント ============ */
@@ -562,7 +469,7 @@
     color var(--dur-fast);
 }
 .mode:hover {
-  border-color: color-mix(in oklch, var(--f1) 60%, var(--line-strong));
+  border-color: color-mix(in oklch, var(--ink) 40%, var(--line-strong));
   background: var(--wash);
   color: var(--ink);
 }
@@ -570,12 +477,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-family: var(--font-mono);
   font-size: var(--fs-md);
   color: var(--ink);
 }
 .mode-name.is-text {
-  font-family: var(--font-ui);
   font-weight: 500;
 }
 .mode-name::after {
@@ -589,20 +494,16 @@
   font-size: var(--fs-xs);
   line-height: 1.6;
 }
-/* 選んだモード: 箔の縁と、藤色の薄い色づけ。切り替えたときは、縁と色づけが短く現れるだけにする
+/* 選んだモード: 琥珀の縁と、琥珀の薄い色づけ。切り替えたときは、縁と色づけが短く現れるだけにする
    （まとまり全体を光が回る動きは、派手すぎるので外した） */
 .mode[aria-checked="true"] {
   border-color: transparent;
-  background: color-mix(in oklch, var(--f2) 9%, transparent);
+  background: var(--accent-soft);
   color: var(--ink);
 }
 .mode[aria-checked="true"] .mode-name::after {
   border-color: transparent;
-  background: var(--f2);
-}
-[data-row$="-mode"] .trace::after,
-[data-row$="-mode"] .trace.is-traced::before {
-  content: none;
+  background: var(--accent);
 }
 [data-row$="-mode"] .trace.is-traced .mode[aria-checked="true"] {
   animation: mode-tint 360ms var(--ease-out) 1;
@@ -675,19 +576,14 @@
   gap: var(--sp-4);
 }
 
-/* 役割の表とトリガーは、trace そのものを面にする（縁の光は面の外周を回る） */
+/* 役割の表とトリガーは、trace そのものを面にする */
 [data-row$="-roles"] > .trace,
 [data-row="g-triggers"] > .trace {
-  --trace-r: calc(var(--r-md) + 3px);
   padding: 2px 18px;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   background: var(--surface);
   box-shadow: var(--card-shadow);
-}
-[data-row$="-roles"] > .trace.is-traced::before,
-[data-row="g-triggers"] > .trace.is-traced::before {
-  content: none;
 }
 .trace > .table-wrap {
   margin: 0;
@@ -722,7 +618,6 @@
 .roles .eff {
   display: flex;
   flex-direction: column;
-  font-family: var(--font-mono);
   font-size: var(--fs-xs);
   color: var(--ink);
   line-height: 1.7;
@@ -785,7 +680,7 @@
   background: var(--field);
   font-size: var(--fs-sm);
 }
-/* 入っているスイッチは藤色の 1 色。位置（つまみが右）でも分かる */
+/* 入っているスイッチは琥珀の 1 色。位置（つまみが右）でも分かる */
 .switch {
   position: relative;
   flex: none;
@@ -823,7 +718,7 @@
 }
 .switch[aria-checked="true"]::before {
   border-color: transparent;
-  background: var(--f2) border-box;
+  background: var(--accent) border-box;
 }
 .switch[aria-checked="true"]::after {
   transform: translateX(11px);
@@ -878,17 +773,20 @@
   padding: 0;
   border: 0;
   background: transparent;
-  font-family: var(--font-mono);
   font-size: var(--fs-md);
   color: var(--ink);
   text-decoration: underline;
-  text-decoration-color: color-mix(in oklch, var(--f2) 55%, var(--line-strong));
+  text-decoration-color: color-mix(
+    in oklch,
+    var(--accent) 55%,
+    var(--line-strong)
+  );
   text-underline-offset: 4px;
   overflow-wrap: anywhere;
   text-align: left;
 }
 .skill-name:hover {
-  color: var(--hot-ink);
+  color: var(--accent-ink);
   text-decoration-color: currentColor;
 }
 .skill-desc {
@@ -914,7 +812,6 @@
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
   background: var(--well);
-  font-family: var(--font-mono);
   font-size: var(--fs-sm);
   line-height: 1.7;
   white-space: pre-wrap;
@@ -933,7 +830,6 @@
   gap: var(--sp-3);
   padding: 6px 0;
   border-bottom: 1px solid var(--line);
-  font-family: var(--font-mono);
   font-size: var(--fs-xs);
   color: var(--ink-2);
   overflow-wrap: anywhere;
@@ -974,17 +870,6 @@
   .main .trace > .table-wrap {
     margin: 0;
     padding: 0;
-  }
-  .effective::before {
-    left: 0;
-    right: 0;
-    border-radius: 0;
-  }
-  /* 端まで広げた面では、縁の光も画面の内側に収める（横スクロールを作らない） */
-  [data-row$="-roles"] > .trace::after,
-  [data-row="g-triggers"] > .trace::after {
-    inset: -3px 0;
-    border-radius: 0;
   }
   .row {
     grid-template-columns: minmax(0, 1fr) 20px;

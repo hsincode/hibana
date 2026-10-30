@@ -21,10 +21,9 @@
     border-color var(--dur-fast),
     box-shadow var(--dur-fast);
 }
-/* 触れたカードは、線が箔の縁に替わる */
+/* 触れたカードは、線が琥珀の縁に替わる */
 .guild-card:hover {
   border-color: transparent;
-  box-shadow: var(--glow-sel), var(--card-shadow);
 }
 .guild-card:hover::before,
 .guild-card:focus-visible::before {
@@ -54,13 +53,11 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
-  font-family: var(--font-mono);
   font-size: var(--fs-xs);
   color: var(--ink-2);
   overflow-wrap: anywhere;
 }
 .guild-card .model .is-text {
-  font-family: var(--font-ui);
   font-weight: 500;
 }
 .guild-card .model .mono-tile {
@@ -72,7 +69,7 @@
   transition: color var(--dur-fast);
 }
 .guild-card:hover > .ic {
-  color: var(--hot-ink);
+  color: var(--accent-ink);
 }
 
 /* ============ モデル管理: ChatGPT のマスターアカウント ============ */
@@ -104,12 +101,11 @@
   gap: 6px;
   align-items: flex-start;
   padding: var(--sp-3) var(--sp-4);
-  border: 1px dashed color-mix(in oklch, var(--f1) 55%, var(--line-strong));
+  border: 1px dashed var(--line-strong);
   border-radius: var(--r-md);
   background: var(--wash);
 }
 .auth-box .code-big {
-  font-family: var(--font-mono);
   font-size: var(--fs-xl);
   letter-spacing: 0.06em;
 }
@@ -196,7 +192,6 @@
   gap: 6px 10px;
 }
 .stat-value {
-  font-family: var(--font-mono);
   font-size: var(--fs-2xl);
   font-weight: 400;
   line-height: 1.2;
@@ -214,7 +209,7 @@
 .stat-note.is-error {
   color: var(--danger);
 }
-/* メーター: 溝の全長に箔の帯があり、使った分だけ見える（使うほど暖かい色に届く） */
+/* メーター: 使った分だけ琥珀の帯が伸びる。超過は赤 */
 .meter {
   position: relative;
   height: 12px;
@@ -239,8 +234,7 @@
   height: 4px;
   max-width: 100%;
   border-radius: 4px;
-  background: var(--foil) 0 0 / 100cqw 100% no-repeat;
-  box-shadow: var(--glow-line);
+  background: var(--accent);
   transform-origin: 0 50%;
   animation: meter-grow 600ms var(--ease-out) backwards;
 }
@@ -297,7 +291,10 @@
   border-radius: 2px;
 }
 .legend .k-in {
-  background: linear-gradient(0deg, var(--f1), var(--f2) 55%, var(--f3));
+  background: var(--bar);
+}
+.legend .k-sel {
+  background: var(--accent);
 }
 /* 超過は色だけでなく斜線でも示す */
 .legend .k-over {
@@ -335,7 +332,6 @@
   color: var(--ink-2);
 }
 .chart-tip strong {
-  font-family: var(--font-mono);
   font-size: var(--fs-md);
   font-weight: 400;
   color: var(--ink);
@@ -364,18 +360,23 @@
   shape-rendering: crispEdges;
 }
 .chart-tick {
-  font-family: var(--font-mono);
   font-size: 11px;
   fill: var(--muted);
 }
-/* 棒: 軸の高さに対して箔の色を掛けるので、高い日ほど暖かい色になる */
+/* 棒: 線の色の単色。選んだ日だけ琥珀（#142） */
+.chart-panel {
+  /* 地に対して 3 以上になる濃さ */
+  --bar: color-mix(in oklch, var(--ink) 45%, var(--surface));
+}
 .chart-bar {
-  fill: var(--f2);
-  filter: var(--bar-shadow);
+  fill: var(--bar);
   transform-box: fill-box;
   transform-origin: 50% 100%;
   animation: bar-grow 520ms var(--ease-out) backwards;
   animation-delay: calc(var(--i, 0) * 14ms);
+}
+.chart-bar.is-sel {
+  fill: var(--accent);
 }
 .chart-bar.is-over {
   fill: var(--danger);
@@ -396,12 +397,11 @@
   shape-rendering: crispEdges;
 }
 .chart-guide-label {
-  font-family: var(--font-mono);
   font-size: 11px;
   fill: var(--ink-2);
 }
 .chart-active {
-  fill: color-mix(in oklch, var(--f1) 16%, transparent);
+  fill: var(--accent-soft);
 }
 .cost-table td,
 .cost-table th {
@@ -431,7 +431,6 @@
   font-size: var(--fs-sm);
 }
 .budget-amount {
-  font-family: var(--font-mono);
   font-weight: 400;
   color: var(--ink);
 }
@@ -464,7 +463,6 @@
   align-items: center;
   gap: 6px;
   color: var(--ink-2);
-  font-family: var(--font-mono);
   font-size: var(--fs-sm);
 }
 .budget-usd .input {

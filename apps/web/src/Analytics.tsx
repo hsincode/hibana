@@ -647,6 +647,10 @@ function Report({
                   目安以内
                 </li>
                 <li>
+                  <i className="k-sel" />
+                  選んだ日
+                </li>
+                <li>
                   <i className="k-over" />
                   目安超過
                 </li>
@@ -890,20 +894,6 @@ function CostChart({ m }: { m: CostMonth }) {
             aria-hidden="true"
           >
             <defs>
-              {/* 軸の高さに対して色を掛ける（棒ごとではない）ので、高い日ほど暖かい色になる。 */}
-              <linearGradient
-                id={`${defs}-bar`}
-                gradientUnits="userSpaceOnUse"
-                x1="0"
-                x2="0"
-                y1={base}
-                y2={PAD_TOP}
-              >
-                <stop offset="0" style={{ stopColor: "var(--f1)" }} />
-                <stop offset="0.46" style={{ stopColor: "var(--f2)" }} />
-                <stop offset="0.82" style={{ stopColor: "var(--f3)" }} />
-                <stop offset="1" style={{ stopColor: "var(--f4)" }} />
-              </linearGradient>
               {/* 超過は色だけでなく斜線でも示す。 */}
               <pattern
                 id={`${defs}-over`}
@@ -959,14 +949,15 @@ function CostChart({ m }: { m: CostMonth }) {
               return (
                 <path
                   key={d.date}
-                  className={`chart-bar${d.over ? " is-over" : ""}`}
+                  // 超過は赤と斜線のまま。それ以外は線の色で、選んだ日だけ琥珀（#142）。
+                  className={`chart-bar${d.over ? " is-over" : i === active ? " is-sel" : ""}`}
                   // 棒は左の日から順に伸びる。
                   style={
                     {
                       "--i": i,
-                      fill: d.over
-                        ? `url(#${defs}-over) var(--danger)`
-                        : `url(#${defs}-bar) var(--f2)`,
+                      ...(d.over && {
+                        fill: `url(#${defs}-over) var(--danger)`,
+                      }),
                     } as CSSProperties
                   }
                   // 上だけ丸め、基線側は角のまま。

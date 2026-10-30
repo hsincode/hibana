@@ -17,7 +17,10 @@ import { Icon } from "./ui";
 
 export type SaveState = "idle" | "saving" | "saved" | "failed";
 export type Mark = "saving" | "saved" | "failed";
-/** n が変わるたびに、その行の部品の縁を光が 1 周する。failed は赤が逆に回る。 */
+/**
+ * n が変わるたびに、その行の部品に印を付け直す。部品そのものは光らせない（#142）。
+ * 今これを使うのはサブエージェントのモードで、選んだカードの縁と色づけが短く現れ、failed は縁が赤くなる。
+ */
 export type Pulse = { n: number; failed: boolean };
 
 /* ---------- 上部バーの保存状態 ---------- */
@@ -49,7 +52,11 @@ export function SaveStatus({ state }: { state: SaveState | null }) {
       className={`save-state${state === "idle" ? "" : ` is-${state}`}`}
       role="status"
     >
-      <span className="save-glyph" aria-hidden="true" />
+      {/* 保存できたときは、印から火花が 1 回散る（.spark） */}
+      <span
+        className={`save-glyph${state === "saved" ? " spark" : ""}`}
+        aria-hidden="true"
+      />
       <span className="save-text">{SAVE_TEXT[state]}</span>
       {/* 届いたかどうかを知る API は無いので、上限だけを案内する（docs/production.md）。 */}
       {state === "saved" && (
@@ -59,7 +66,7 @@ export function SaveStatus({ state }: { state: SaveState | null }) {
   );
 }
 
-/* ---------- 行ごとの印と、縁を回る光 ---------- */
+/* ---------- 行ごとの印 ---------- */
 export type SaveMarks = {
   marks: Record<string, Mark>;
   pulses: Record<string, Pulse>;
@@ -79,7 +86,11 @@ export function RowMark({ k }: { k: string }) {
     <div className="row-mark">
       {mark && (
         <>
-          <span className={`m is-${mark}`} title={MARK_TEXT[mark]}>
+          {/* 保存できた印からは、火花が 1 回散る（.spark） */}
+          <span
+            className={`m is-${mark}${mark === "saved" ? " spark" : ""}`}
+            title={MARK_TEXT[mark]}
+          >
             {mark === "saved" && <Icon.check size={14} />}
             {mark === "failed" && <Icon.close size={14} />}
           </span>
@@ -92,7 +103,7 @@ export function RowMark({ k }: { k: string }) {
 }
 
 /**
- * 値を変えた部品を包む。保存を始めたときと失敗したときに、縁を光が 1 周する。
+ * 値を変えた部品を包む。保存を始めたときと失敗したときに is-traced を付け直す。
  * アニメーションをやり直すには class を付け直す必要があるので、ここだけ DOM を直接触る
  * （key で作り直すと、中の部品がフォーカスを失う）。
  */

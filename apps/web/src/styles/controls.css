@@ -1,7 +1,6 @@
-/* 部品: ボタン・入力・選択・印・面・重なり・表。縁は 1px の線、選択中だけ箔の縁になる。 */
+/* 部品: ボタン・入力・選択・印・面・重なり・表。縁は 1px の線、選んでいるものだけ琥珀の縁になる。 */
 
-/* グラデーションの 1px の縁（mask で輪だけを残す）。選択中の部品と面が共用する */
-.seg button[aria-pressed="true"]::before,
+/* 琥珀の 1px の縁（mask で輪だけを残す）。選んでいるカードと、触れた面が共用する */
 .mode[aria-checked="true"]::before,
 .chip-f[aria-pressed="true"]::before,
 .frame::before {
@@ -11,7 +10,7 @@
   padding: 1px;
   border-radius: inherit;
   pointer-events: none;
-  background: var(--foil);
+  background: var(--accent);
   -webkit-mask:
     linear-gradient(#000 0 0) content-box,
     linear-gradient(#000 0 0);
@@ -28,7 +27,7 @@
   min-height: 34px;
   padding: 0 12px;
   border: 1px solid var(--line-strong);
-  border-radius: var(--r-sm);
+  border-radius: 999px;
   background: var(--wash);
   color: var(--ink);
   font-size: var(--fs-sm);
@@ -44,15 +43,14 @@
 }
 .btn:hover:not(:disabled) {
   background: color-mix(in oklch, var(--ink) 10%, transparent);
-  border-color: color-mix(in oklch, var(--f2) 62%, var(--line-strong));
-  box-shadow: 0 0 16px -6px color-mix(in oklch, var(--f2) 70%, transparent);
+  border-color: color-mix(in oklch, var(--ink) 40%, var(--line-strong));
 }
 .btn:disabled {
   color: var(--muted);
   border-color: var(--line);
   background: transparent;
 }
-/* 主ボタン: 単色の塗り。普段は光らせず、触れたときだけ藤色のにじみが出る */
+/* 主ボタン: 単色の塗り。光らせない（触れたときは塗りが少し沈むだけ） */
 .btn-primary {
   background: var(--fill) border-box;
   border-color: transparent;
@@ -63,9 +61,7 @@
 .btn-primary:hover:not(:disabled) {
   background: var(--ink-2) border-box;
   border-color: transparent;
-  box-shadow:
-    var(--btn-shadow),
-    0 0 20px -6px color-mix(in oklch, var(--f2) 72%, transparent);
+  box-shadow: var(--btn-shadow);
 }
 .btn-primary:disabled {
   background: var(--surface-2);
@@ -128,7 +124,7 @@
   background: var(--wash);
 }
 .icon-btn.bordered:hover:not(:disabled) {
-  border-color: color-mix(in oklch, var(--f2) 62%, var(--line-strong));
+  border-color: color-mix(in oklch, var(--ink) 40%, var(--line-strong));
 }
 
 /* ============ 入力 ============ */
@@ -146,18 +142,23 @@
   line-height: 1.5;
   transition: border-color var(--dur-fast);
 }
+/* 1 行の欄は丸く、複数行の欄は角丸のまま */
+.input,
+.select-trigger {
+  border-radius: 999px;
+  padding-inline: 14px;
+}
 .input:hover,
 .textarea:hover,
 .select-trigger:hover:not(:disabled) {
-  border-color: color-mix(in oklch, var(--f1) 55%, var(--line-strong));
+  border-color: color-mix(in oklch, var(--ink) 40%, var(--line-strong));
 }
-/* フォーカス: 2px の藤色の線と、左右にだけ薄い光 */
+/* フォーカス: 2px の琥珀の線。光は付けない */
 .input:focus-visible,
 .textarea:focus-visible,
 .select-trigger:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 1px;
-  box-shadow: var(--glow-focus);
 }
 .input::placeholder,
 .textarea::placeholder {
@@ -165,7 +166,6 @@
 }
 .input.mono,
 .textarea.mono {
-  font-family: var(--font-mono);
   font-size: var(--fs-sm);
 }
 .input[aria-invalid="true"],
@@ -234,21 +234,24 @@
   padding-left: 32px;
 }
 
-/* セグメント: 溝の中で、選んだ駒だけが箔の縁と薄い塗りで灯る */
+/* セグメント: 丸い溝の中で、選んだ駒だけが単色で塗られる */
 .seg {
   display: inline-flex;
+  gap: 2px;
   max-width: 100%;
-  padding: 1px;
-  border-radius: calc(var(--r-sm) + 1px);
-  background: var(--line-strong);
+  padding: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--field);
   overflow: hidden;
 }
 .seg button {
-  min-width: 56px;
-  min-height: 34px;
+  min-width: 52px;
+  min-height: 30px;
   padding: 0 12px;
   border: 0;
-  background: var(--field);
+  border-radius: 999px;
+  background: transparent;
   color: var(--ink-2);
   font-size: var(--fs-sm);
   font-weight: 500;
@@ -258,37 +261,23 @@
     color var(--dur-fast);
 }
 .seg button:hover:not(:disabled) {
-  background: color-mix(in oklch, var(--ink) 8%, var(--field));
+  background: color-mix(in oklch, var(--ink) 8%, transparent);
   color: var(--ink);
 }
-.seg button[aria-pressed="true"] {
-  position: relative;
-  z-index: 1;
-  border-radius: var(--r-sm);
-  background: var(--sel-fill);
-  color: var(--ink);
-  font-weight: 600;
-  box-shadow: var(--glow-in);
-}
+.seg button[aria-pressed="true"],
 .seg button[aria-pressed="true"]:hover {
-  background: var(--sel-fill);
+  background: var(--fill);
+  color: var(--on-fill);
+  font-weight: 600;
 }
 .seg button:disabled {
   color: var(--muted);
 }
 .seg button:focus-visible {
-  outline-offset: -3px;
-}
-.seg.is-mono button {
-  font-family: var(--font-mono);
-  font-weight: 400;
-}
-.seg.is-mono button[aria-pressed="true"] {
-  font-weight: 500;
+  outline-offset: -2px;
 }
 .seg .count {
   margin-left: 6px;
-  font-family: var(--font-mono);
   font-size: 11px;
   opacity: 0.7;
 }
@@ -311,17 +300,25 @@
   color: var(--ok);
   border-color: color-mix(in oklch, var(--ok) 50%, var(--line));
 }
+/* 注意は琥珀と色が近いので、▲ の形も添える（#142） */
 .badge.is-warn {
   color: var(--warn);
   border-color: color-mix(in oklch, var(--warn) 50%, var(--line));
+}
+.badge.is-warn::before {
+  content: "";
+  width: 8px;
+  height: 7px;
+  background: currentColor;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
 }
 .badge.is-danger {
   color: var(--danger);
   border-color: color-mix(in oklch, var(--danger) 55%, var(--line));
 }
 .badge.is-solid {
-  background: color-mix(in oklch, var(--f1) 22%, transparent);
-  border-color: color-mix(in oklch, var(--f1) 60%, var(--line));
+  background: var(--accent-soft);
+  border-color: color-mix(in oklch, var(--accent) 60%, var(--line));
   color: var(--ink);
 }
 /* プロバイダの印を入れる小さな枠。印は文字と同じ色にして、色数を増やさない */
@@ -333,7 +330,6 @@
   height: 28px;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
-  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--ink-2);
   background: var(--field);
@@ -350,9 +346,9 @@
   width: 40px;
   height: 40px;
   overflow: hidden;
-  border: 1px solid color-mix(in oklch, var(--f2) 42%, var(--line-strong));
+  border: 1px solid var(--line-strong);
   border-radius: calc(var(--r-sm) + 3px);
-  background: color-mix(in oklch, var(--f2) 15%, var(--surface));
+  background: var(--surface-2);
   color: var(--ink);
   font-weight: 600;
   font-size: var(--fs-lg);
@@ -372,7 +368,6 @@ kbd {
   border: 1px solid var(--line-strong);
   border-radius: 5px;
   background: var(--wash);
-  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--ink-2);
   white-space: nowrap;
@@ -380,12 +375,16 @@ kbd {
 .link {
   color: var(--ink);
   text-decoration: underline;
-  text-decoration-color: color-mix(in oklch, var(--f2) 60%, var(--line-strong));
+  text-decoration-color: color-mix(
+    in oklch,
+    var(--accent) 60%,
+    var(--line-strong)
+  );
   text-underline-offset: 3px;
   overflow-wrap: anywhere;
 }
 .link:hover {
-  color: var(--hot-ink);
+  color: var(--accent-ink);
   text-decoration-color: currentColor;
 }
 .pending {
@@ -399,17 +398,28 @@ kbd {
   content: "";
   width: 6px;
   height: 6px;
-  border: 1px solid var(--hot-ink);
+  border: 1px solid var(--accent);
   border-radius: 50%;
 }
+/* 読み込み中: 12 本の目盛りの輪が、1 目盛りずつ刻んで回る。
+   目盛りは mask で切り出し、半分を薄くして向きが分かるようにする */
 .spinner {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   flex: none;
-  border: 2px solid var(--line-strong);
-  border-top-color: var(--ink);
   border-radius: 50%;
-  animation: spin 0.7s linear infinite;
+  background: conic-gradient(
+    var(--ink) 0 50%,
+    color-mix(in oklch, var(--ink) 35%, transparent) 50% 100%
+  );
+  -webkit-mask:
+    repeating-conic-gradient(#000 0 9deg, transparent 9deg 30deg),
+    radial-gradient(circle, transparent 0 4px, #000 4.5px);
+  -webkit-mask-composite: source-in;
+  mask:
+    repeating-conic-gradient(#000 0 9deg, transparent 9deg 30deg) intersect,
+    radial-gradient(circle, transparent 0 4px, #000 4.5px);
+  animation: spin 1.2s steps(12) infinite;
 }
 @keyframes spin {
   to {
@@ -424,7 +434,51 @@ kbd {
   font-size: var(--fs-sm);
 }
 
-/* 面: 細い線の角丸。箔の縁は、普段は隠しておき、部品ごとに出す */
+/* 火花: 保存できたとき、印のまわりに 8 本の琥珀の線が 1 回散る（#142）。
+   線は放射の縞と輪の mask を重ねて切り出す（色は琥珀 1 色で、グラデーションにはしない） */
+.spark {
+  position: relative;
+}
+.spark::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  background: var(--accent);
+  pointer-events: none;
+  opacity: 0;
+  -webkit-mask-image:
+    repeating-conic-gradient(from -5deg, #000 0 10deg, transparent 10deg 45deg),
+    radial-gradient(
+      circle closest-side,
+      transparent 52%,
+      #000 54% 96%,
+      transparent 98%
+    );
+  -webkit-mask-composite: source-in;
+  mask-image:
+    repeating-conic-gradient(from -5deg, #000 0 10deg, transparent 10deg 45deg),
+    radial-gradient(
+      circle closest-side,
+      transparent 52%,
+      #000 54% 96%,
+      transparent 98%
+    );
+  mask-composite: intersect;
+  animation: spark-burst 560ms var(--ease-out) 1;
+}
+@keyframes spark-burst {
+  from {
+    opacity: 1;
+    transform: scale(0.45);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.2);
+  }
+}
+
+/* 面: 細い線の角丸。琥珀の縁は、普段は隠しておき、部品ごとに出す */
 .frame {
   position: relative;
   border: 1px solid var(--line);
@@ -534,7 +588,7 @@ kbd {
 .modal.is-narrow {
   width: min(440px, 100%);
 }
-/* 重なりの上縁に、箔の線が左から引かれる */
+/* 重なりの上縁に、琥珀の線が左から引かれる（光は付けない） */
 .modal::before,
 .palette::before {
   content: "";
@@ -544,8 +598,7 @@ kbd {
   top: -1px;
   height: 2px;
   border-radius: 2px;
-  background: var(--foil);
-  box-shadow: var(--glow-line);
+  background: var(--accent);
   pointer-events: none;
   transform-origin: 0 50%;
   animation: line-draw 460ms var(--ease-out) backwards;
@@ -665,7 +718,7 @@ kbd {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--hot-ink);
+  color: var(--accent-ink);
 }
 .pop-item[aria-checked="true"],
 .pop-item[data-state="checked"],
@@ -710,8 +763,7 @@ kbd {
   border: 1px solid var(--line-strong);
   border-radius: var(--r-md);
   background:
-    linear-gradient(var(--f3), var(--f2) 50%, var(--f1)) 0 0 / 3px 100%
-      no-repeat,
+    linear-gradient(var(--accent), var(--accent)) 0 0 / 3px 100% no-repeat,
     var(--raised);
   box-shadow: var(--shadow);
   font-size: var(--fs-sm);
@@ -775,10 +827,6 @@ tbody tr:last-child > td {
 td.num,
 th.num {
   text-align: right;
-  font-family: var(--font-mono);
-}
-th.num {
-  font-family: var(--font-ui);
 }
 .cell-main {
   display: flex;

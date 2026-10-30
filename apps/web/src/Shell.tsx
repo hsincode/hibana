@@ -88,7 +88,6 @@ export function Shell({
   const side = useRef<HTMLElement>(null);
   const navigation = useRef<HTMLElement>(null);
   const indicator = useRef<HTMLDivElement>(null);
-  const saveline = useRef<HTMLDivElement>(null);
   const main = useRef<HTMLElement>(null);
   const current = useCurrentGuild(guilds);
 
@@ -148,8 +147,8 @@ export function Shell({
       main.current?.focus({ preventScroll: true });
   }, [location.key]);
 
-  /* ---------- 現在地の線 ---------- */
-  // 現在地のリンクの位置へ線を移す。ページを移ると、線は前の位置から滑って動く。
+  /* ---------- 現在地の点 ---------- */
+  // 現在地のリンクの高さへ点を移す。ページを移ると、点は前の位置から滑って動く。
   const placeIndicator = () => {
     const box = navigation.current;
     const line = indicator.current;
@@ -181,16 +180,6 @@ export function Shell({
     window.addEventListener("resize", placeIndicator);
     return () => window.removeEventListener("resize", placeIndicator);
   }, []);
-
-  /* ---------- 保存ライン ---------- */
-  // 保存できたとき（と失敗したとき）に、上部バーの下端を光が 1 回走る。
-  useEffect(() => {
-    const line = saveline.current;
-    if (!line || (save !== "saved" && save !== "failed")) return;
-    line.classList.remove("run", "run-fail");
-    void line.offsetWidth;
-    line.classList.add(save === "saved" ? "run" : "run-fail");
-  }, [save]);
 
   async function logout() {
     setBusy(true);
@@ -296,7 +285,6 @@ export function Shell({
             </Dropdown.Content>
           </Dropdown.Portal>
         </Dropdown.Root>
-        <div ref={saveline} className="saveline" aria-hidden="true" />
       </header>
 
       <div className="shell">

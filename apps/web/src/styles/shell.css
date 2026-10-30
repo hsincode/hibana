@@ -41,7 +41,6 @@
   width: 44px;
   height: 44px;
   border-radius: var(--r-md);
-  box-shadow: 0 0 30px -12px color-mix(in oklch, var(--f2) 70%, transparent);
 }
 .nav-toggle {
   display: none;
@@ -55,7 +54,7 @@
   margin-left: var(--sp-5);
   width: min(320px, 34vw);
   border: 1px solid var(--line);
-  border-radius: var(--r-sm);
+  border-radius: 999px;
   background: var(--field);
   color: var(--muted);
   font-size: var(--fs-sm);
@@ -65,7 +64,7 @@
     color var(--dur-fast);
 }
 .palette-btn:hover {
-  border-color: color-mix(in oklch, var(--f1) 55%, var(--line-strong));
+  border-color: color-mix(in oklch, var(--ink) 40%, var(--line-strong));
   color: var(--ink-2);
 }
 .palette-btn span {
@@ -80,7 +79,8 @@
   min-width: 0;
 }
 
-/* 保存の状態。成功はトーストではなく、ここと行の右端の印で伝える */
+/* 保存の状態。成功はトーストではなく、ここと行の右端の印で伝える。
+   保存できたときは、印から火花が 1 回散る（.spark、controls.css） */
 .save-state {
   display: inline-flex;
   align-items: center;
@@ -111,9 +111,8 @@
   color: var(--ink);
 }
 .save-state.is-saved .save-glyph {
-  background: var(--ok);
-  border-color: var(--ok);
-  box-shadow: 0 0 8px var(--ok);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 .save-state.is-failed {
   color: var(--danger);
@@ -123,78 +122,12 @@
   background: var(--danger);
   border-color: var(--danger);
   border-radius: 0;
-  box-shadow: 0 0 8px var(--danger);
 }
 .save-sync {
   color: var(--muted);
   padding-left: 8px;
   border-left: 1px solid var(--line);
 }
-/* 保存ライン: 保存できたとき、上部バーの下端を光が 1 回だけ走る。失敗は赤が逆向きに走る */
-.saveline {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -6px;
-  height: 12px;
-  overflow: hidden;
-  pointer-events: none;
-}
-.saveline::before {
-  content: "";
-  position: absolute;
-  top: 5px;
-  bottom: 5px;
-  left: 0;
-  width: 34%;
-  border-radius: 2px;
-  opacity: 0;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    var(--f1) 28%,
-    var(--f2) 58%,
-    var(--f3) 84%,
-    var(--f4)
-  );
-  filter: drop-shadow(0 0 5px var(--f2));
-  transform: translateX(-100%);
-}
-.saveline.run::before {
-  animation: comet 780ms cubic-bezier(0.3, 0.1, 0.2, 1) 1;
-}
-.saveline.run-fail::before {
-  background: linear-gradient(270deg, transparent, var(--danger) 70%);
-  filter: drop-shadow(0 0 5px var(--danger));
-  animation: comet-back 780ms cubic-bezier(0.3, 0.1, 0.2, 1) 1;
-}
-@keyframes comet {
-  0% {
-    transform: translateX(-100%);
-    opacity: 1;
-  }
-  88% {
-    opacity: 1;
-  }
-  100% {
-    transform: translateX(296%);
-    opacity: 0;
-  }
-}
-@keyframes comet-back {
-  0% {
-    transform: translateX(296%);
-    opacity: 1;
-  }
-  88% {
-    opacity: 1;
-  }
-  100% {
-    transform: translateX(-100%);
-    opacity: 0;
-  }
-}
-
 .account-btn {
   display: inline-flex;
   align-items: center;
@@ -268,7 +201,7 @@
 }
 .guild-switch:hover,
 .guild-switch[aria-expanded="true"] {
-  border-color: color-mix(in oklch, var(--f1) 55%, var(--line-strong));
+  border-color: color-mix(in oklch, var(--ink) 40%, var(--line-strong));
 }
 .guild-switch .name {
   flex: 1;
@@ -327,24 +260,24 @@
   background: var(--wash);
   color: var(--ink);
 }
-/* 現在地: 薄い色づけと、左で光る縦線（線はページを移ると滑って動く） */
+/* 現在地: 単色の面と、右の琥珀の点（点はページを移ると滑って動く） */
 .nav-link[aria-current="page"] {
-  background: var(--sel-wash);
+  background: var(--surface-2);
   color: var(--ink);
   font-weight: 600;
 }
 .nav-link[aria-current="page"] .ic {
-  color: var(--hot-ink);
+  color: var(--ink);
 }
 .nav-indicator {
   position: absolute;
-  left: 0;
+  right: 22px;
   top: 0;
-  width: 3px;
-  height: 18px;
-  border-radius: 2px;
-  background: var(--foil-v);
-  box-shadow: var(--glow-ind);
+  z-index: 1;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
   opacity: 0;
   pointer-events: none;
 }
@@ -417,22 +350,56 @@
 .head-search {
   width: min(300px, 100%);
 }
-/* 見出し: 墨の字の尾だけに箔の色が入る */
+/* 見出し: 墨 1 色 */
 .page-head h1,
 .login-card h1 {
-  width: fit-content;
   max-width: 100%;
   color: var(--ink);
-  background: var(--title-text) 0 0 / 100% 100% no-repeat;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
 }
-@media (forced-colors: active) {
-  .page-head h1,
-  .login-card h1 {
-    background: none;
-    -webkit-text-fill-color: currentColor;
+/* 見出しの右の小さな図: 目盛りの半円と放射線（::before）、中心に琥珀の星（::after）。
+   飾りなので疑似要素で描き、読み上げない。右に検索や操作を置く見出し（.page-head-row）と、
+   狭い幅には出さない */
+.page-head {
+  position: relative;
+}
+/* 見出しの文字が右の図に重ならないよう、図の幅だけ空ける（タブ帯は端まで使う） */
+.page-head:not(:has(.page-head-row)) > :not(nav) {
+  padding-right: 148px;
+}
+.page-head:not(:has(.page-head-row))::before,
+.page-head:not(:has(.page-head-row))::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  pointer-events: none;
+}
+.page-head:not(:has(.page-head-row))::before {
+  right: 0;
+  width: 132px;
+  height: 62px;
+  background: var(--line-strong);
+  -webkit-mask: url("./art/head-dial.svg") no-repeat center / contain;
+  mask: url("./art/head-dial.svg") no-repeat center / contain;
+  animation: fade-in 600ms var(--ease-out) backwards;
+}
+.page-head:not(:has(.page-head-row))::after {
+  right: 57px;
+  top: 41px;
+  width: 18px;
+  height: 18px;
+  background: var(--accent);
+  -webkit-mask: url("./art/star.svg") no-repeat center / contain;
+  mask: url("./art/star.svg") no-repeat center / contain;
+  animation: star-pop 700ms var(--ease-out) 150ms backwards;
+}
+@keyframes star-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1.08);
   }
 }
 .guild-heading {
@@ -527,12 +494,11 @@
 }
 .palette-item[aria-selected="true"] {
   background:
-    linear-gradient(var(--f3), var(--f2) 50%, var(--f1)) 0 50% / 2px 60%
-      no-repeat,
-    var(--sel-wash);
+    linear-gradient(var(--accent), var(--accent)) 0 50% / 2px 60% no-repeat,
+    var(--surface-2);
 }
 .palette-item[aria-selected="true"] .ic {
-  color: var(--hot-ink);
+  color: var(--accent-ink);
 }
 .palette-item[aria-selected="true"] .where {
   color: var(--ink-2);
@@ -576,14 +542,10 @@
   background: color-mix(in oklch, var(--surface) 86%, transparent);
   box-shadow: var(--shadow);
 }
-.login-card.frame::before {
-  opacity: 0.75;
-}
 .login-card h1 {
   font-size: 44px;
   font-weight: 300;
   letter-spacing: -0.02em;
-  background-image: var(--foil-text);
 }
 .login-card .sub {
   color: var(--ink-2);
@@ -596,7 +558,9 @@
   color: var(--muted);
   font-size: var(--fs-xs);
 }
-/* 図版: 星を箔の線で描き、周りに軌道を置く。星の線は 1 回だけ描かれて止まる */
+/* 図版: 同心円・目盛りの輪・放射線と、中心の琥珀の星（#142）。
+   円と放射線は 1 回だけ描かれて止まり、星は 1 回現れる。目盛りの輪だけは 2 分で 1 周回り続ける
+   （出来事と関係なく続く動きは、ダッシュボードの中には置かない。例外はこの輪だけ）。 */
 .login-plate {
   justify-self: center;
   width: min(440px, 100%);
@@ -608,59 +572,53 @@
   display: block;
   overflow: visible;
 }
-.login-plate .star {
+/* 線の太さは viewBox（100）の単位。440px の図版で約 1px になる */
+.login-plate .ring {
   fill: none;
-  stroke: url(#plate-star) var(--f2);
-  stroke-width: 0.22px;
-  stroke-linejoin: round;
-  animation: star-draw 1100ms var(--ease-out) backwards;
+  stroke: var(--line-strong);
+  stroke-width: 0.24px;
+  stroke-dasharray: 1;
+  animation: plate-draw 1200ms var(--ease-out) backwards;
+  animation-delay: var(--d, 0ms);
 }
-.login-plate .star-glow {
+.login-plate .ticks {
   fill: none;
-  stroke: url(#plate-star) var(--f2);
-  stroke-width: 0.7px;
-  stroke-linejoin: round;
-  opacity: 0.6;
+  stroke: var(--muted);
+  stroke-width: 0.24px;
+  opacity: 0.7;
 }
-.login-plate .orbit {
-  fill: none;
-  stroke: color-mix(in oklch, var(--f1) 55%, var(--line-strong));
-  stroke-width: 1px;
-  vector-effect: non-scaling-stroke;
+.login-plate .pip {
+  fill: var(--accent);
 }
-.login-plate .orbit.b {
-  stroke: color-mix(in oklch, var(--f2) 50%, var(--line-strong));
-}
-.login-plate .orbit.c {
-  stroke: color-mix(in oklch, var(--f3) 45%, var(--line-strong));
-}
-.login-plate .ion.a {
-  fill: var(--f1);
-}
-.login-plate .ion.b {
-  fill: var(--f2);
-}
-.login-plate .ion.c {
-  fill: var(--f3);
-}
-.login-plate .orbits {
+.login-plate .spin {
   transform-origin: 50px 50px;
-  animation: orbit-in 1200ms var(--ease-out) backwards;
+  animation:
+    fade-in 600ms var(--ease-out) 500ms backwards,
+    plate-spin 120s linear infinite;
 }
-@keyframes star-draw {
+.login-plate .ray {
+  fill: none;
+  stroke: var(--ink-2);
+  stroke-width: 0.3px;
+  stroke-linecap: round;
+  stroke-dasharray: 1;
+  animation: plate-draw 600ms var(--ease-out) backwards;
+  animation-delay: var(--d, 0ms);
+}
+.login-plate .star {
+  fill: var(--accent);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: star-pop 700ms var(--ease-out) 150ms backwards;
+}
+@keyframes plate-draw {
   from {
-    stroke-dasharray: 100;
-    stroke-dashoffset: 100;
+    stroke-dashoffset: 1;
   }
+}
+@keyframes plate-spin {
   to {
-    stroke-dasharray: 100;
-    stroke-dashoffset: 0;
-  }
-}
-@keyframes orbit-in {
-  from {
-    opacity: 0;
-    transform: rotate(-24deg) scale(0.92);
+    transform: rotate(360deg);
   }
 }
 
@@ -736,7 +694,8 @@
   .guild-tabs a[aria-current="page"] {
     color: var(--ink);
     font-weight: 600;
-    background: var(--foil) 0 100% / 100% 2px no-repeat;
+    background: linear-gradient(var(--accent), var(--accent)) 0 100% / 100% 2px
+      no-repeat;
   }
 }
 @media (max-width: 900px) {
@@ -753,6 +712,13 @@
   }
 }
 @media (max-width: 760px) {
+  .page-head::before,
+  .page-head::after {
+    display: none;
+  }
+  .page-head:not(:has(.page-head-row)) > :not(nav) {
+    padding-right: 0;
+  }
   .nav-link,
   .palette-item {
     min-height: 40px;

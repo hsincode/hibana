@@ -1302,6 +1302,18 @@ test("a save shows on the row and in the top bar, and a failed save rolls the co
   // Only an upper bound is promised: nothing tells the dashboard when the bot picked it up.
   await expect(status).toContainText("bot への反映は最大 30 秒");
   await expect(mark).toHaveText("保存済み");
+  // The saved mark, on the row and in the top bar, sends out one spark (#142).
+  for (const spark of [
+    mark.locator(".m.is-saved.spark"),
+    status.locator(".save-glyph.spark"),
+  ]) {
+    await expect(spark).toHaveCount(1);
+    expect(
+      await spark.evaluate(
+        (el) => getComputedStyle(el, "::after").animationIterationCount,
+      ),
+    ).toBe("1");
+  }
   await expect(strip).toContainText("high");
   // Success is not a toast any more.
   await expect(page.locator(".toast")).toHaveCount(0);
@@ -1585,6 +1597,30 @@ test("long names and URLs wrap or scroll inside their own frame", async ({
   }
 });
 
+test("on the login page only the dial's ring keeps turning, and it stops when the OS asks for less (#142)", async ({
+  page,
+}) => {
+  await page.route("**/api/**", (route) =>
+    route.fulfill({ status: 401, json: { error: "Unauthorized" } }),
+  );
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/login");
+  await expect(
+    page.getByRole("link", { name: "Discord でログイン" }),
+  ).toBeVisible();
+  const looping = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll("*")]
+        .filter((el) =>
+          getComputedStyle(el).animationIterationCount.includes("infinite"),
+        )
+        .map((el) => el.getAttribute("class")),
+    );
+  expect(await looping()).toEqual(["spin"]);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  expect(await looping()).toEqual([]);
+});
+
 test("motion plays once, and not at all when the OS asks for less", async ({
   page,
 }) => {
@@ -1611,7 +1647,7 @@ test("motion plays once, and not at all when the OS asks for less", async ({
   expect(await seconds()).toBeLessThan(0.001);
 });
 
-test("the two typefaces are served by the app itself", async ({
+test("the one typeface is served by the app itself, and IDs use it too (#142)", async ({
   page,
   baseURL,
 }) => {
@@ -1628,7 +1664,14 @@ test("the two typefaces are served by the app itself", async ({
       .filter((face) => face.status === "loaded")
       .map((face) => face.family.replace(/"/g, "")),
   );
-  expect(loaded).toEqual(expect.arrayContaining(["Outfit", "Red Hat Mono"]));
+  expect(loaded).toContain("Outfit");
+  // No monospace face any more: IDs, values and code are set in Outfit as well.
+  expect(loaded).not.toContain("Red Hat Mono");
+  expect(
+    await page
+      .locator(".page-head .sub .mono")
+      .evaluate((el) => getComputedStyle(el).fontFamily),
+  ).toMatch(/^"?Outfit/);
   // No font host, no CDN: every request went to the dashboard's own origin.
   expect([...hosts]).toEqual([new URL(baseURL!).host]);
 });

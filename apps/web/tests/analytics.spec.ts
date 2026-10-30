@@ -275,9 +275,13 @@ for (const width of [1440, 390]) {
     await chart.focus();
     await expect(page.locator(".chart-tip")).toContainText("$8.00");
     await expect(page.locator(".chart-tip")).toContainText("目安超過");
+    // A day over the guideline stays red even when chosen.
+    await expect(page.locator(".chart-bar.is-sel")).toHaveCount(0);
     await page.keyboard.press("ArrowLeft");
     await expect(page.locator(".chart-tip")).toContainText("$6.45");
     await expect(page.locator(".chart-tip")).toContainText("目安以内");
+    // The chosen day is the one amber bar (#142).
+    await expect(page.locator(".chart-bar.is-sel")).toHaveCount(1);
 
     expect(
       await page.evaluate(

@@ -4,7 +4,8 @@ import { Select } from "./controls";
 import { Badge, Skeleton, ToastArea, useToasts } from "./ui";
 
 /* ============================================================
-   予算が少ないときのモデル（#89、閾値は #95、書き換えは #121、請求月ごとに一度は #128）
+   予算が少ないときのモデル（#89、閾値は #95、書き換えは #121、請求月ごとに一度は #128、
+   Anthropic 以外のモデルは #146）
    「今月の残り」から「今日の推計」を引いた額が閾値を切ると、API は保存された
    設定のうち Anthropic API と Anthropic Workspace を選んでいるものを、請求月ごとに
    一度だけ、ここで選んだモデルに書き換える（apps/api/src/budget-switch.ts）。判定は
@@ -159,9 +160,10 @@ export function BudgetFallbackPanel({ reloadKey }: { reloadKey: string }) {
         を切ったとき、すべてのサーバーと個人設定のうち、Anthropic API（Auto
         を含む）と Anthropic Workspace を選んでいる設定を、請求月（毎月 5
         日〜翌月 4
-        日）ごとに一度だけこのモデルに書き換えます。サブエージェントのモデルとテキスト生成モデルも含みます。Workspace
-        は同じモデルの Workspace にして、Ultra を off
-        にします。その後は自由に変えられ、予算が戻っても元には戻しません。ほかのプロバイダーは変えません。
+        日）ごとに一度だけこのモデルに書き換えます。サブエージェントのモデルも含みます。Workspace
+        は Ultra を off にして、Anthropic API のモデルなら同じモデルの Workspace
+        に、それ以外ならこのモデルにします。テキスト生成モデルは、Anthropic API
+        のモデルを選んだときだけ書き換えます。その後は自由に変えられ、予算が戻っても元には戻しません。ほかのプロバイダーを選んでいる設定は変えません。
       </p>
 
       {err && <p className="stat-note is-error">{err}</p>}

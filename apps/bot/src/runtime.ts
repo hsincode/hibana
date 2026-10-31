@@ -26,7 +26,7 @@ import {
   type UserOverrideRow,
 } from "@hibana/shared/settings";
 import {
-  BUDGET_FALLBACK_PROVIDER,
+  BUDGET_PROVIDER,
   DEFAULT_BUDGET_FALLBACK,
   DEFAULT_BUDGET_FALLBACK_THRESHOLD_USD,
   budgetFallbackSelection,
@@ -297,15 +297,21 @@ export class Runtime {
     return budgetFallbackSelection(fallback);
   }
   /** Whether a turn's selection is what the switch writes (#121): the
-   *  fallback, or a Workspace preset of its model at its effort. Such a turn
-   *  says so once per channel while the budget is low. A model picked after
-   *  the switch is not, and runs as picked without a notice. */
+   *  fallback, or, for an Anthropic API fallback, a Workspace preset of its
+   *  model at its effort. Such a turn says so once per channel while the
+   *  budget is low. A model picked after the switch is not, and runs as
+   *  picked without a notice. The bot does not know which rows the switch
+   *  wrote: a server that was on the fallback already is told too, which a
+   *  fallback of another provider (#146) makes likelier. */
   onBudgetFallback(selection: Selection): boolean {
     if (!this.budgetLow()) return false;
     const fallback = this.budgetFallback();
+    const provider =
+      selection.provider === fallback.provider ||
+      (fallback.provider === BUDGET_PROVIDER &&
+        selection.provider === WORKSPACE_PROVIDER);
     return (
-      (selection.provider === BUDGET_FALLBACK_PROVIDER ||
-        selection.provider === WORKSPACE_PROVIDER) &&
+      provider &&
       selection.model === fallback.model &&
       selection.effort === fallback.effort
     );

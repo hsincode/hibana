@@ -1,5 +1,5 @@
 // The model the settings switch to once the month's budget is nearly spent
-// (decision record: #89), the threshold that counts as nearly spent (#95),
+// (decision record: #89; any provider since #146), the threshold that counts as nearly spent (#95),
 // and the switch itself (#121). The settings API decides whether it is
 // (`/internal/budget`, from the cost report and today's estimate) and, when it
 // turns so, rewrites the stored settings once a billing month (#128); the bot
@@ -9,6 +9,7 @@
 import { z } from "zod";
 import {
   AUTO_ROUTE_MODEL,
+  AUTO_ROUTE_PROVIDER,
   MODEL_PRESETS,
   SELECTABLE_PRESETS,
   WORKSPACE_PROVIDER,
@@ -20,10 +21,10 @@ import {
  *  an Administrator stores another on the dashboard (#95). */
 export const DEFAULT_BUDGET_FALLBACK_THRESHOLD_USD = 10;
 
-/** The provider of the fallback (#89): the one billed against the budget the
- *  cost report shows. The switch also moves Anthropic Workspace choices, to
- *  the fallback's model there (#121). */
-export const BUDGET_FALLBACK_PROVIDER = "anthropic";
+/** The provider billed against the budget the cost report shows (#89). Its
+ *  stored choices, and Anthropic Workspace ones (#121), are what the switch
+ *  rewrites. The fallback itself may be another provider's model (#146). */
+export const BUDGET_PROVIDER = "anthropic";
 
 /** Efforts the fallback may run at. `none` is left out: Claude 5.x cannot
  *  switch thinking off (the bot sends low instead), so it would only mislead. */
@@ -36,18 +37,21 @@ export const BUDGET_FALLBACK_EFFORTS = [
 ] as const;
 
 /**
- * Presets the fallback may be: Anthropic API models, not the auto route.
- * A conversation keeps its provider's own blocks (Anthropic thinking blocks),
- * so the history of an `anthropic` turn can be continued by another
- * `anthropic` model but not sent to another provider's protocol.
+ * Presets the fallback may be (#146): any selectable one but the auto route
+ * and Anthropic Workspace. #89 kept it to Anthropic API because a request
+ * swap would have sent an `anthropic` history, thinking blocks included, to
+ * another protocol. Since #121 the stored settings are rewritten instead, and
+ * a conversation is filed under its selection (`conversationKey`), so a new
+ * model starts a new conversation. Workspace is left out because a fixed
+ * child cannot be a Workspace preset (`isChildPresetId`).
  */
 export function isBudgetFallbackPreset(raw: string): boolean {
   const id = canonicalPresetId(raw);
   return SELECTABLE_PRESETS.some(
     (p) =>
       p.id === id &&
-      p.provider === BUDGET_FALLBACK_PROVIDER &&
-      p.model !== AUTO_ROUTE_MODEL,
+      p.provider !== WORKSPACE_PROVIDER &&
+      !(p.provider === AUTO_ROUTE_PROVIDER && p.model === AUTO_ROUTE_MODEL),
   );
 }
 
@@ -56,7 +60,7 @@ export const budgetFallbackSchema = z
     preset: z
       .string()
       .refine(isBudgetFallbackPreset, {
-        message: "fallback must be an Anthropic API preset other than Auto",
+        message: "fallback must be a preset other than Auto and Workspace",
       })
       .transform(canonicalPresetId),
     effort: z.enum(BUDGET_FALLBACK_EFFORTS),
@@ -156,16 +160,23 @@ export function formatThreshold(usd: number): string {
  * Every stored choice of an `anthropic` preset (Auto included) or an
  * Anthropic Workspace preset is rewritten (decision record #121): the
  * main model of a server and of a person, a fixed subagent or role model, and
- * a server's Text Generation Model. Other providers are left as they are.
+ * a server's Text Generation Model when the fallback can be one. Other
+ * providers are left as they are.
  */
 export type BudgetSwitchTarget = {
-  /** The fallback: an `anthropic` preset. */
+  /** The fallback: any provider's preset (#146). */
   preset: string;
   effort: (typeof BUDGET_FALLBACK_EFFORTS)[number];
-  /** The Workspace preset of the fallback's model, or null when it is
-   *  unpublished (it may not have a live wire id): Workspace choices then
-   *  take the fallback itself. */
+  /** The Workspace preset of the fallback's model, or null: Workspace
+   *  choices then take the fallback itself. Null when that preset is
+   *  unpublished (it may not have a live wire id), and when the fallback is
+   *  not Anthropic API (#146): Claude Max Opus 5.5 shares Workspace Opus
+   *  5.5's model name, but moving to it would keep spending the budget. */
   workspacePreset: string | null;
+  /** Whether a server's Text Generation Model takes the fallback. Those are
+   *  Anthropic API presets only (#118), so another provider's fallback
+   *  leaves them as they are (#146). */
+  textModel: boolean;
 };
 
 /** What the switch writes. A stored fallback that was hidden since runs the
@@ -177,15 +188,19 @@ export function budgetSwitchTarget(
   const chosen = unpublished.includes(fallback.preset)
     ? DEFAULT_BUDGET_FALLBACK
     : fallback;
-  const model = MODEL_PRESETS.find((p) => p.id === chosen.preset)!.model;
-  const workspace = MODEL_PRESETS.find(
-    (p) => p.provider === WORKSPACE_PROVIDER && p.model === model,
-  );
+  const preset = MODEL_PRESETS.find((p) => p.id === chosen.preset)!;
+  const anthropic = preset.provider === BUDGET_PROVIDER;
+  const workspace = anthropic
+    ? MODEL_PRESETS.find(
+        (p) => p.provider === WORKSPACE_PROVIDER && p.model === preset.model,
+      )
+    : undefined;
   return {
     preset: chosen.preset,
     effort: chosen.effort,
     workspacePreset:
       workspace && !unpublished.includes(workspace.id) ? workspace.id : null,
+    textModel: anthropic,
   };
 }
 
@@ -206,13 +221,15 @@ type MainPatch = {
 /** The main model. A Workspace choice moves to the Workspace preset of the
  *  fallback's model and leaves Ultra and Multi-Agent: on Haiku 5.5 a stored
  *  Ultra would start Managed Agents' dynamic workflows (#76), which a server
- *  on Opus with Ultra stored never ran (#121). A row already on the target is
- *  left alone, so its conversations are kept. */
+ *  on Opus with Ultra stored never ran (#121). An Anthropic API choice keeps
+ *  its switches, also when the fallback is another provider's, where stored
+ *  ones apply again (#146). A row already on the target is left alone, so
+ *  its conversations are kept. */
 function mainPatch(row: MainFields, target: BudgetSwitchTarget): MainPatch {
   const selection = row.selection;
   if (!selection) return {};
   const workspace = selection.provider === WORKSPACE_PROVIDER;
-  if (!workspace && selection.provider !== BUDGET_FALLBACK_PROVIDER) return {};
+  if (!workspace && selection.provider !== BUDGET_PROVIDER) return {};
   const id = workspace
     ? (target.workspacePreset ?? target.preset)
     : target.preset;
@@ -235,7 +252,8 @@ type ChildEffort = { mode: string; effort?: string } | null | undefined;
 
 /** A fixed child model of Anthropic API runs as the fallback, at its effort,
  *  as the request swap did before #121. "auto" and "same" are not stored
- *  models and are left as they are. Workspace presets cannot be a child. */
+ *  models and are left as they are. Workspace presets cannot be a child, and
+ *  neither can the fallback be one (`isBudgetFallbackPreset`). */
 function childPatch(
   model: ChildModel,
   effort: ChildEffort,
@@ -244,7 +262,7 @@ function childPatch(
   if (
     model?.mode !== "fixed" ||
     !model.preset ||
-    providerOf(model.preset) !== BUDGET_FALLBACK_PROVIDER
+    providerOf(model.preset) !== BUDGET_PROVIDER
   )
     return null;
   if (
@@ -303,10 +321,12 @@ export function budgetSwitchGuildPatch(
     MainPatch & {
       text_model?: { preset: string; effort: BudgetSwitchTarget["effort"] };
     } = { ...mainPatch(row, target), ...childrenPatch(row, target) };
-  // Text Generation Model presets are Anthropic API ones only (#118).
+  // Text Generation Model presets are Anthropic API ones only (#118): a
+  // fallback of another provider leaves it (#146).
   if (
-    canonicalPresetId(row.text_model.preset) !== target.preset ||
-    row.text_model.effort !== target.effort
+    target.textModel &&
+    (canonicalPresetId(row.text_model.preset) !== target.preset ||
+      row.text_model.effort !== target.effort)
   )
     patch.text_model = { preset: target.preset, effort: target.effort };
   return Object.keys(patch).length ? patch : null;

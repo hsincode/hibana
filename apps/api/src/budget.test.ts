@@ -241,7 +241,7 @@ describe("/api/budget-fallback", () => {
     }
   });
 
-  test("offers Anthropic API presets only: not Auto, not Workspace, not another provider", async () => {
+  test("offers every provider's presets but Auto and Workspace (#146)", async () => {
     const { call } = await setup(ADMIN_KEY);
     const body = await (
       await call("/api/budget-fallback", { session: "free-1" })
@@ -253,7 +253,11 @@ describe("/api/budget-fallback", () => {
     expect(ids.some((id: string) => id.startsWith("anthropic-workspace"))).toBe(
       false,
     );
-    expect(ids).not.toContain("sonnet-5");
+    expect(ids).toContain("sonnet-5");
+    expect(ids).toContain("max-opus-5-5");
+    expect(ids).toContain("ds-deepseek-flash");
+    // Grok Free is not a pick anywhere.
+    expect(ids).not.toContain("grok-4.5");
     expect(body.efforts).toEqual(["low", "medium", "high", "xhigh", "max"]);
   });
 
@@ -309,7 +313,7 @@ describe("/api/budget-fallback", () => {
     ).toBe("anthropic-sonnet-5-5");
   });
 
-  test("only an Administrator may change it, and only to an Anthropic API preset that is public", async () => {
+  test("only an Administrator may change it, and only to a public preset other than Auto and Workspace", async () => {
     const { call, store } = await setup(ADMIN_KEY);
     const put = (session: string | undefined, body: unknown) =>
       call("/api/budget-fallback", { session, method: "PUT", body });
@@ -342,7 +346,7 @@ describe("/api/budget-fallback", () => {
     for (const body of [
       { preset: "anthropic-auto", effort: "high" },
       { preset: "anthropic-workspace-haiku-5-5", effort: "high" },
-      { preset: "sonnet-5", effort: "high" },
+      { preset: "grok-4.5", effort: "high" },
       { preset: "anthropic-haiku-5-5", effort: "none" },
       { preset: "anthropic-haiku-5-5", effort: "ultra" },
       { preset: "anthropic-haiku-5-5" },
@@ -361,6 +365,16 @@ describe("/api/budget-fallback", () => {
     // Nothing was stored by the refused writes.
     expect(await store.getMeta("budget_fallback")).toBeNull();
     expect(await store.getMeta("budget_fallback_threshold")).toBeNull();
+    // Another provider's preset is accepted since #146.
+    const other = await put("admin-1", {
+      preset: "ds-deepseek-flash",
+      effort: "low",
+    });
+    expect(other.status).toBe(200);
+    expect(JSON.parse((await store.getMeta("budget_fallback"))!)).toEqual({
+      preset: "ds-deepseek-flash",
+      effort: "low",
+    });
   });
 });
 
@@ -581,6 +595,48 @@ describe("the settings switch once the budget is low (#121)", () => {
     expect((await poll(call)).low).toBe(true);
     expect((await store.getGuild("api")).effort).toBe("xhigh");
     expect(await store.version()).toBe(picked);
+  });
+
+  test("a fallback of another provider (#146): Anthropic choices take it, the Text Generation Model stays", async () => {
+    const { call, store } = await low();
+    await store.setMeta(
+      "preset_visibility",
+      JSON.stringify({ "anthropic-workspace-opus-5-5": true }),
+    );
+    await store.setMeta(
+      "budget_fallback",
+      JSON.stringify({ preset: "ds-deepseek-flash", effort: "low" }),
+    );
+    await seed(store, "api", {
+      preset: "anthropic-opus-5-5",
+      effort: "max",
+      ultra_mode: true,
+      text_model: { preset: "anthropic-opus-5-5", effort: "max" },
+    });
+    await seed(store, "workspace", {
+      preset: "anthropic-workspace-opus-5-5",
+      ultra_mode: true,
+    });
+    await seed(store, "other", { preset: "opus-5-5", effort: "max" });
+    expect((await poll(call)).low).toBe(true);
+    const deepseek = {
+      provider: "deepseek",
+      model: "deepseek-flash",
+      effort: "low",
+    };
+    const api = await store.getGuild("api");
+    expect(api.selection).toEqual(deepseek);
+    expect(api.ultra_mode).toBe(true);
+    expect(api.text_model).toEqual({
+      preset: "anthropic-opus-5-5",
+      effort: "max",
+    });
+    const workspace = await store.getGuild("workspace");
+    expect(workspace.selection).toEqual(deepseek);
+    expect(workspace.ultra_mode).toBe(false);
+    expect((await store.getGuild("other")).selection?.provider).toBe(
+      "claude_kiro",
+    );
   });
 
   test("with the Workspace preset of the fallback unpublished, a Workspace server takes the fallback itself", async () => {

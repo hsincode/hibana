@@ -427,3 +427,76 @@ describe("DiscordRecordingPort.join", () => {
     expect(s.disconnected()).toBe(1);
   });
 });
+
+describe("direct messages (#152)", () => {
+  const portWith = (
+    users: Record<string, { bot: boolean; error?: unknown }>,
+  ) => {
+    const sent: { userId: string; payload: Record<string, unknown> }[] = [];
+    const client = {
+      users: {
+        fetch: async (id: string) => {
+          const user = users[id];
+          if (!user)
+            throw Object.assign(new Error("Unknown User"), { code: 10013 });
+          return {
+            bot: user.bot,
+            send: async (payload: Record<string, unknown>) => {
+              if (user.error) throw user.error;
+              sent.push({ userId: id, payload });
+            },
+          };
+        },
+      },
+    };
+    const port = new DiscordRecordingPort(
+      client as never,
+      new Runtime(loadConfig({ ANTHROPIC_API_KEY: "fixture" })),
+      () => {},
+    );
+    return { port, sent };
+  };
+
+  test("a person is sent it with the file, and nobody is pinged", async () => {
+    const t = portWith({ u1: { bot: false } });
+    expect(
+      await t.port.direct("u1", {
+        content: "要約",
+        files: [{ name: "transcript.txt", data: Buffer.from("全文") }],
+      }),
+    ).toBe("sent");
+    expect(t.sent[0]!.payload.allowedMentions).toEqual({ parse: [] });
+    expect((t.sent[0]!.payload.files as unknown[]).length).toBe(1);
+  });
+
+  test("a bot is not sent it", async () => {
+    const t = portWith({ b1: { bot: true } });
+    expect(await t.port.direct("b1", { content: "要約" })).toBe("bot");
+    expect(t.sent).toEqual([]);
+  });
+
+  test("a closed inbox, or no server in common, is 'closed'; anything else throws", async () => {
+    const t = portWith({
+      closed: {
+        bot: false,
+        error: Object.assign(new Error("Cannot send"), { code: 50007 }),
+      },
+      left: {
+        bot: false,
+        error: Object.assign(new Error("No mutual guilds"), { code: 50278 }),
+      },
+      limited: {
+        bot: false,
+        error: Object.assign(new Error("Rate limited"), { code: 20016 }),
+      },
+    });
+    expect(await t.port.direct("closed", { content: "要約" })).toBe("closed");
+    expect(await t.port.direct("left", { content: "要約" })).toBe("closed");
+    await expect(t.port.direct("limited", { content: "要約" })).rejects.toThrow(
+      "Rate limited",
+    );
+    await expect(t.port.direct("gone", { content: "要約" })).rejects.toThrow(
+      "Unknown User",
+    );
+  });
+});

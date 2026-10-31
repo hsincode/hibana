@@ -112,6 +112,31 @@ export class DiscordRecordingPort implements RecordingPort {
     });
   }
 
+  async direct(
+    userId: string,
+    message: { content: string; files?: { name: string; data: Buffer }[] },
+  ) {
+    const user = await this.client.users.fetch(userId);
+    if (user.bot) return "bot" as const;
+    try {
+      await user.send({
+        content: message.content,
+        files: message.files?.map(
+          (f) => new AttachmentBuilder(f.data, { name: f.name }),
+        ),
+        allowedMentions: { parse: [] },
+      });
+      return "sent" as const;
+    } catch (error) {
+      // 50007: they take no direct messages from the bot (their privacy
+      // setting, or they blocked it); 50278: they share no server with it
+      // any more. Neither is a fault of the bot.
+      const code = (error as { code?: unknown }).code;
+      if (code === 50007 || code === 50278) return "closed" as const;
+      throw error;
+    }
+  }
+
   async join(
     guildId: string,
     channelId: string,

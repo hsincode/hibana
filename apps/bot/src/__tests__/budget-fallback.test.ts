@@ -105,6 +105,28 @@ describe("Runtime.onBudgetFallback (#121)", () => {
     expect(runtime.budgetFallback()).toEqual(haikuHigh);
   });
 
+  test("a fallback of another provider (#146) is told on that provider only, not on Workspace", async () => {
+    const runtime = new Runtime(config());
+    await runtime.setBudget(low);
+    runtime.replace(
+      {
+        ...runtime.snapshot,
+        budget_fallback: { preset: "max-opus-5-5", effort: "high" },
+      },
+      false,
+    );
+    const maxOpus = {
+      provider: "claude_max",
+      model: "claude-opus-5-5",
+      effort: "high",
+    };
+    expect(runtime.budgetFallback()).toEqual(maxOpus);
+    expect(runtime.onBudgetFallback(maxOpus)).toBe(true);
+    // Same model name, but the switch never writes these for this fallback.
+    for (const provider of ["anthropic", "anthropic_workspace"])
+      expect(runtime.onBudgetFallback({ ...maxOpus, provider })).toBe(false);
+  });
+
   test("a snapshot from the API does not carry the budget, so it keeps the bot's last answer", async () => {
     const runtime = new Runtime(config());
     await runtime.setBudget(low);

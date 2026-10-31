@@ -38,14 +38,27 @@ describe("budget fallback (#89)", () => {
     });
   });
 
-  test("only Anthropic API presets other than Auto may be the fallback", () => {
+  test("any selectable preset but Auto and Workspace may be the fallback (#146)", () => {
     expect(isBudgetFallbackPreset("anthropic-haiku-5-5")).toBe(true);
     expect(isBudgetFallbackPreset("anthropic-opus-5-5")).toBe(true);
+    expect(isBudgetFallbackPreset("max-opus-5-5")).toBe(true);
+    expect(isBudgetFallbackPreset("sonnet-5")).toBe(true);
+    expect(isBudgetFallbackPreset("ds-deepseek-flash")).toBe(true);
     expect(isBudgetFallbackPreset("anthropic-auto")).toBe(false);
     expect(isBudgetFallbackPreset("anthropic-workspace-haiku-5-5")).toBe(false);
-    expect(isBudgetFallbackPreset("max-opus-5-5")).toBe(false);
-    expect(isBudgetFallbackPreset("sonnet-5")).toBe(false);
+    // Grok Free is kept for old rows but is not a pick.
+    expect(isBudgetFallbackPreset("grok-4.5")).toBe(false);
     expect(isBudgetFallbackPreset("nope")).toBe(false);
+    expect(
+      parseBudgetFallback({ preset: "ds-deepseek-flash", effort: "low" }),
+    ).toEqual({ preset: "ds-deepseek-flash", effort: "low" });
+    expect(
+      budgetFallbackSelection({ preset: "max-opus-5-5", effort: "max" }),
+    ).toEqual({
+      provider: "claude_max",
+      model: "claude-opus-5-5",
+      effort: "max",
+    });
   });
 
   test("a stored value that no longer parses reads as the default", () => {
@@ -132,6 +145,7 @@ describe("budget switch of the stored settings (#121)", () => {
       preset: "anthropic-haiku-5-5",
       effort: "high",
       workspacePreset: "anthropic-workspace-haiku-5-5",
+      textModel: true,
     });
     // Unpublished Workspace preset: Workspace choices take the fallback.
     expect(
@@ -320,5 +334,125 @@ describe("budget switch of the stored settings (#121)", () => {
         target,
       ),
     ).toBeNull();
+  });
+});
+
+describe("budget switch to a fallback outside Anthropic API (#146)", () => {
+  const deepseek = budgetSwitchTarget(
+    { preset: "ds-deepseek-flash", effort: "low" },
+    [],
+  );
+  const guild = (patch: GuildPatch) => applyPatch(emptyGuild(), patch);
+  const switched = (row: GuildRow, target = deepseek) => {
+    const patch = budgetSwitchGuildPatch(row, target);
+    if (patch) expect(guildPatchSchema.safeParse(patch).success).toBe(true);
+    return patch ? applyPatch(row, guildPatchSchema.parse(patch)) : row;
+  };
+
+  test("there is no Workspace preset to move to, and the Text Generation Model is left", () => {
+    expect(deepseek).toEqual({
+      preset: "ds-deepseek-flash",
+      effort: "low",
+      workspacePreset: null,
+      textModel: false,
+    });
+    // Claude Max Opus 5.5 has the model name of Workspace Opus 5.5, but only
+    // an Anthropic API fallback moves Workspace choices onto Workspace.
+    expect(
+      budgetSwitchTarget({ preset: "max-opus-5-5", effort: "high" }, []),
+    ).toEqual({
+      preset: "max-opus-5-5",
+      effort: "high",
+      workspacePreset: null,
+      textModel: false,
+    });
+    expect(budgetSwitchTarget(DEFAULT_BUDGET_FALLBACK, []).textModel).toBe(
+      true,
+    );
+  });
+
+  test("an Anthropic API server moves to it and keeps its delegation switches", () => {
+    const row = switched(
+      guild({
+        preset: "anthropic-opus-5-5",
+        effort: "max",
+        subagent_enabled: true,
+        ultra_mode: true,
+        multi_agent: true,
+        text_model: { preset: "anthropic-opus-5-5", effort: "max" },
+      }),
+    );
+    expect(row.selection).toEqual({
+      provider: "deepseek",
+      model: "deepseek-flash",
+      effort: "low",
+    });
+    expect(row.effort).toBe("low");
+    expect(row.subagent_enabled).toBe(true);
+    expect(row.ultra_mode).toBe(true);
+    expect(row.multi_agent).toBe(true);
+    // Text Generation Models are Anthropic API presets only (#118).
+    expect(row.text_model).toEqual({
+      preset: "anthropic-opus-5-5",
+      effort: "max",
+    });
+  });
+
+  test("a Workspace server moves to the fallback itself, with Ultra off", () => {
+    const row = switched(
+      guild({
+        preset: "anthropic-workspace-haiku-5-5",
+        effort: "high",
+        ultra_mode: true,
+      }),
+    );
+    expect(row.selection).toEqual({
+      provider: "deepseek",
+      model: "deepseek-flash",
+      effort: "low",
+    });
+    expect(row.ultra_mode).toBe(false);
+    expect(row.multi_agent).toBe(false);
+  });
+
+  test("fixed Anthropic API children take it; other providers and a server already on it stay", () => {
+    const row = switched(
+      guild({
+        preset: "opus-5-5",
+        subagent_model: { mode: "fixed", preset: "anthropic-opus-5-5" },
+      }),
+    );
+    expect(row.selection?.provider).toBe("claude_kiro");
+    expect(row.subagent_model).toEqual({
+      mode: "fixed",
+      preset: "ds-deepseek-flash",
+    });
+    expect(row.subagent_effort).toEqual({ mode: "fixed", effort: "low" });
+    expect(
+      budgetSwitchGuildPatch(guild({ preset: "opus-5-5" }), deepseek),
+    ).toBeNull();
+    // A DeepSeek server is not an Anthropic choice: not switched at all.
+    expect(
+      budgetSwitchGuildPatch(
+        guild({ preset: "ds-deepseek-flash", effort: "max" }),
+        deepseek,
+      ),
+    ).toBeNull();
+  });
+
+  test("a person's Anthropic API choice moves to it", () => {
+    const own = applyUserOverridePatch(emptyUserOverride(), {
+      preset: "anthropic-sonnet-5-5",
+      effort: "max",
+    });
+    const next = applyUserOverridePatch(
+      own,
+      userOverridePatchSchema.parse(budgetSwitchUserPatch(own, deepseek)),
+    );
+    expect(next.selection).toEqual({
+      provider: "deepseek",
+      model: "deepseek-flash",
+      effort: "low",
+    });
   });
 });

@@ -226,27 +226,27 @@ cost report に載らない進行中の日（UTC）は、APIの `GET /api/analyt
 - 手元のテスト（`apps/api/src/analytics.test.ts`、`apps/web/tests/analytics.spec.ts`）だけです。usage report の応答は公式の API リファレンスの形に合わせた代用です
 - 未確認: 実際の usage report の応答、進行中の1分・1時間が返るか、推計と翌日の確定額との差、本番（Vercel）での動作。手元に Admin API キーがないため、実 API は呼んでいません
 
-### 予算が少ないときのモデル（2026-10-18、閾値の設定は 2026-10-23、設定の書き換えは 2026-10-27、請求月ごとに一度は 2026-10-28）
+### 予算が少ないときのモデル（2026-10-18、閾値の設定は 2026-10-23、設定の書き換えは 2026-10-27、請求月ごとに一度は 2026-10-28、Anthropic 以外のモデルは 2026-10-31）
 
-「今月の残り」から「今日の推計」を引いた額が閾値（既定 $10）を切ったとき、設定 API は、保存された設定のうち Anthropic API（provider `anthropic`）と Anthropic Workspace（provider `anthropic_workspace`）を、請求月（毎月 5 日〜翌月 4 日）ごとに一度だけ、フォールバックモデルに書き換えます（[#89](https://github.com/hsincode/hibana/issues/89)、書き換えは [#121](https://github.com/hsincode/hibana/issues/121)、請求月ごとに一度は [#128](https://github.com/hsincode/hibana/issues/128)）。既定は Anthropic / Claude Haiku 5.5、effort high です。書き換えた後は、送る直前の差し替えをしません。閾値を下回っている間でも、選び直したモデル・effort のとおりに動きます（#121 より前は、何を選んでもフォールバックで動きました）。
+「今月の残り」から「今日の推計」を引いた額が閾値（既定 $10）を切ったとき、設定 API は、保存された設定のうち Anthropic API（provider `anthropic`）と Anthropic Workspace（provider `anthropic_workspace`）を、請求月（毎月 5 日〜翌月 4 日）ごとに一度だけ、フォールバックモデルに書き換えます（[#89](https://github.com/hsincode/hibana/issues/89)、書き換えは [#121](https://github.com/hsincode/hibana/issues/121)、請求月ごとに一度は [#128](https://github.com/hsincode/hibana/issues/128)）。既定は Anthropic / Claude Haiku 5.5、effort high です。フォールバックには Anthropic 以外のモデルも選べます（[#146](https://github.com/hsincode/hibana/issues/146)）。書き換えた後は、送る直前の差し替えをしません。閾値を下回っている間でも、選び直したモデル・effort のとおりに動きます（#121 より前は、何を選んでもフォールバックで動きました）。
 
 - 判定は API の `GET /internal/budget` がします。上の cost report と usage report を、ページと同じ1分のキャッシュから読み、保存された閾値と比べます。どちらかが失敗したら、判定せずにエラーを返します
 - bot は設定のポーリング（30秒ごと）のついでに、2分に1回これを読みます（`apps/bot/src/sync.ts` の `BUDGET_POLL_MS`）。書き換えは、この読み取りに API が答えるときにします。bot が止まっていれば、書き換えは次に bot が読みに来るまで待ちます
 - 書き換えを済ませた請求月を、設定 DB の meta `budget_fallback_switched`（`"2026-10"` など）に持ちます。下回っている答えを返すときに、その請求月をまだ書き換えていなければ、`compareMeta` で請求月を書いてから書き換えます（同時に 2 つの答えを返しても、書き換えは 1 回）。下回っていない答えを返しても印は消しません。同じ請求月に残りが閾値を上回り、また下回っても（UTC の日付が変わった直後に cost report が前日の分を載せたとき、閾値を変えたときなど）、もう書き換えません。次の請求月に下回ったら、もう一度書き換えます。#122 の版が書いた `"true"` は、その版では下回っている間しか残らないので、最初の答えで（下回っているかどうかにかかわらず）その時の請求月に書き直し、書き換え済みとして扱います。API に Admin API キーがないとき、レポートが失敗したときは、印を変えず、書き換えません
 - 書き換えの途中で行の保存が失敗したら、ほかの行は続けて書き換え、失敗した行だけを印に残します（`{"month":"2026-10","guilds":[…],"users":[…]}`）。次に下回っている答えを返すとき、その行だけをやり直します。書き換えた行は、その請求月はもう書き換えないので、後から選び直したモデル・effort は残ります。設定を読めなかったとき（まだ 1 行も書いていない）は、印を戻し、次の読み取りで全体をやり直します
-- 書き換える設定（`packages/shared/src/budget.ts` の `budgetSwitchGuildPatch` / `budgetSwitchUserPatch`）: すべてのサーバーと個人設定のメインモデル（Auto を含む）、サブエージェントと Multi-Agent の役割の固定モデルのうち Anthropic API のプリセット（effort もフォールバックの effort に固定）、サーバーのテキスト生成モデル（#118）。Anthropic Workspace を選んでいる設定は、フォールバックと同じモデルの Workspace のプリセットにし、Ultra と Multi-Agent を off にします（Haiku 5.5 で Ultra が保存されていると、Managed Agents の dynamic workflow が始まるため）。そのプリセットが非公開なら、Anthropic API のフォールバックにします。すでにフォールバックと同じ設定は書き換えません（会話の履歴を消さないため）。ほかのプロバイダーは変えません
-- 書き換えないもの: サブエージェントのモデルが「auto」のとき、エージェントがその場で選ぶモデル。DM の既定（bot の環境変数）。個人設定で effort や Ultra だけを選び、モデルはサーバーに従う人の、その effort や Ultra
+- 書き換える設定（`packages/shared/src/budget.ts` の `budgetSwitchGuildPatch` / `budgetSwitchUserPatch`）: すべてのサーバーと個人設定のメインモデル（Auto を含む）、サブエージェントと Multi-Agent の役割の固定モデルのうち Anthropic API のプリセット（effort もフォールバックの effort に固定）、サーバーのテキスト生成モデル（#118。フォールバックが Anthropic API のときだけ。テキスト生成モデルは Anthropic API のプリセットに限るため、ほかのプロバイダーのときは書き換えません）。Anthropic Workspace を選んでいる設定は、Ultra と Multi-Agent を off にし（Haiku 5.5 で Ultra が保存されていると、Managed Agents の dynamic workflow が始まるため）、フォールバックが Anthropic API ならそれと同じモデルの Workspace のプリセットに、そのプリセットが非公開か、フォールバックがほかのプロバイダーなら、フォールバックそのものにします（Claude Max の Opus 5.5 を選んでも、Workspace の Opus 5.5 にはしません）。Anthropic API の設定をほかのプロバイダーのフォールバックに書き換えるとき、サブエージェント・Ultra・Multi-Agent のスイッチは変えません。`anthropic` のターンでは効かなかった保存済みのスイッチが、書き換えた後は効きます（Ultracode なら effort は xhigh になります）。すでにフォールバックと同じ設定は書き換えません（会話の履歴を消さないため）。ほかのプロバイダーは変えません
+- 書き換えないもの: サブエージェントのモデルが「auto」のとき、エージェントがその場で選ぶモデル。DM の既定（bot の環境変数）。個人設定で effort や Ultra だけを選び、モデルはサーバーに従う人の、その effort や Ultra。ほかのプロバイダーのフォールバックのときの、テキスト生成モデル
 - 予算が戻っても（翌月、閾値の変更）、設定は元に戻しません。書き換えの後に選び直した設定は、その請求月のうちは書き換えません。書き換えの最中に設定を保存すると、どちらかの保存が負けることがあります
-- メインのモデルが変わったサーバーは、変わった設定を受け取ったときに会話の履歴を消します（ほかのモデルの変更と同じ）。下回っている間に、チャンネルで最初にフォールバック（またはそのモデルの Workspace）で動いたターンでは、Discord に「今月の利用料の残りが $10 を切ったため、Anthropic のモデルを **…** に切り替えました。設定から変更できます」と一行出します。金額は `/internal/budget` が返した閾値です（それを返さない古い API なら $10）。bot の判定は状態ファイル（`runtime_state.json` の `budget`）に保つので、再起動しても最後の判定のまま知らせます
+- メインのモデルが変わったサーバーは、変わった設定を受け取ったときに会話の履歴を消します（ほかのモデルの変更と同じ）。下回っている間に、チャンネルで最初にフォールバック（Anthropic API のフォールバックなら、そのモデルの Workspace も）で動いたターンでは、Discord に「今月の利用料の残りが $10 を切ったため、Anthropic のモデルを **…** に切り替えました。設定から変更できます」と一行出します。金額は `/internal/budget` が返した閾値です（それを返さない古い API なら $10）。bot の判定は状態ファイル（`runtime_state.json` の `budget`）に保つので、再起動しても最後の判定のまま知らせます。bot はどの設定を書き換えたかを知らず、選択がフォールバックと同じかどうかで決めるので、書き換える前からそのモデル・effort を選んでいたサーバーにも一度出ます（ほかのプロバイダーのフォールバックでは、起きやすくなります）
 - フォールバックモデルと閾値は、ダッシュボードの「利用料」の「予算が少ないときのモデル」で決めます。変えられるのは Administrator（`WEB_ADMIN_IDS`）だけです（`canManageBudget`、[#95](https://github.com/hsincode/hibana/issues/95)。#89 では Moderator もモデルを変えられました）。ほかの人は、いまの値を見るだけです
-- 選べるモデルは Anthropic API の公開中のプリセット（Auto を除く）と、effort low〜max です。保存したプリセットが後から非公開になったら、既定に書き換えます。下回った後にモデルを変えても、書き換え済みの設定は変わりません（次の請求月に下回ったときに効きます）
+- 選べるモデルは、Auto と Anthropic Workspace を除く公開中のプリセット（#146。#89〜#128 では Anthropic API だけ）と、effort low〜max です。Premium 限定で `server_shared` でないプリセット（Claude Max）を選ぶと、書き換えたサーバーの Premium 以外のメンバーは、bot の既定モデルで動きます。そのプロバイダーの認証情報が bot にないと、書き換えた設定のターンは失敗します。保存したプリセットが後から非公開になったら、既定に書き換えます。下回った後にモデルを変えても、書き換え済みの設定は変わりません（次の請求月に下回ったときに効きます）
 - 閾値は $0〜$200（`MONTHLY_BUDGET_USD`）の 1 セント単位です。$0 なら、予算を超えるまで切り替えません。設定 DB の meta `budget_fallback_threshold` に保存し、API の判定にだけ使います（bot へのスナップショットには入れません）。保存がないとき、月の予算を下げて範囲の外になったときは、既定の $10（`packages/shared/src/budget.ts` の `DEFAULT_BUDGET_FALLBACK_THRESHOLD_USD`）で判定します。保存した閾値は、bot が次に `/internal/budget` を読んだとき（最大2分後）に効きます
 - UTC の日付が変わった直後、前日の分が cost report に載るまでの間は、前日の分がどちらの数字にも入りません。その間は残りを多めに見ます
 
-検証の範囲（2026-10-18、閾値は 2026-10-23、設定の書き換えは 2026-10-27、請求月ごとに一度は 2026-10-28）:
+検証の範囲（2026-10-18、閾値は 2026-10-23、設定の書き換えは 2026-10-27、請求月ごとに一度は 2026-10-28、Anthropic 以外のモデルは 2026-10-31）:
 
 - 手元のテスト（`apps/api/src/budget.test.ts`、`apps/bot/src/__tests__/budget-fallback.test.ts`、`apps/bot/src/__tests__/sync.test.ts`、`packages/shared/src/__tests__/budget.test.ts`、`apps/web/tests/analytics.spec.ts`）だけです。Anthropic の応答は代用です。設定の書き換えは、メモリの DB（`MemoryStore`）でだけ確かめています
-- 未確認: 実際の Admin API での判定、本番（Vercel・VPS）での切り替え、フォールバックで動いたターンの実際の応答、本番の DB（Supabase）に閾値を保存して読み直すこと、本番の DB での `compareMeta` による 1 回だけの書き換え、本番の印 `"true"` を請求月に書き直すこと、実際の cost report が前日の分を載せるまでの時間
+- 未確認: 実際の Admin API での判定、本番（Vercel・VPS）での切り替え、フォールバックで動いたターンの実際の応答（Anthropic 以外のフォールバックを含む）、本番の DB（Supabase）に閾値を保存して読み直すこと、本番の DB での `compareMeta` による 1 回だけの書き換え、本番の印 `"true"` を請求月に書き直すこと、実際の cost report が前日の分を載せるまでの時間
 
 ## 会話履歴と Auto Routing の経路の保存（2026-10-10）
 

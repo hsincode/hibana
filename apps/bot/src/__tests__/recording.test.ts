@@ -767,6 +767,56 @@ describe("Text Generation Model", () => {
     expect(text(summary).split(line).length - 1).toBe(count);
   });
 
+  test("casual talk gets its own headings, and no request asks for remarks on the transcript's quality (#148)", async () => {
+    // Asked for meeting minutes of a game night, Haiku 5.5 filled them with
+    // "文字起こしの品質が低く、…判然としない" and empty decisions.
+    const llm = fakeLlm((call) =>
+      String(call.messages[0]!.content).includes("one part")
+        ? "- 部分のメモ"
+        : "## 概要\n- 全体",
+    );
+    const s = setup({ llm });
+    await s.recorder.start("g1", "t1", "u1");
+    const line = "あ".repeat(1000);
+    const count = Math.ceil((RECORDING_SUMMARY_PART_TOKENS * 1.5) / 1000);
+    for (let i = 0; i < count; i++)
+      s.port.joined[0]!.events.utterance(
+        "u1",
+        "Aoi",
+        s.at(1000 + i * 1000),
+        line,
+      );
+    await s.recorder.stop("g1", "u1");
+    await s.recorder.settled();
+    expect(s.llm.calls.length).toBe(3);
+    const [part, , merge] = s.llm.calls.map((c) =>
+      String(c.messages[0]!.content),
+    );
+    for (const system of [part!, merge!])
+      expect(system).toContain(
+        "do not comment on the transcript, the speech recognition or its quality",
+      );
+    expect(part).toContain("casual talk");
+    for (const heading of ["## 決定事項", "## 話題", "## できごと"])
+      expect(merge).toContain(heading);
+    expect(merge).toContain('do not write "なし"');
+  });
+
+  test("a short casual talk is summarized in one request with the same rules (#148)", async () => {
+    const s = setup();
+    await s.recorder.start("g1", "t1", "u1");
+    s.port.joined[0]!.events.utterance("u1", "Aoi", s.at(1000), "ナイス");
+    await s.recorder.stop("g1", "u1");
+    await s.recorder.settled();
+    const system = String(s.llm.calls[0]!.messages[0]!.content);
+    expect(system).toContain("## 話題");
+    expect(system).toContain("## できごと");
+    expect(system).toContain(
+      "do not comment on the transcript, the speech recognition or its quality",
+    );
+    expect(system).not.toContain("minutes of a meeting");
+  });
+
   test("the number of parts is bounded; what is past the bound is said to be left out of the summary", async () => {
     const llm = fakeLlm(() => "- メモ");
     const s = setup({ llm });

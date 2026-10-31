@@ -917,3 +917,96 @@ describe("failure detail", () => {
     expect(events).toEqual([]);
   });
 });
+
+test("a tool call cut off by the output limit is not run, and the model is told to split it (#144)", async () => {
+  const events = (values: Json[]) =>
+    values
+      .map((v) => `event: ${v.type}\ndata: ${JSON.stringify(v)}\n\n`)
+      .join("");
+  const bodies: Json[] = [];
+  let executed = 0;
+  const llm = new LlmClient(
+    loadConfig({ ANTHROPIC_API_KEY: "fixture" }),
+    async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      const cut = bodies.length === 1;
+      return sse(
+        events([
+          { type: "message_start", message: { usage: { input_tokens: 5 } } },
+          {
+            type: "content_block_start",
+            index: 0,
+            content_block: cut
+              ? { type: "tool_use", id: "toolu_1", name: "write", input: {} }
+              : { type: "text", text: "" },
+          },
+          {
+            type: "content_block_delta",
+            index: 0,
+            delta: cut
+              ? { type: "input_json_delta", partial_json: '{"content":"lo' }
+              : { type: "text_delta", text: "done" },
+          },
+          { type: "content_block_stop", index: 0 },
+          {
+            type: "message_delta",
+            delta: { stop_reason: cut ? "max_tokens" : "end_turn" },
+            usage: { output_tokens: 3 },
+          },
+          { type: "message_stop" },
+        ]),
+      );
+    },
+    { sleep: noWait },
+  );
+  const progress: string[] = [];
+  const result = await new Agent(llm).run({
+    selection: { provider: "anthropic", model: "claude-haiku-5-5" },
+    messages: [{ role: "user", content: "write" }],
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "write",
+          description: "write a file",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+    ],
+    context: {
+      channelId: "1",
+      userId: "2",
+      botId: "3",
+      thread: false,
+      depth: 0,
+      delivered: false,
+      progress: async (text) => {
+        progress.push(text);
+      },
+    },
+    maxRounds: 4,
+    temperature: 0,
+    nativeSearch: false,
+    execute: async () => {
+      executed++;
+      return "written";
+    },
+  });
+  expect(result.text).toBe("done");
+  expect(executed).toBe(0);
+  // One request per round: the cut-off response is not resent.
+  expect(bodies).toHaveLength(2);
+  expect(progress.some((p) => p.includes("再接続"))).toBe(false);
+  const sent = (bodies[1]!.messages as Json[]).flatMap((m) =>
+    Array.isArray(m.content) ? (m.content as Json[]) : [],
+  );
+  expect(sent).toContainEqual({
+    type: "tool_use",
+    id: "toolu_1",
+    name: "write",
+    input: {},
+  });
+  const reply = sent.find((b) => b.type === "tool_result")!;
+  expect(reply.tool_use_id).toBe("toolu_1");
+  expect(JSON.stringify(reply.content)).toContain("output token limit");
+});

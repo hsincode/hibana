@@ -1126,7 +1126,68 @@ test("Anthropic stream accepts a tool call without arguments", async () => {
   expect(requests).toBe(1);
 });
 
-test("Anthropic stream still rejects a tool input that ends mid-JSON", async () => {
+// A tool call whose input stops after `{"key":`, ended with `stop_reason`.
+const cutToolInput = (stop: string) =>
+  [
+    [
+      "message_start",
+      { type: "message_start", message: { usage: { input_tokens: 5 } } },
+    ],
+    [
+      "content_block_start",
+      {
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "text", text: "" },
+      },
+    ],
+    [
+      "content_block_delta",
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "Writing it." },
+      },
+    ],
+    ["content_block_stop", { type: "content_block_stop", index: 0 }],
+    [
+      "content_block_start",
+      {
+        type: "content_block_start",
+        index: 1,
+        content_block: {
+          type: "tool_use",
+          id: "toolu_1",
+          name: "lookup",
+          input: {},
+        },
+      },
+    ],
+    [
+      "content_block_delta",
+      {
+        type: "content_block_delta",
+        index: 1,
+        delta: { type: "input_json_delta", partial_json: '{"key":' },
+      },
+    ],
+    ["content_block_stop", { type: "content_block_stop", index: 1 }],
+    [
+      "message_delta",
+      {
+        type: "message_delta",
+        delta: { stop_reason: stop },
+        usage: { output_tokens: 2 },
+      },
+    ],
+    ["message_stop", { type: "message_stop" }],
+  ]
+    .map(
+      ([event, data]) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`,
+    )
+    .join("");
+
+test("Anthropic stream still rejects a tool input that ends mid-JSON before the output limit", async () => {
   const sse = [
     [
       "message_start",
@@ -1166,7 +1227,7 @@ test("Anthropic stream still rejects a tool input that ends mid-JSON", async () 
       "message_delta",
       {
         type: "message_delta",
-        delta: { stop_reason: "max_tokens" },
+        delta: { stop_reason: "tool_use" },
         usage: { output_tokens: 2 },
       },
     ],
@@ -1201,4 +1262,36 @@ test("Anthropic stream still rejects a tool input that ends mid-JSON", async () 
   });
   // The initial request and five reconnects; a half-received call never runs.
   expect(requests).toBe(6);
+});
+
+test("a tool input cut off by the output limit is not retried and is marked (#144)", async () => {
+  let requests = 0;
+  const client = new LlmClient(
+    loadConfig({ ANTHROPIC_API_KEY: "fixture" }),
+    async () => {
+      requests++;
+      return new Response(cutToolInput("max_tokens"), {
+        headers: { "content-type": "text/event-stream" },
+      });
+    },
+    { sleep: async () => {} },
+  );
+  const out = await client.complete(
+    { provider: "anthropic", model: "claude-haiku-5-5" },
+    [{ role: "user", content: "Hi" }],
+    [tool],
+  );
+  // The same request stops at the same place, so it is sent once.
+  expect(requests).toBe(1);
+  expect(out.incomplete).toBe(true);
+  expect(out.message.content).toBe("Writing it.");
+  expect(out.truncatedToolCalls).toEqual(["toolu_1"]);
+  // The cut-off arguments are never kept; the replayed block stays valid.
+  expect(out.message.tool_calls?.[0]?.function.arguments).toBe("{}");
+  expect(out.message.providerBlocks?.[1]).toEqual({
+    type: "tool_use",
+    id: "toolu_1",
+    name: "lookup",
+    input: {},
+  });
 });

@@ -176,10 +176,14 @@ export class Agent {
         // leave unknown outcomes, which /retry must inspect instead of replay.
         await o.checkpoint?.(messages, usage);
         const results = new Serial();
+        const truncated = new Set(completion.truncatedToolCalls);
         const execute = async (call: (typeof calls)[number]) => {
           let result: unknown;
           try {
             o.context.signal?.throwIfAborted();
+            // Its arguments were cut off and replaced by `{}`: running it
+            // would act on input the model never wrote (#144).
+            if (truncated.has(call.id)) throw new Error(TRUNCATED_CALL);
             if (!registered.has(call.function.name))
               throw new Error(`Tool unavailable: ${call.function.name}`);
             const args = JSON.parse(call.function.arguments || "{}");
@@ -319,6 +323,9 @@ export class Agent {
     );
   }
 }
+
+const TRUNCATED_CALL =
+  "The response reached the output token limit while writing this call's arguments, so the call was cut off and was not run. Call it again with smaller arguments, for example by splitting the content across several calls.";
 
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return "[" + value.map(stableJson).join(",") + "]";

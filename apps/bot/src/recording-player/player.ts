@@ -9,11 +9,13 @@ import { oggOpus } from "../ogg";
 import type { RecordingManifest } from "../recording-audio";
 import {
   chunksIn,
+  clipRange,
   clock,
   fileStem,
   japanTime,
   length,
   lineRange,
+  parseClock,
   pcm16,
   wavHeader,
   type Chunk,
@@ -279,18 +281,20 @@ function wavWriter(): Writer {
   };
 }
 
-/** Mixes the speakers given (all: null) into one file, a window at a time. */
+/** Mixes the speakers given (all: null) into one file, a window at a time,
+ *  between `start` and `end` (ms; a part of the recording, #150). */
 async function render(
   m: RecordingManifest,
   speakers: ReadonlySet<number> | null,
+  start: number,
+  end: number,
   progress: (done: number) => void,
 ): Promise<{ blob: Blob; ext: string }> {
   const writer = (await opusWriter()) ?? wavWriter();
-  const total = length(m);
   // A chunk that runs into the next window is decoded once.
   let carried = new Map<Chunk, AudioBuffer>();
-  for (let from = 0; from < total; from += WINDOW_MS) {
-    const to = Math.min(total, from + WINDOW_MS);
+  for (let from = start; from < end; from += WINDOW_MS) {
+    const to = Math.min(end, from + WINDOW_MS);
     const frames = Math.max(1, Math.round(((to - from) / 1000) * writer.rate));
     const ctx = new OfflineAudioContext(1, frames, writer.rate);
     const next = new Map<Chunk, AudioBuffer>();
@@ -308,7 +312,7 @@ async function render(
     carried = next;
     const mixed = await ctx.startRendering();
     await writer.add(mixed.getChannelData(0));
-    progress(to / total);
+    progress((to - start) / (end - start));
   }
   return { blob: await writer.finish(), ext: writer.ext };
 }
@@ -420,7 +424,8 @@ async function main() {
   };
 
   // The timeline: a lane per speaker, their speech as segments on one time
-  // axis. Clicking a lane moves the playhead there.
+  // axis. Clicking a lane moves the playhead there; dragging along it picks
+  // the part of the recording to download (#150).
   const lanes = $("lanes");
   const laneOf = new Map<number, HTMLElement>();
   for (const s of m.speakers) {
@@ -444,11 +449,32 @@ async function main() {
     laneOf.set(s.id, lane);
     lanes.append(lane);
   }
-  lanes.onclick = (e) => {
+  let drag: { x: number; box: DOMRect; moved: boolean } | undefined;
+  const timeAt = (box: DOMRect, x: number) =>
+    Math.max(0, Math.min(1, (x - box.left) / box.width)) * total;
+  lanes.onpointerdown = (e) => {
     const area = (e.target as HTMLElement).closest(".track");
-    if (!area) return;
-    const box = area.getBoundingClientRect();
-    jump(((e.clientX - box.left) / box.width) * total);
+    if (!area || e.button !== 0) return;
+    drag = { x: e.clientX, box: area.getBoundingClientRect(), moved: false };
+    lanes.setPointerCapture(e.pointerId);
+  };
+  lanes.onpointermove = (e) => {
+    if (!drag) return;
+    // A few pixels of a click's wobble do not make a drag.
+    if (!drag.moved && Math.abs(e.clientX - drag.x) < 5) return;
+    drag.moved = true;
+    band(timeAt(drag.box, drag.x), timeAt(drag.box, e.clientX));
+  };
+  lanes.onpointerup = (e) => {
+    if (!drag) return;
+    const { x, box, moved } = drag;
+    drag = undefined;
+    if (moved) pick(timeAt(box, x), timeAt(box, e.clientX));
+    else jump(timeAt(box, e.clientX));
+  };
+  lanes.onpointercancel = () => {
+    drag = undefined;
+    shownClip();
   };
 
   // Who is heard when everyone plays.
@@ -477,6 +503,66 @@ async function main() {
     toggle.disabled = true;
   }
 
+  // The part of the recording to download (#150): typed, taken from the
+  // playhead, or dragged along the timeline. Whole seconds, as the fields
+  // show them.
+  const whole = $<HTMLInputElement>("span-all");
+  const part = $<HTMLInputElement>("span-part");
+  const fields = $("clip");
+  const fromField = $<HTMLInputElement>("clip-start");
+  const toField = $<HTMLInputElement>("clip-end");
+  const clipLength = $("clip-length");
+  const clipBand = $("clip-band");
+  const clip = () =>
+    clipRange(parseClock(fromField.value), parseClock(toField.value), total);
+  /** Marks a stretch on the timeline. */
+  const band = (a: number, b: number) => {
+    const [from, to] = a < b ? [a, b] : [b, a];
+    clipBand.hidden = false;
+    clipBand.style.left = `${(from / span) * 100}%`;
+    clipBand.style.width = `${((to - from) / span) * 100}%`;
+  };
+  const shownClip = () => {
+    fields.hidden = !part.checked;
+    const range = clip();
+    if (part.checked && typeof range !== "string") band(range.from, range.to);
+    else clipBand.hidden = true;
+    clipLength.textContent = !part.checked
+      ? ""
+      : typeof range === "string"
+        ? range
+        : `長さ ${clock(range.to - range.from)}`;
+    clipLength.dataset.tone = typeof range === "string" ? "error" : "";
+  };
+  /** Picks the stretch between two times, in whole seconds. */
+  const pick = (a: number, b: number) => {
+    const from = Math.floor(Math.min(a, b) / 1000) * 1000;
+    const to = Math.min(total, Math.ceil(Math.max(a, b) / 1000) * 1000);
+    fromField.value = clock(from);
+    toField.value = clock(Math.max(to, from + 1000));
+    part.checked = true;
+    shownClip();
+  };
+  fromField.value = clock(0);
+  toField.value = clock(Math.min(total, 60_000));
+  whole.onchange = part.onchange = shownClip;
+  fromField.oninput = toField.oninput = shownClip;
+  // A whole second typed short ("7", "56:21") is shown in full.
+  fromField.onchange = toField.onchange = (e) => {
+    const field = e.target as HTMLInputElement;
+    const ms = parseClock(field.value);
+    if (ms !== undefined && ms % 1000 === 0) field.value = clock(ms);
+  };
+  $("clip-start-now").onclick = () => {
+    fromField.value = clock(player.position());
+    shownClip();
+  };
+  $("clip-end-now").onclick = () => {
+    toField.value = clock(Math.ceil(player.position() / 1000) * 1000);
+    shownClip();
+  };
+  shownClip();
+
   // Downloads.
   const choice = $<HTMLSelectElement>("who");
   choice.append(el("option", { value: "" }, "全員を重ねた 1 本"));
@@ -488,6 +574,11 @@ async function main() {
   download.onclick = async () => {
     const id = Number(choice.value) || null;
     const speaker = m.speakers.find((s) => s.id === id);
+    const range = part.checked ? clip() : { from: 0, to: total };
+    if (typeof range === "string") {
+      say(range, "error");
+      return;
+    }
     download.disabled = true;
     bar.hidden = false;
     bar.value = 0;
@@ -496,12 +587,17 @@ async function main() {
       const { blob, ext } = await render(
         m,
         speaker ? new Set([speaker.id]) : null,
+        range.from,
+        range.to,
         (done) => {
           bar.value = done;
           say(`ダウンロードの準備をしています（${Math.floor(done * 100)}%）…`);
         },
       );
-      save(blob, `${fileStem(m.started_at, speaker?.name)}.${ext}`);
+      const stem = part.checked
+        ? fileStem(m.started_at, speaker?.name, range)
+        : fileStem(m.started_at, speaker?.name);
+      save(blob, `${stem}.${ext}`);
       say(
         ext === "wav"
           ? "WAV で保存しました（このブラウザは Opus で書き出せないため）。"
@@ -515,8 +611,25 @@ async function main() {
     }
   };
 
-  // The transcript: each line plays alone, its time moves the playhead,
-  // and the line being heard is marked.
+  // Hears the part before downloading it: the speakers the download takes.
+  const clipPlay = $<HTMLButtonElement>("clip-play");
+  clipPlay.disabled = !m.speakers.length;
+  clipPlay.onclick = () => {
+    const range = clip();
+    if (typeof range === "string") {
+      say(range, "error");
+      return;
+    }
+    const id = Number(choice.value) || null;
+    say("");
+    void player
+      .play(range.from, range.to, id ? new Set([id]) : null)
+      .catch(player.onError);
+  };
+
+  // The transcript: each line plays alone, a click on the line (or its
+  // time) plays everyone from there (#150), and the line being heard is
+  // marked.
   const list = $("lines");
   const rows: { row: HTMLElement; t: number; search: string }[] = [];
   for (const [i, line] of m.lines.entries()) {
@@ -547,6 +660,13 @@ async function main() {
       title: "ここから全員を再生",
     });
     time.onclick = () => playAll(line.t);
+    // Anywhere else on the line does the same, unless text was being
+    // selected to copy. The buttons keep their own.
+    row.onclick = (e) => {
+      if ((e.target as HTMLElement).closest("button")) return;
+      if (getSelection()?.toString()) return;
+      playAll(line.t);
+    };
     row.append(
       el(
         "span",

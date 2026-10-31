@@ -214,7 +214,8 @@
         height: 22px;
         fill: currentColor;
       }
-      .skip {
+      .skip,
+      .pill {
         border: 1px solid var(--line);
         background: var(--surface-2);
         border-radius: 999px;
@@ -265,6 +266,9 @@
         border-radius: 4px;
         background: var(--surface-2);
         cursor: pointer;
+        /* A sideways drag picks a part of the recording, not scroll. */
+        touch-action: pan-y;
+        user-select: none;
       }
       .seg {
         position: absolute;
@@ -281,6 +285,17 @@
         position: absolute;
         inset: 0 0 0 98px;
         pointer-events: none;
+      }
+      /* The part of the recording picked for a download (#150). */
+      #clip-band {
+        position: absolute;
+        top: -6px;
+        bottom: -6px;
+        border-radius: 4px;
+        background: color-mix(in srgb, var(--accent) 16%, transparent);
+        box-shadow:
+          inset 2px 0 0 var(--accent),
+          inset -2px 0 0 var(--accent);
       }
       #playhead {
         position: absolute;
@@ -366,6 +381,96 @@
       }
 
       /* Download */
+      .segmented {
+        display: inline-flex;
+        padding: 3px;
+        border-radius: 999px;
+        background: var(--surface-2);
+        border: 1px solid var(--line);
+      }
+      .segmented label {
+        position: relative;
+        padding: 4px 14px;
+        border-radius: 999px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--text-2);
+        cursor: pointer;
+      }
+      .segmented input {
+        position: absolute;
+        opacity: 0;
+        inset: 0;
+        margin: 0;
+        cursor: pointer;
+      }
+      .segmented label:has(input:checked) {
+        background: var(--surface);
+        color: var(--text);
+        box-shadow: var(--shadow);
+      }
+      .segmented label:has(input:focus-visible) {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      .clip {
+        display: grid;
+        gap: 10px;
+        margin-bottom: 14px;
+        padding: 14px;
+        border-radius: 12px;
+        background: var(--surface-2);
+      }
+      .clip[hidden] {
+        display: none;
+      }
+      .clip .note {
+        margin: 0;
+      }
+      .clip .pill {
+        background: var(--surface);
+      }
+      .clip-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px 10px;
+      }
+      .clip-row .grow {
+        flex: 1;
+      }
+      .field {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.8rem;
+        color: var(--text-2);
+      }
+      .field input {
+        width: 7.5em;
+        padding: 6px 10px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: var(--surface);
+        font-variant-numeric: tabular-nums;
+      }
+      /* A field and its button wrap together. */
+      .pair {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .tilde {
+        color: var(--text-3);
+      }
+      .clip-length {
+        font-size: 0.85rem;
+        color: var(--text-2);
+        font-variant-numeric: tabular-nums;
+      }
+      .clip-length[data-tone="error"] {
+        color: var(--danger);
+      }
       .download-row {
         display: flex;
         flex-wrap: wrap;
@@ -501,6 +606,10 @@
         transition: background 0.2s ease;
         scroll-margin: 260px 0 24px;
       }
+      /* A click on the line plays everyone from its time (#150). */
+      .line {
+        cursor: pointer;
+      }
       .line:hover {
         background: var(--surface-2);
       }
@@ -592,6 +701,10 @@
         .skip {
           display: none;
         }
+        /* Start and end go on lines of their own. */
+        .tilde {
+          display: none;
+        }
       }
       @media (prefers-reduced-motion: reduce) {
         * {
@@ -638,6 +751,7 @@
         <div class="timeline">
           <div id="lanes" aria-label="話者ごとの発言の区間"></div>
           <div class="heads" aria-hidden="true">
+            <span id="clip-band" hidden></span>
             <span id="playhead"></span>
           </div>
           <input
@@ -657,7 +771,62 @@
       </section>
 
       <section class="card" aria-label="ダウンロード">
-        <div class="card-head"><h2>ダウンロード</h2></div>
+        <div class="card-head">
+          <h2>ダウンロード</h2>
+          <span class="segmented" role="radiogroup" aria-label="範囲">
+            <label
+              ><input type="radio" name="span" id="span-all" checked />
+              全体</label
+            >
+            <label
+              ><input type="radio" name="span" id="span-part" />
+              範囲を指定</label
+            >
+          </span>
+        </div>
+        <div class="clip" id="clip" hidden>
+          <div class="clip-row">
+            <span class="pair"
+              ><label class="field"
+                >開始
+                <input
+                  id="clip-start"
+                  inputmode="numeric"
+                  autocomplete="off"
+                  spellcheck="false"
+              /></label>
+              <button type="button" class="pill" id="clip-start-now">
+                再生位置
+              </button></span
+            >
+            <span class="tilde" aria-hidden="true">〜</span>
+            <span class="pair"
+              ><label class="field"
+                >終了
+                <input
+                  id="clip-end"
+                  inputmode="numeric"
+                  autocomplete="off"
+                  spellcheck="false"
+              /></label>
+              <button type="button" class="pill" id="clip-end-now">
+                再生位置
+              </button></span
+            >
+          </div>
+          <div class="clip-row">
+            <span
+              class="clip-length"
+              id="clip-length"
+              aria-live="polite"
+            ></span>
+            <span class="grow"></span>
+            <button type="button" class="pill" id="clip-play">
+              範囲を再生
+            </button>
+          </div>
+          <p class="note">タイムラインを横にドラッグしても範囲を選べます。</p>
+        </div>
         <div class="download-row">
           <select id="who" aria-label="ダウンロードする音声"></select>
           <button type="button" class="primary" id="download">
@@ -669,7 +838,7 @@
         </div>
         <progress id="progress" max="1" value="0" hidden></progress>
         <p class="note">
-          音声はこのブラウザの中で重ねて作ります。長い会議では時間がかかります。
+          音声はこのブラウザの中で重ねて作ります。長い会議では時間がかかります。範囲を指定すると、その部分だけを保存します。
         </p>
       </section>
 

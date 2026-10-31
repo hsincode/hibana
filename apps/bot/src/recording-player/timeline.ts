@@ -81,16 +81,57 @@ export function japanTime(ms: number) {
   return jst.format(new Date(ms));
 }
 
-/** "recording-20261030-1400", from the start in Japan time, with the
+/**
+ * A time typed into the page ("00:56:21", "56:21", "45", "1:30.5"; full-width
+ * digits and colons too), in ms. Minutes and seconds under a larger unit run
+ * to 59. Undefined when it is not a time.
+ */
+export function parseClock(text: string): number | undefined {
+  const plain = text
+    .trim()
+    .replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0))
+    .replace(/：/g, ":");
+  if (!/^\d+(:\d+){0,2}(\.\d+)?$/.test(plain)) return;
+  const parts = plain.split(":").map(Number);
+  if (parts.slice(1).some((n) => n >= 60)) return;
+  const seconds = parts.reduce((total, n) => total * 60 + n, 0);
+  return Math.round(seconds * 1000);
+}
+
+/**
+ * The part of the recording a download covers (#150): from before to, both
+ * inside the recording. A message to show when it is not one.
+ */
+export function clipRange(
+  from: number | undefined,
+  to: number | undefined,
+  total: number,
+): { from: number; to: number } | string {
+  if (from === undefined || to === undefined)
+    return "開始と終了を 00:00:00 の形で入れてください。";
+  if (to > total) return `終了は録音の長さ（${clock(total)}）までです。`;
+  if (from >= to) return "終了は開始より後にしてください。";
+  return { from, to };
+}
+
+/** "recording-20261030-1400", from the start in Japan time, with the part
+ *  of the recording when it is one ("-005621-005643", elapsed time) and the
  *  speaker's name when it is one speaker's file. */
-export function fileStem(startedAt: number, speaker?: string) {
+export function fileStem(
+  startedAt: number,
+  speaker?: string,
+  range?: { from: number; to: number },
+) {
   const part = Object.fromEntries(
     jst.formatToParts(new Date(startedAt)).map((p) => [p.type, p.value]),
   );
+  const span = range
+    ? `-${clock(range.from).replaceAll(":", "")}-${clock(range.to).replaceAll(":", "")}`
+    : "";
   const name = speaker
     ? `-${speaker.replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 40)}`
     : "";
-  return `recording-${part.year}${part.month}${part.day}-${part.hour}${part.minute}${name}`;
+  return `recording-${part.year}${part.month}${part.day}-${part.hour}${part.minute}${span}${name}`;
 }
 
 /** 16-bit PCM from samples in [-1, 1] (louder ones are clipped). */

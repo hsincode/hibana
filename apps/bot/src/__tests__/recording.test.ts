@@ -17,9 +17,11 @@ import { applyPatch, emptyGuild } from "@hibana/shared/settings";
 import { loadConfig } from "../config";
 import { estimateTokens } from "../history";
 import {
+  RECORDING_DM_MAX,
   RECORDING_SUMMARY_MAX_PARTS,
   RECORDING_SUMMARY_PART_TOKENS,
   Recorder,
+  dmRecipients,
   type RecordingEvents,
   type RecordingPort,
 } from "../recording";
@@ -77,6 +79,13 @@ class FakePort implements RecordingPort {
   beforeSend?: (channelId: string, message: Omit<Sent, "channelId">) => void;
   sent: Sent[] = [];
   joined: Joined[] = [];
+  /** Who takes direct messages from the bot. Nobody by default: the result
+   *  then goes to the command channel, as it did before #152. */
+  dmOpen = new Set<string>();
+  bots = new Set<string>();
+  /** Runs before each direct message; a throw fails it. */
+  beforeDirect?: (userId: string) => void;
+  directs: (Omit<Sent, "channelId"> & { userId: string })[] = [];
   async voiceChannelOf(_guildId: string, userId: string) {
     return this.voice[userId] ?? null;
   }
@@ -89,6 +98,13 @@ class FakePort implements RecordingPort {
   async send(channelId: string, message: Omit<Sent, "channelId">) {
     this.beforeSend?.(channelId, message);
     this.sent.push({ channelId, ...message });
+  }
+  async direct(userId: string, message: Omit<Sent, "channelId">) {
+    if (this.bots.has(userId)) return "bot" as const;
+    this.beforeDirect?.(userId);
+    if (!this.dmOpen.has(userId)) return "closed" as const;
+    this.directs.push({ userId, ...message });
+    return "sent" as const;
   }
   async join(guildId: string, channelId: string, events: RecordingEvents) {
     if (this.joinError) throw this.joinError;
@@ -192,7 +208,8 @@ function setup(
   };
 }
 const files = (dir: string) => readdirSync(dir);
-const text = (sent: Sent) => sent.files?.[0]?.data.toString("utf8") ?? "";
+const text = (sent: Pick<Sent, "files">) =>
+  sent.files?.[0]?.data.toString("utf8") ?? "";
 
 describe("starting", () => {
   test("records the voice channel the member is in and says so in the command channel and in the voice channel's chat", async () => {
@@ -699,6 +716,239 @@ describe("overlaps (review of #119)", () => {
     ).toBe(true);
     expect(s.errors.length).toBe(1);
     expect(files(dir)).toEqual([]);
+  });
+});
+
+describe("direct messages (#152)", () => {
+  /** Records one utterance each from `speakers`, then everyone leaves. */
+  async function meeting(s: ReturnType<typeof setup>, speakers = ["u1"]) {
+    await s.recorder.start("g1", "t1", "u1");
+    const events = s.port.joined[0]!.events;
+    speakers.forEach((id, i) =>
+      events.utterance(id, `名前${id}`, s.at(1000 * (i + 1)), `${id} の発言`),
+    );
+    s.port.members.set("vc1", []);
+    s.at(10 * 60000);
+    s.recorder.voiceStateChanged("g1");
+    await s.recorder.settled();
+  }
+  const ended = (s: ReturnType<typeof setup>) =>
+    s.port.sent.filter((m) => !m.content.includes("録音を始めました"));
+
+  test("every participant is sent the summary and the transcript; the channel is told only how many got them", async () => {
+    const s = setup();
+    s.port.dmOpen = new Set(["u1", "u2"]);
+    await meeting(s, ["u1", "u2"]);
+
+    expect(s.port.directs.map((d) => d.userId)).toEqual(["u1", "u2"]);
+    for (const d of s.port.directs) {
+      expect(d.content).toContain("録音の要約");
+      expect(d.content).toContain("## 概要\n- 天気の話");
+      // Read outside the server: the server is named, the channel is not
+      // linked.
+      expect(d.content).toContain("テストサーバー の 🔊会議室");
+      expect(d.content).not.toContain("<#vc1>");
+      expect(d.files!.map((f) => f.name)).toEqual([
+        "transcript-20261025-1400.txt",
+      ]);
+      expect(text(d)).toContain("u2 の発言");
+    }
+    // Neither channel gets the summary or the file.
+    const posts = ended(s);
+    expect(posts.map((m) => m.channelId)).toEqual(["t1", "vc1"]);
+    for (const m of posts) {
+      expect(m.content).not.toContain("天気の話");
+      expect(m.files ?? []).toEqual([]);
+    }
+    expect(posts[0]!.content).toContain("参加者 2 人の DM に送りました");
+    expect(posts[0]!.content).not.toContain("送れませんでした");
+    expect(posts[1]!.content).toContain("参加者の DM に送りました");
+    expect(s.llm.calls.length).toBe(1);
+    expect(files(s.dir)).toEqual([]);
+  });
+
+  test("one who listened without speaking is sent it too", async () => {
+    const s = setup();
+    s.port.dmOpen = new Set(["u1", "u2"]);
+    await meeting(s, ["u1"]);
+    expect(s.port.directs.map((d) => d.userId)).toEqual(["u1", "u2"]);
+  });
+
+  test("those who could not be sent it are counted in the channel, not named", async () => {
+    const s = setup();
+    s.port.dmOpen = new Set(["u1"]);
+    await meeting(s, ["u1", "u2"]);
+    expect(s.port.directs.map((d) => d.userId)).toEqual(["u1"]);
+    const notice = ended(s)[0]!;
+    expect(notice.content).toContain("参加者 1 人の DM に送りました");
+    expect(notice.content).toContain("1 人には DM を送れませんでした");
+    expect(notice.content).not.toContain("u2");
+    // A closed inbox is not a fault of the bot.
+    expect(s.errors).toEqual([]);
+  });
+
+  test("a failure other than a closed inbox is reported and counted the same", async () => {
+    const s = setup();
+    s.port.dmOpen = new Set(["u1", "u2"]);
+    s.port.beforeDirect = (id) => {
+      if (id === "u2") throw new Error("Unknown User");
+    };
+    await meeting(s, ["u1", "u2"]);
+    expect(s.port.directs.map((d) => d.userId)).toEqual(["u1"]);
+    expect(ended(s)[0]!.content).toContain("1 人には DM を送れませんでした");
+    expect(s.errors.length).toBe(1);
+  });
+
+  test("when nobody can be sent it, the channel gets it as before, and says why", async () => {
+    const s = setup();
+    await meeting(s, ["u1", "u2"]);
+    expect(s.port.directs).toEqual([]);
+    const [summary, notice] = ended(s);
+    expect(summary!.channelId).toBe("t1");
+    expect(summary!.content).toContain("天気の話");
+    expect(summary!.content).toContain("参加者の DM に送れなかったため");
+    expect(summary!.files!.length).toBe(1);
+    expect(notice!.channelId).toBe("vc1");
+    expect(notice!.content).toContain("<#t1>");
+  });
+
+  test(`at most ${RECORDING_DM_MAX} are sent it: the one who started it, those who spoke, then the rest as they were seen`, async () => {
+    const s = setup();
+    const people = Array.from({ length: 30 }, (_, i) => ({
+      id: `p${i + 1}`,
+      name: `P${i + 1}`,
+    }));
+    s.port.voice.p1 = s.port.voice.u1!;
+    s.port.members.set("vc1", people);
+    s.port.dmOpen = new Set(people.map((p) => p.id));
+    await s.recorder.start("g1", "t1", "p1");
+    s.port.joined[0]!.events.utterance("p29", "P29", s.at(1000), "はい");
+    s.port.members.set("vc1", []);
+    s.recorder.voiceStateChanged("g1");
+    await s.recorder.settled();
+    const got = s.port.directs.map((d) => d.userId);
+    expect(got.length).toBe(RECORDING_DM_MAX);
+    expect(got.slice(0, 3)).toEqual(["p1", "p29", "p2"]);
+    expect(got).not.toContain("p30");
+    const notice = ended(s)[0]!.content;
+    expect(notice).toContain(`参加者 ${RECORDING_DM_MAX} 人の DM に送りました`);
+    expect(notice).toContain(
+      `${RECORDING_DM_MAX} 人を超えたため、5 人には送っていません`,
+    );
+  });
+
+  test("a bot that was transcribed is not sent it and takes no slot", async () => {
+    const s = setup();
+    s.port.bots = new Set(["b1"]);
+    s.port.dmOpen = new Set(["u1", "u2"]);
+    await meeting(s, ["b1", "u1"]);
+    expect(s.port.directs.map((d) => d.userId)).toEqual(["u1", "u2"]);
+    const notice = ended(s)[0]!.content;
+    expect(notice).toContain("参加者 2 人の DM に送りました");
+    expect(notice).not.toContain("送れませんでした");
+  });
+
+  test("a long summary is sent in parts; the file goes with the first", async () => {
+    const llm = fakeLlm(
+      () => "## 概要\n" + "- 長い要約の行です。\n".repeat(400),
+    );
+    const s = setup({ llm });
+    s.port.dmOpen = new Set(["u1"]);
+    await meeting(s, ["u1"]);
+    const parts = s.port.directs;
+    expect(parts.length).toBeGreaterThan(1);
+    expect(parts.every((p) => p.userId === "u1")).toBe(true);
+    for (const p of parts) expect(p.content.length).toBeLessThanOrEqual(2000);
+    expect(parts[0]!.files?.length).toBe(1);
+    expect(parts.slice(1).every((p) => !p.files?.length)).toBe(true);
+  });
+
+  test("with nothing said and no audio, nobody is sent anything", async () => {
+    const s = setup();
+    s.port.dmOpen = new Set(["u1", "u2"]);
+    await meeting(s, []);
+    expect(s.port.directs).toEqual([]);
+    expect(ended(s)[0]!.content).toContain("発言は記録されませんでした");
+  });
+
+  test("after a restart part way through, those already sent it are not sent it again", async () => {
+    const dir = tempDir();
+    await Bun.write(
+      join(dir, "g1-1.jsonl"),
+      [
+        {
+          type: "start",
+          id: "g1-1",
+          guild_id: "g1",
+          guild_name: "S",
+          voice_channel_id: "vc1",
+          voice_channel_name: "会議室",
+          text_channel_id: "t1",
+          started_by: "u1",
+          started_at: START,
+        },
+        { type: "present", user_id: "u1", name: "Aoi" },
+        { type: "present", user_id: "u2", name: "Ren" },
+        {
+          type: "line",
+          at: START + 1000,
+          user_id: "u1",
+          name: "Aoi",
+          text: "はい",
+        },
+        { type: "end", reason: "empty", at: START + 60000 },
+        { type: "dm", user_id: "u1" },
+      ]
+        .map((r) => JSON.stringify(r))
+        .join("\n") + "\n",
+    );
+    const s = setup({ dir });
+    s.port.dmOpen = new Set(["u1", "u2"]);
+    await s.recorder.recover();
+    expect(s.port.directs.map((d) => d.userId)).toEqual(["u2"]);
+    expect(s.port.sent[0]!.content).toContain("参加者 2 人の DM に送りました");
+    expect(files(dir)).toEqual([]);
+  });
+
+  test("each one sent is noted in the file as it goes", async () => {
+    const s = setup();
+    s.port.dmOpen = new Set(["u1", "u2"]);
+    const noted: string[] = [];
+    s.port.beforeDirect = () => {
+      const [name] = files(s.dir).filter((n) => n.endsWith(".jsonl"));
+      noted.push(
+        readFileSync(join(s.dir, name!), "utf8")
+          .split("\n")
+          .filter((l) => l.includes('"type":"dm"'))
+          .join(","),
+      );
+    };
+    await meeting(s, ["u1"]);
+    expect(noted).toEqual(["", '{"type":"dm","user_id":"u1"}']);
+  });
+
+  test("the order: the one who started it, those who spoke, then the rest", () => {
+    const participants = new Map([
+      ["a", "A"],
+      ["b", "B"],
+      ["c", "C"],
+      ["d", "D"],
+    ]);
+    const line = (user_id: string) => ({ at: 0, user_id, name: "", text: "" });
+    expect(dmRecipients(participants, [line("d"), line("b")], "c")).toEqual([
+      "c",
+      "b",
+      "d",
+      "a",
+    ]);
+    // One who started it but had left before it was seen is still first.
+    expect(dmRecipients(participants, [], "z")).toEqual([
+      "z",
+      "a",
+      "b",
+      "c",
+      "d",
+    ]);
   });
 });
 

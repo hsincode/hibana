@@ -370,6 +370,15 @@ class Port implements RecordingPort {
   async send(channelId: string, message: { content: string }) {
     this.sent.push({ channelId, content: message.content });
   }
+  /** Who takes direct messages. Nobody by default: the result then goes to
+   *  the channel. */
+  dmOpen = new Set<string>();
+  directs: { userId: string; content: string }[] = [];
+  async direct(userId: string, message: { content: string }) {
+    if (!this.dmOpen.has(userId)) return "closed" as const;
+    this.directs.push({ userId, content: message.content });
+    return "sent" as const;
+  }
   async join(_g: string, _c: string, events: RecordingEvents) {
     this.events = events;
     return { leave: async () => {} };
@@ -490,6 +499,34 @@ describe("recording with audio", () => {
     ]);
     // Counted against the recordings' room, not the published sites'.
     expect(sites.recordingBytes()).toBe(site!.bytes);
+  });
+
+  test("the link reaches the participants' direct messages, also when nothing was turned into text (#152)", async () => {
+    for (const said of [true, false]) {
+      const root = tempDir();
+      const sites = await sitesIn(root);
+      const { recorder, port, errors } = recorderWith(root, sites);
+      port.dmOpen.add("u1");
+      await recorder.start("1001", "2001", "u1");
+      const events = port.events!;
+      speak(events, "u1", START + 1_000, 2_000);
+      if (said) events.utterance("u1", "Aoi", START + 1_000, "おはよう");
+      await recorder.stop("1001", "u1");
+      await recorder.settled();
+      expect(errors).toEqual([]);
+      const [site] = sites.list();
+      expect(port.directs.map((d) => d.userId)).toEqual(["u1"]);
+      expect(port.directs[0]!.content).toContain(site!.url);
+      const notice = port.sent
+        .filter((m) => m.channelId === "2001")
+        .at(-1)!.content;
+      expect(notice).not.toContain(site!.url);
+      expect(notice).toContain(
+        said
+          ? "要約と全文を参加者 1 人の DM に送りました"
+          : "音声と全文のページを参加者 1 人の DM に送りました",
+      );
+    }
   });
 
   test("the page serves a chunk as a byte range, and a recording cannot be extended or replaced", async () => {

@@ -3,7 +3,9 @@
 // speaker, `stt.ts`). It ends when everyone but bots has left, someone stops
 // it, it reaches its longest length, or the bot is cut off. Then the server's
 // Text Generation Model summarizes the transcript, and the summary and the
-// whole transcript as a file go to the channel the command was sent in.
+// whole transcript as a file go to every participant's direct messages
+// (#152); the channel the command was sent in is told how many got them, and
+// gets the summary itself only when nobody did.
 //
 // What is said is appended to `<data>/recordings/<id>.jsonl` as it is
 // recognized, so a restart (a deploy) loses nothing: the next process
@@ -43,6 +45,9 @@ export const RECORDING_SUMMARY_PART_TOKENS = 60_000;
 /** At most this many parts are summarized (calls: parts + 1). A three-hour
  *  recording stays well inside it; past it the summary says so. */
 export const RECORDING_SUMMARY_MAX_PARTS = 12;
+/** Participants sent the result in direct messages, at most (#152). One who
+ *  only listened can join a voice channel in any number. */
+export const RECORDING_DM_MAX = 25;
 
 export type Utterance = {
   at: number;
@@ -56,7 +61,8 @@ export type RecordingHeader = {
   guild_name: string;
   voice_channel_id: string;
   voice_channel_name: string;
-  /** Where the command was sent: the summary goes here. */
+  /** Where the command was sent: told where the summary went, and sent it
+   *  when no participant could be (#152). */
   text_channel_id: string;
   started_by: string;
   started_at: number;
@@ -95,6 +101,13 @@ export type RecordingPort = {
     channelId: string,
     message: { content: string; files?: { name: string; data: Buffer }[] },
   ): Promise<void>;
+  /** Sends a direct message. "bot": the user is a bot, and nothing is sent;
+   *  "closed": they take no direct messages from the bot. Any other failure
+   *  throws. */
+  direct(
+    userId: string,
+    message: { content: string; files?: { name: string; data: Buffer }[] },
+  ): Promise<"sent" | "bot" | "closed">;
   join(
     guildId: string,
     channelId: string,
@@ -451,6 +464,7 @@ export class Recorder {
             taken: 0,
             published: saved.published,
           },
+          saved.dms,
         );
       } catch (error) {
         this.o.report(error);
@@ -564,16 +578,17 @@ export class Recorder {
     const kept = session.audio
       ? `音声も保存し、終了後 ${formatTtl(this.o.audio!.ttlMs)}の間、URL を知っていればだれでも聞けるページに置きます。`
       : "";
+    const to = `録音中に ${where} にいた人（${RECORDING_DM_MAX} 人まで）の DM`;
     const notices = [
       {
         channel: header.text_channel_id,
-        content: `🔴 **録音を始めました** — <@${header.started_by}> が ${where} の会議を録音し、文字起こししています。発言は xAI の音声認識に送られます。${kept}終わったら、要約と全文をこのチャンネルに送ります。${how}`,
+        content: `🔴 **録音を始めました** — <@${header.started_by}> が ${where} の会議を録音し、文字起こししています。発言は xAI の音声認識に送られます。${kept}終わったら、要約と全文を${to}に送ります（だれにも送れなければ、このチャンネルに送ります）。${how}`,
       },
     ];
     if (header.voice_channel_id !== header.text_channel_id)
       notices.push({
         channel: header.voice_channel_id,
-        content: `🔴 **録音を始めました** — <@${header.started_by}> が ${where} の会議を録音し、文字起こししています。発言は xAI の音声認識に送られ、要約と全文は <#${header.text_channel_id}> に送られます。${kept}${how}`,
+        content: `🔴 **録音を始めました** — <@${header.started_by}> が ${where} の会議を録音し、文字起こししています。発言は xAI の音声認識に送られ、要約と全文は${to}に送られます（だれにも送れなければ <#${header.text_channel_id}> に送られます）。${kept}${how}`,
       });
     for (const notice of notices)
       await this.o.port
@@ -717,6 +732,8 @@ export class Recorder {
     ending: Ending,
     participants: Map<string, string>,
     audio?: Audio,
+    /** Participants a previous process already sent it to. */
+    sentBefore: ReadonlySet<string> = new Set(),
   ) {
     const signal = this.shutdown.signal;
     const post = (
@@ -752,6 +769,7 @@ export class Recorder {
       }
     };
     let artifact: Published | undefined;
+    let dms: Awaited<ReturnType<Recorder["sendDirect"]>> | undefined;
     try {
       if (signal.aborted) return;
       artifact = await this.publish(
@@ -766,11 +784,21 @@ export class Recorder {
       const listen = artifact
         ? `\n🎧 音声と全文: ${artifact.url}\n-# <t:${Math.floor(artifact.expires_at / 1000)}:f> に消えます。URL を知っていれば、だれでも開けます。`
         : "";
+      // The result, as posted: `place` names the voice channel. A direct
+      // message also names the server, and does not link the channel (it is
+      // read outside the server).
+      let messages: (place: string) => Parameters<RecordingPort["send"]>[1][];
       if (!sorted.length) {
-        await posting(header.text_channel_id, {
-          content: `⏹️ **録音を終了しました** — ${where}（${duration}）\n${why}${artifact ? "発言は文字にできませんでした。" : "発言は記録されませんでした。"}${listen}`,
-        });
-        posted = true;
+        const content = (place: string) =>
+          `⏹️ **録音を終了しました** — ${place}（${duration}）\n${why}${artifact ? "発言は文字にできませんでした。" : "発言は記録されませんでした。"}${listen}`;
+        // With nothing said and no audio, there is nothing to send anyone.
+        messages = artifact
+          ? (place) => [{ content: content(place) }]
+          : () => [];
+        if (!artifact) {
+          await posting(header.text_channel_id, { content: content(where) });
+          posted = true;
+        }
       } else {
         let result: Awaited<ReturnType<Recorder["summarize"]>> | undefined;
         let failure: string | undefined;
@@ -785,31 +813,69 @@ export class Recorder {
         }
         if (signal.aborted) return;
         const speakers = new Set(sorted.map((l) => l.user_id)).size;
-        const head = `📝 **録音の要約** — ${where}（<t:${Math.floor(header.started_at / 1000)}:f> から ${duration}、発言した人 ${speakers} 人）\n${why}${listen}`;
-        const body = result
-          ? `${head}\n-# ${modelLabel(result.selection)}（effort ${result.selection.effort ?? "既定"}）が文字起こしから作った要約です。誤りを含むことがあります。${result.omitted ? "後半の一部は要約に含めていません（全文には入っています）。" : ""}\n\n${result.summary}`
-          : `${head}\n要約を作れませんでした（${failure}）。全文を添付します。`;
-        const [first, ...rest] = splitMessage(body, 1900);
-        await posting(header.text_channel_id, {
-          content: first!,
-          files: [
-            {
-              name: transcriptName(header.started_at),
-              data: Buffer.from(
-                this.transcript(header, sorted, ending, participants),
-                "utf8",
-              ),
-            },
-          ],
-        });
-        posted = true;
-        for (const part of rest)
-          await posting(header.text_channel_id, { content: part });
+        const attachment = {
+          name: transcriptName(header.started_at),
+          data: Buffer.from(
+            this.transcript(header, sorted, ending, participants),
+            "utf8",
+          ),
+        };
+        messages = (place) => {
+          const head = `📝 **録音の要約** — ${place}（<t:${Math.floor(header.started_at / 1000)}:f> から ${duration}、発言した人 ${speakers} 人）\n${why}${listen}`;
+          const body = result
+            ? `${head}\n-# ${modelLabel(result.selection)}（effort ${result.selection.effort ?? "既定"}）が文字起こしから作った要約です。誤りを含むことがあります。${result.omitted ? "後半の一部は要約に含めていません（全文には入っています）。" : ""}\n\n${result.summary}`
+            : `${head}\n要約を作れませんでした（${failure}）。全文を添付します。`;
+          const [first, ...rest] = splitMessage(body, 1900);
+          return [
+            { content: first!, files: [attachment] },
+            ...rest.map((content) => ({ content })),
+          ];
+        };
+      }
+      const dm = messages(
+        `${header.guild_name} の 🔊${header.voice_channel_name}`,
+      );
+      // With nothing said, only the audio's page is sent.
+      const what = sorted.length ? "要約と全文" : "音声と全文のページ";
+      if (dm.length) {
+        // Sent before the channel is told: once one participant has it, a
+        // shutdown does not stop the rest (it would summarize again).
+        dms = await this.sendDirect(
+          file,
+          header,
+          sorted,
+          participants,
+          sentBefore,
+          dm,
+        );
+        if (dms.sent) {
+          posted = true;
+          const missed = [
+            dms.closed ? `${dms.closed} 人には DM を送れませんでした。` : "",
+            dms.over
+              ? `参加者が ${RECORDING_DM_MAX} 人を超えたため、${dms.over} 人には送っていません。`
+              : "",
+          ].join("");
+          await post(header.text_channel_id, {
+            content: `⏹️ **録音を終了しました** — ${where}（${duration}）\n${why}${what}を参加者 ${dms.sent} 人の DM に送りました。${missed}`,
+          }).catch((e) => this.o.report(e));
+        } else {
+          // Nobody could be sent it: the channel gets it, as before (#152).
+          const [first, ...rest] = messages(where);
+          await posting(header.text_channel_id, {
+            ...first!,
+            content: `${first!.content}\n-# 参加者の DM に送れなかったため、このチャンネルに送ります。`,
+          });
+          posted = true;
+          for (const part of rest) await posting(header.text_channel_id, part);
+        }
       }
       // After the summary, so a restart in between does not say it twice.
       if (header.voice_channel_id !== header.text_channel_id)
         await post(header.voice_channel_id, {
-          content: `⏹️ ${where} の録音を終了しました。${why}要約と全文は <#${header.text_channel_id}> に送りました。`,
+          content: dms?.sent
+            ? `⏹️ ${where} の録音を終了しました。${why}${what}は参加者の DM に送りました。`
+            : `⏹️ ${where} の録音を終了しました。${why}要約と全文は <#${header.text_channel_id}> に送りました。`,
         }).catch((e) => this.o.report(e));
       this.o.log.info(
         {
@@ -823,6 +889,9 @@ export class Recorder {
           summary_parts: parts,
           audio_chunks: audio?.chunks.length ?? 0,
           artifact: Boolean(artifact),
+          dm_sent: dms?.sent ?? 0,
+          dm_closed: dms?.closed ?? 0,
+          dm_over: dms?.over ?? 0,
         },
         "Recording delivered",
       );
@@ -838,6 +907,59 @@ export class Recorder {
           );
       }
     }
+  }
+
+  /** Sends the result to the participants' direct messages, one after
+   *  another, up to `RECORDING_DM_MAX`. Each one sent is noted in the file,
+   *  so a process that dies part way does not send it twice. */
+  private async sendDirect(
+    file: string,
+    header: RecordingHeader,
+    lines: Utterance[],
+    participants: Map<string, string>,
+    sentBefore: ReadonlySet<string>,
+    messages: Parameters<RecordingPort["send"]>[1][],
+  ) {
+    const order = dmRecipients(participants, lines, header.started_by);
+    let sent = 0,
+      closed = 0,
+      tried = 0;
+    let i = 0;
+    for (; i < order.length && tried < RECORDING_DM_MAX; i++) {
+      const id = order[i]!;
+      if (sentBefore.has(id)) {
+        sent++;
+        tried++;
+        continue;
+      }
+      let result: Awaited<ReturnType<RecordingPort["direct"]>>;
+      try {
+        result = await this.o.port.direct(id, messages[0]!);
+      } catch (error) {
+        this.o.report(error);
+        result = "closed";
+      }
+      // A bot (a speaker it transcribed) takes no slot.
+      if (result === "bot") continue;
+      tried++;
+      if (result === "closed") {
+        closed++;
+        continue;
+      }
+      sent++;
+      await appendFile(
+        file,
+        JSON.stringify({ type: "dm", user_id: id }) + "\n",
+        { mode: 0o600 },
+      ).catch((e) => this.o.report(e));
+      // The first message carries the file; the rest of a long summary
+      // follows it. One that fails is reported, and they still have it.
+      for (const part of messages.slice(1))
+        await this.o.port.direct(id, part).catch((e) => this.o.report(e));
+    }
+    // Past the limit, a bot is counted too: who is a bot is learned only by
+    // sending (a bot is seen only when it speaks).
+    return { sent, closed, over: order.length - i };
   }
 
   /** The text file: a heading, then one line per utterance. */
@@ -969,6 +1091,7 @@ function parseRecording(raw: string):
       ending?: Ending;
       chunks: AudioChunk[];
       published?: Published;
+      dms: Set<string>;
     }
   | undefined {
   let header: RecordingHeader | undefined;
@@ -977,6 +1100,7 @@ function parseRecording(raw: string):
   const chunks: AudioChunk[] = [];
   const lines: Utterance[] = [];
   const participants = new Map<string, string>();
+  const dms = new Set<string>();
   for (const text of raw.split("\n")) {
     if (!text.trim()) continue;
     let record: Record<string, unknown>;
@@ -993,6 +1117,7 @@ function parseRecording(raw: string):
     else if (type === "end") ending = rest as Ending;
     else if (type === "audio") chunks.push(rest as AudioChunk);
     else if (type === "published") published = rest as Published;
+    else if (type === "dm") dms.add(String(rest.user_id));
   }
   if (
     !header ||
@@ -1022,5 +1147,25 @@ function parseRecording(raw: string):
       typeof published.expires_at === "number"
         ? published
         : undefined,
+    dms,
   };
+}
+
+/** Who is sent the result, in order (#152): the one who started it, then
+ *  those who spoke, then the rest, each in the order they were seen. */
+export function dmRecipients(
+  participants: Map<string, string>,
+  lines: Utterance[],
+  startedBy: string,
+): string[] {
+  const spoke = new Set(lines.map((l) => l.user_id));
+  const seen = [...participants.keys()];
+  return [
+    ...new Set([
+      startedBy,
+      ...seen.filter((id) => spoke.has(id)),
+      ...lines.map((l) => l.user_id),
+      ...seen,
+    ]),
+  ];
 }

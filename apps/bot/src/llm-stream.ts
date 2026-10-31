@@ -165,14 +165,31 @@ export async function readCompletion(
         // A call without arguments streams one empty partial_json (#42); its
         // block keeps the `{}` it started with. An input cut off mid-JSON
         // still fails to parse here and the request is retried.
-        for (const [index, input] of inputs)
-          if (input) blocks.get(index)!.input = JSON.parse(input);
+        const truncated: string[] = [];
+        for (const [index, input] of inputs) {
+          if (!input) continue;
+          const block = blocks.get(index)!;
+          try {
+            block.input = JSON.parse(input);
+          } catch (error) {
+            // The output limit stopped the response inside the arguments.
+            // Resending the same request stops at the same place, so it is
+            // not retried (#144). The call keeps its `{}` so the history
+            // stays valid, and is listed so the agent answers it with an
+            // error instead of running it. A server tool's block is dropped:
+            // it has no result to pair with.
+            if (finish !== "max_tokens") throw error;
+            if (block.type === "tool_use") truncated.push(String(block.id));
+            else blocks.delete(index);
+          }
+        }
         return {
           content: [...blocks.entries()]
             .sort(([a], [b]) => a - b)
             .map(([, block]) => block),
           usage,
           stop_reason: finish,
+          ...(truncated.length && { truncated_tool_use_ids: truncated }),
         };
       }
     } else {

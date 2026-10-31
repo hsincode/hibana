@@ -7,10 +7,12 @@ import { recordingPlayer } from "../recording-player/build";
 import {
   LEAD_MS,
   chunksIn,
+  clipRange,
   clock,
   fileStem,
   length,
   lineRange,
+  parseClock,
   pcm16,
   wavHeader,
 } from "../recording-player/timeline";
@@ -96,6 +98,33 @@ describe("timeline", () => {
     const start = Date.UTC(2026, 9, 30, 5, 7);
     expect(fileStem(start)).toBe("recording-20261030-1407");
     expect(fileStem(start, "A/o i")).toBe("recording-20261030-1407-A_o_i");
+    // A part of the recording names its stretch, as elapsed time (#150).
+    expect(fileStem(start, "Ren", { from: 3_381_000, to: 3_403_500 })).toBe(
+      "recording-20261030-1407-005621-005643-Ren",
+    );
+    expect(fileStem(start, undefined, { from: 0, to: 22_000 })).toBe(
+      "recording-20261030-1407-000000-000022",
+    );
+  });
+
+  test("a time typed for a part of the recording (#150)", () => {
+    expect(parseClock("00:56:21")).toBe(3_381_000);
+    expect(parseClock("56:21")).toBe(3_381_000);
+    expect(parseClock(" 1:02:03 ")).toBe(3_723_000);
+    expect(parseClock("１：０２")).toBe(62_000);
+    expect(parseClock("45")).toBe(45_000);
+    expect(parseClock("1:30.5")).toBe(90_500);
+    for (const bad of ["", "abc", "1:60", "1:2:3:4", "-5", "1::2"])
+      expect(parseClock(bad)).toBeUndefined();
+  });
+
+  test("a part of the recording runs forward, inside it (#150)", () => {
+    expect(clipRange(1_000, 5_000, 60_000)).toEqual({ from: 1_000, to: 5_000 });
+    expect(clipRange(0, 60_000, 60_000)).toEqual({ from: 0, to: 60_000 });
+    expect(clipRange(5_000, 5_000, 60_000)).toBeString();
+    expect(clipRange(6_000, 5_000, 60_000)).toBeString();
+    expect(clipRange(0, 61_000, 60_000)).toBeString();
+    expect(clipRange(undefined, 5_000, 60_000)).toBeString();
   });
 });
 

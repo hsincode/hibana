@@ -17,6 +17,7 @@ import {
 import { PassThrough } from "node:stream";
 import { sleep } from "./io";
 import type { RecordingEvents, RecordingPort, VoiceHandle } from "./recording";
+import type { Avatar } from "./recording-audio";
 import type { Runtime } from "./runtime";
 import { UtteranceAssembler, recordingQuery, streamSpeech } from "./stt";
 
@@ -34,6 +35,16 @@ const FAILURES_TO_WARN = 5;
 const STREAM_MAX_MS = 5 * 60000;
 /** Leaving waits this long at most for open speech to be finished. */
 const FLUSH_MS = 7000;
+/** An icon for the recording's page (#155): 512 px, a still image. */
+const AVATAR_SIZE = 512;
+const AVATAR_MAX_BYTES = 1_000_000;
+const AVATAR_TIMEOUT_MS = 10_000;
+const AVATAR_TYPES: Record<string, Avatar["ext"]> = {
+  "image/webp": "webp",
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+};
 
 export class DiscordRecordingPort implements RecordingPort {
   constructor(
@@ -46,6 +57,7 @@ export class DiscordRecordingPort implements RecordingPort {
       entersState?: typeof entersState;
       getVoiceConnection?: typeof getVoiceConnection;
       streamSpeech?: typeof streamSpeech;
+      fetch?: (url: string, init: RequestInit) => Promise<Response>;
     } = {},
   ) {}
 
@@ -135,6 +147,34 @@ export class DiscordRecordingPort implements RecordingPort {
       if (code === 50007 || code === 50278) return "closed" as const;
       throw error;
     }
+  }
+
+  async avatar(guildId: string, userId: string): Promise<Avatar | null> {
+    // The server's own icon when they set one, as their name is the
+    // server's nickname. Someone who has left the server keeps their own.
+    const guild = await this.client.guilds.fetch(guildId);
+    const member = await guild.members.fetch(userId).catch(() => null);
+    const user = member?.user ?? (await this.client.users.fetch(userId));
+    if (user.bot) return null;
+    const url = (member ?? user).displayAvatarURL({
+      extension: "webp",
+      size: AVATAR_SIZE,
+      forceStatic: true,
+    });
+    const response = await (this.deps.fetch ?? fetch)(url, {
+      signal: AbortSignal.timeout(AVATAR_TIMEOUT_MS),
+    });
+    if (!response.ok) throw new Error(`Icon: HTTP ${response.status}`);
+    const ext =
+      AVATAR_TYPES[
+        (response.headers.get("content-type") ?? "").split(";")[0]!.trim()
+      ];
+    if (!ext) throw new Error("Icon: not an image");
+    const declared = Number(response.headers.get("content-length"));
+    if (declared > AVATAR_MAX_BYTES) throw new Error("Icon: too large");
+    const data = Buffer.from(await response.arrayBuffer());
+    if (data.length > AVATAR_MAX_BYTES) throw new Error("Icon: too large");
+    return { data, ext };
   }
 
   async join(

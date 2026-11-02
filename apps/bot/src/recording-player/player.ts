@@ -331,6 +331,26 @@ function save(blob: Blob, name: string) {
 const colorOf = (id: number | null) =>
   id !== null && id >= 1 && id <= 8 ? `var(--s${id})` : "var(--s-other)";
 const initial = (name: string) => [...name.trim()][0]?.toUpperCase() ?? "?";
+/** A person's icon (#155): the Discord icon kept with the recording, over
+ *  their initial on their color. The initial stays while the image loads,
+ *  and when it is missing or fails. The name is always written next to it,
+ *  so the icon itself is hidden from screen readers. */
+function face(
+  m: RecordingManifest,
+  p: number | null,
+  name: string,
+  size: "line" | "chip" | "lane" | "person",
+) {
+  const box = el("span", { className: `avatar ${size}` }, initial(name));
+  box.setAttribute("aria-hidden", "true");
+  const src = p === null ? null : m.participants[p]?.avatar;
+  if (src) {
+    const img = el("img", { src, alt: "", decoding: "async" });
+    img.onerror = () => img.remove();
+    box.append(img);
+  }
+  return box;
+}
 const ICON = {
   play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>',
   pause:
@@ -366,7 +386,20 @@ async function main() {
   ])
     chips.insertBefore(el("li", { className: "chip" }, text), $("expires"));
   $("ending").textContent = m.ending;
-  $("participants").textContent = m.participants.join("、");
+  $("participants").append(
+    ...m.participants.map((person, i) => {
+      const item = el(
+        "span",
+        { className: "person" },
+        face(m, i, person.name, "person"),
+        person.name,
+      );
+      // Their speaker's color when their audio is kept, as on their lane.
+      const speaker = m.speakers.find((s) => s.p === i);
+      item.style.setProperty("--c", colorOf(speaker?.id ?? null));
+      return item;
+    }),
+  );
   $("expires").textContent = `${japanTime(m.expires_at)} に削除`;
   $("total").textContent = clock(total);
 
@@ -442,7 +475,12 @@ async function main() {
     const lane = el(
       "div",
       { className: "lane" },
-      el("span", { className: "lane-name", title: s.name }, s.name),
+      el(
+        "span",
+        { className: "lane-name", title: s.name },
+        face(m, s.p, s.name, "lane"),
+        el("span", { className: "lane-label" }, s.name),
+      ),
       track,
     );
     lane.style.setProperty("--c", colorOf(s.id));
@@ -483,7 +521,7 @@ async function main() {
     const chip = el(
       "button",
       { type: "button", className: "speaker" },
-      el("span", { className: "dot" }),
+      face(m, s.p, s.name, "chip"),
       s.name,
     );
     chip.style.setProperty("--c", colorOf(s.id));
@@ -668,11 +706,7 @@ async function main() {
       playAll(line.t);
     };
     row.append(
-      el(
-        "span",
-        { className: "avatar", ariaHidden: "true" },
-        initial(line.name),
-      ),
+      face(m, line.p, line.name, "line"),
       el(
         "div",
         { className: "body" },

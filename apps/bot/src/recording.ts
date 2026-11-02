@@ -26,6 +26,7 @@ import type { LlmClient } from "./llm";
 import {
   AudioCapture,
   publishRecording,
+  type Avatar,
   recordingManifest,
   type AudioChunk,
   type AudioQuota,
@@ -113,7 +114,16 @@ export type RecordingPort = {
     channelId: string,
     events: RecordingEvents,
   ): Promise<VoiceHandle>;
+  /** The icon Discord shows for the member in this server (the server's
+   *  own, else theirs, else Discord's default), or null when there is none
+   *  to take (#155). Any other failure throws. */
+  avatar?(guildId: string, userId: string): Promise<Avatar | null>;
 };
+
+/** Icons taken for one recording's page, and how many at once (#155). The
+ *  rest show their initial. */
+export const RECORDING_AVATAR_MAX = 50;
+const AVATARS_AT_ONCE = 4;
 
 export type RecorderOptions = {
   runtime: Runtime;
@@ -665,6 +675,7 @@ export class Recorder {
     }
     const title = `${header.voice_channel_name} の会議（${japanTime(header.started_at)}）`;
     try {
+      const avatars = await this.avatars(header.guild_id, participants);
       const expiresAt = this.now() + options.ttlMs;
       const site = await publishRecording({
         sites: options.sites,
@@ -677,6 +688,12 @@ export class Recorder {
         chunks: audio.chunks,
         taken: audio.taken,
         player: options.player,
+        avatars: new Map(
+          [...participants.keys()].flatMap((id, i) => {
+            const avatar = avatars.get(id);
+            return avatar ? [[i, avatar] as const] : [];
+          }),
+        ),
         manifest: (expires) =>
           recordingManifest({
             title,
@@ -686,7 +703,8 @@ export class Recorder {
             endedAt: ending.at,
             ending: this.why(ending, participants),
             expiresAt: expires,
-            participants: [...participants.values()],
+            participants,
+            avatars,
             chunks: audio.chunks,
             lines,
           }),
@@ -704,6 +722,35 @@ export class Recorder {
       this.o.report(error);
       return;
     }
+  }
+
+  /** Takes the participants' icons for the page (#155). One that cannot be
+   *  taken is left out: the page shows the initial, and the artifact is made
+   *  all the same. */
+  private async avatars(guildId: string, participants: Map<string, string>) {
+    const taken = new Map<string, Avatar>();
+    const get = this.o.port.avatar?.bind(this.o.port);
+    if (!get) return taken;
+    const queue = [...participants.keys()].slice(0, RECORDING_AVATAR_MAX);
+    let failed = 0;
+    await Promise.all(
+      Array.from({ length: AVATARS_AT_ONCE }, async () => {
+        for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
+          try {
+            const avatar = await get(guildId, id);
+            if (avatar) taken.set(id, avatar);
+          } catch {
+            failed++;
+          }
+        }
+      }),
+    );
+    if (failed)
+      this.o.log.warn(
+        { guild_id: guildId, failed, taken: taken.size },
+        "Some icons for a recording's page could not be taken",
+      );
+    return taken;
   }
 
   private why(ending: Ending, names?: Map<string, string>) {

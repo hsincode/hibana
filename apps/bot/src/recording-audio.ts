@@ -290,8 +290,12 @@ export type RecordingSites = PublishedRecordings & {
   }): Promise<{ token: string; url: string; bytes: number }>;
 };
 
+/** A participant's icon, taken from Discord when the artifact is made
+ *  (#155). */
+export type Avatar = { data: Buffer; ext: "webp" | "png" | "jpg" | "gif" };
+
 export type RecordingManifest = {
-  version: 1;
+  version: 2;
   title: string;
   guild: string;
   channel: string;
@@ -299,16 +303,30 @@ export type RecordingManifest = {
   ended_at: number;
   ending: string;
   expires_at: number;
-  participants: string[];
-  speakers: { id: number; name: string; file: string }[];
+  /** `avatar` is a path in the artifact, or null when none was taken. */
+  participants: { name: string; avatar: string | null }[];
+  /** `p` is the index in `participants`. */
+  speakers: { id: number; name: string; file: string; p: number | null }[];
   /** `t` and `d` are milliseconds from the start of the recording. */
   chunks: { s: number; o: number; b: number; t: number; d: number }[];
-  /** `s` is the speaker's number, or null when none of their audio is kept. */
-  lines: { t: number; s: number | null; name: string; text: string }[];
+  /** `s` is the speaker's number, or null when none of their audio is kept;
+   *  `p` is the index in `participants`. */
+  lines: {
+    t: number;
+    s: number | null;
+    p: number | null;
+    name: string;
+    text: string;
+  }[];
 };
 
+/** The file a participant's icon is kept as in the artifact. */
+export const avatarPath = (index: number, ext: Avatar["ext"]) =>
+  `avatars/p${index}.${ext}`;
+
 /** Builds the page's data. Discord IDs are left out: the page is reachable
- *  by anyone with its URL. */
+ *  by anyone with its URL. People are told apart by their index in
+ *  `participants`, which also names their icon's file (#155). */
 export function recordingManifest(o: {
   title: string;
   guild: string;
@@ -317,14 +335,20 @@ export function recordingManifest(o: {
   endedAt: number;
   ending: string;
   expiresAt: number;
-  participants: string[];
+  /** User ID to display name, in the order they were seen. */
+  participants: Map<string, string>;
+  /** The icons taken, by user ID. */
+  avatars?: Map<string, Avatar>;
   chunks: AudioChunk[];
   lines: { at: number; user_id: string; name: string; text: string }[];
 }): RecordingManifest {
-  const speakers = new Map<
-    number,
-    { id: number; name: string; file: string }
-  >();
+  const index = new Map<string, number>();
+  const participants = [...o.participants].map(([id, name], i) => {
+    index.set(id, i);
+    const avatar = o.avatars?.get(id);
+    return { name, avatar: avatar ? avatarPath(i, avatar.ext) : null };
+  });
+  const speakers = new Map<number, RecordingManifest["speakers"][number]>();
   const byUser = new Map<string, number>();
   for (const c of o.chunks) {
     byUser.set(c.user_id, c.speaker);
@@ -333,10 +357,11 @@ export function recordingManifest(o: {
         id: c.speaker,
         name: c.name,
         file: `audio/s${c.speaker}.ogg`,
+        p: index.get(c.user_id) ?? null,
       });
   }
   return {
-    version: 1,
+    version: 2,
     title: o.title,
     guild: o.guild,
     channel: o.channel,
@@ -344,7 +369,7 @@ export function recordingManifest(o: {
     ended_at: o.endedAt,
     ending: o.ending,
     expires_at: o.expiresAt,
-    participants: o.participants,
+    participants,
     speakers: [...speakers.values()].sort((a, b) => a.id - b.id),
     chunks: o.chunks
       .map((c) => ({
@@ -358,6 +383,7 @@ export function recordingManifest(o: {
     lines: o.lines.map((l) => ({
       t: l.at - o.startedAt,
       s: byUser.get(l.user_id) ?? null,
+      p: index.get(l.user_id) ?? null,
       name: l.name,
       text: l.text,
     })),
@@ -378,6 +404,8 @@ export async function publishRecording(o: {
   title: string;
   /** Takes the time the page expires at. */
   manifest: (expiresAt: number) => RecordingManifest;
+  /** The participants' icons, by index in `participants` (#155). */
+  avatars?: Map<number, Avatar>;
   expiresAt: number;
   chunks: AudioChunk[];
   /** Room the recording took in this process. */
@@ -404,6 +432,11 @@ export async function publishRecording(o: {
         }
         await writeFile(join(dir, "index.html"), page.html);
         await writeFile(join(dir, "player.js"), page.js);
+        if (o.avatars?.size) {
+          await mkdir(join(dir, "avatars"));
+          for (const [i, avatar] of o.avatars)
+            await writeFile(join(dir, avatarPath(i, avatar.ext)), avatar.data);
+        }
         await writeFile(join(dir, "manifest.json"), JSON.stringify(manifest));
         await rm(o.audioDir, { recursive: true, force: true });
       },

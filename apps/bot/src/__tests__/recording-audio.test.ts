@@ -3,7 +3,14 @@
 // transcript as an artifact that lives three days, the room bounded over
 // every recording. Discord, xAI and the browser are not involved; the
 // artifact is served by a real `Sites` on a local port.
-import { afterEach, describe, expect, test } from "bun:test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  setSystemTime,
+  test,
+} from "bun:test";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -354,6 +361,11 @@ test("a byte range is read as browsers send it", () => {
 // --- The recorder with a real `Sites` -------------------------------------
 
 const START = Date.UTC(2026, 9, 30, 5, 0, 0);
+// `Sites` drops an expired artifact by the clock, and a recording's lives
+// three days from START: the clock is held there, or these tests fail once
+// three days have passed since START.
+beforeEach(() => setSystemTime(START));
+afterEach(() => setSystemTime());
 
 class Port implements RecordingPort {
   sent: { channelId: string; content: string }[] = [];

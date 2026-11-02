@@ -500,3 +500,130 @@ describe("direct messages (#152)", () => {
     );
   });
 });
+
+describe("icons for the recording's page (#155)", () => {
+  type Owner = { bot: boolean; url: string };
+  const portWith = (o: {
+    members?: Record<string, Owner>;
+    users?: Record<string, Owner>;
+    respond?: (url: string) => Response;
+  }) => {
+    const asked: { url: string; options: unknown }[] = [];
+    const fetched: string[] = [];
+    const avatarOf = (owner: Owner) => (options: unknown) => {
+      asked.push({ url: owner.url, options });
+      return owner.url;
+    };
+    const client = {
+      guilds: {
+        fetch: async () => ({
+          members: {
+            fetch: async (id: string) => {
+              const m = o.members?.[id];
+              if (!m) throw new Error("Unknown Member");
+              return {
+                user: { bot: m.bot },
+                displayAvatarURL: avatarOf(m),
+              };
+            },
+          },
+        }),
+      },
+      users: {
+        fetch: async (id: string) => {
+          const u = o.users?.[id];
+          if (!u) throw new Error("Unknown User");
+          return { bot: u.bot, displayAvatarURL: avatarOf(u) };
+        },
+      },
+    };
+    const port = new DiscordRecordingPort(
+      client as never,
+      new Runtime(loadConfig({ ANTHROPIC_API_KEY: "fixture" })),
+      () => {},
+      {
+        fetch: async (url) => {
+          fetched.push(url);
+          return (
+            o.respond?.(url) ??
+            new Response(new Uint8Array([1, 2, 3]), {
+              headers: { "content-type": "image/webp" },
+            })
+          );
+        },
+      },
+    );
+    return { port, asked, fetched };
+  };
+
+  test("the member's icon in the server, 512 px and still", async () => {
+    const t = portWith({
+      members: { u1: { bot: false, url: "https://cdn/guild-icon" } },
+      users: { u1: { bot: false, url: "https://cdn/user-icon" } },
+    });
+    const avatar = await t.port.avatar("1001", "u1");
+    expect(avatar).toEqual({ data: Buffer.from([1, 2, 3]), ext: "webp" });
+    expect(t.fetched).toEqual(["https://cdn/guild-icon"]);
+    expect(t.asked[0]!.options).toEqual({
+      extension: "webp",
+      size: 512,
+      forceStatic: true,
+    });
+  });
+
+  test("someone who left the server: their own icon", async () => {
+    const t = portWith({
+      users: { u1: { bot: false, url: "https://cdn/user-icon" } },
+    });
+    expect((await t.port.avatar("1001", "u1"))!.ext).toBe("webp");
+    expect(t.fetched).toEqual(["https://cdn/user-icon"]);
+  });
+
+  test("Discord's default icon comes as PNG", async () => {
+    const t = portWith({
+      members: { u1: { bot: false, url: "https://cdn/embed/avatars/0.png" } },
+      respond: () =>
+        new Response(new Uint8Array([9]), {
+          headers: { "content-type": "image/png" },
+        }),
+    });
+    expect((await t.port.avatar("1001", "u1"))!.ext).toBe("png");
+  });
+
+  test("a bot has none taken", async () => {
+    const t = portWith({
+      members: { b1: { bot: true, url: "https://cdn/b" } },
+    });
+    expect(await t.port.avatar("1001", "b1")).toBeNull();
+    expect(t.fetched).toEqual([]);
+  });
+
+  test("an error, something not an image, or one over 1 MB throws", async () => {
+    const member = { u1: { bot: false, url: "https://cdn/icon" } };
+    await expect(
+      portWith({
+        members: member,
+        respond: () => new Response("", { status: 404 }),
+      }).port.avatar("1001", "u1"),
+    ).rejects.toThrow("HTTP 404");
+    await expect(
+      portWith({
+        members: member,
+        respond: () =>
+          new Response("<html>", { headers: { "content-type": "text/html" } }),
+      }).port.avatar("1001", "u1"),
+    ).rejects.toThrow("not an image");
+    await expect(
+      portWith({
+        members: member,
+        respond: () =>
+          new Response(new Uint8Array(1_000_001), {
+            headers: { "content-type": "image/webp" },
+          }),
+      }).port.avatar("1001", "u1"),
+    ).rejects.toThrow("too large");
+    await expect(portWith({}).port.avatar("1001", "gone")).rejects.toThrow(
+      "Unknown User",
+    );
+  });
+});

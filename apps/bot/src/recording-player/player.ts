@@ -341,7 +341,7 @@ function face(
   name: string,
   size: "line" | "chip" | "lane" | "person",
 ) {
-  const box = el("span", { className: `avatar ${size}` }, initial(name));
+  const box = el("span", { className: `avatar avatar-${size}` }, initial(name));
   box.setAttribute("aria-hidden", "true");
   const src = p === null ? null : m.participants[p]?.avatar;
   if (src) {

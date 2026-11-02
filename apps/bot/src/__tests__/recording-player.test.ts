@@ -21,7 +21,7 @@ const manifest = (
   chunks: RecordingManifest["chunks"],
   lines: RecordingManifest["lines"],
 ): RecordingManifest => ({
-  version: 1,
+  version: 2,
   title: "会議",
   guild: "サーバー",
   channel: "会議室",
@@ -31,8 +31,8 @@ const manifest = (
   expires_at: 0,
   participants: [],
   speakers: [
-    { id: 1, name: "Aoi", file: "audio/s1.ogg" },
-    { id: 2, name: "Ren", file: "audio/s2.ogg" },
+    { id: 1, name: "Aoi", file: "audio/s1.ogg", p: null },
+    { id: 2, name: "Ren", file: "audio/s2.ogg", p: null },
   ],
   chunks,
   lines,
@@ -60,11 +60,11 @@ describe("timeline", () => {
 
   test("a line plays its speaker alone, from just before it to their next line", () => {
     const m = manifest(chunks, [
-      { t: 1_200, s: 1, name: "Aoi", text: "一つ目" },
-      { t: 3_100, s: 2, name: "Ren", text: "相づち" },
-      { t: 4_000, s: 1, name: "Aoi", text: "二つ目" },
-      { t: 30_100, s: 1, name: "Aoi", text: "最後" },
-      { t: 31_000, s: null, name: "Mio", text: "音声なし" },
+      { t: 1_200, s: 1, p: null, name: "Aoi", text: "一つ目" },
+      { t: 3_100, s: 2, p: null, name: "Ren", text: "相づち" },
+      { t: 4_000, s: 1, p: null, name: "Aoi", text: "二つ目" },
+      { t: 30_100, s: 1, p: null, name: "Aoi", text: "最後" },
+      { t: 31_000, s: null, p: null, name: "Mio", text: "音声なし" },
     ]);
     expect(lineRange(m, 0)).toEqual({
       speaker: 1,

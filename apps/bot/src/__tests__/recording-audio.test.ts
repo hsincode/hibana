@@ -26,8 +26,10 @@ import {
   ChunkBuilder,
   recordingManifest,
   type AudioChunk,
+  type Avatar,
 } from "../recording-audio";
 import {
+  RECORDING_AVATAR_MAX,
   Recorder,
   type RecordingEvents,
   type RecordingPort,
@@ -324,7 +326,15 @@ test("the page's data has no Discord IDs, and a line of someone whose audio is n
     endedAt: 61_000,
     ending: "終わり",
     expiresAt: 999,
-    participants: ["Aoi", "Ren"],
+    participants: new Map([
+      ["111111111111111111", "Aoi"],
+      ["222222222222222222", "Ren"],
+      ["333333333333333333", "Mio"],
+    ]),
+    avatars: new Map([
+      ["111111111111111111", { data: Buffer.from([1]), ext: "webp" as const }],
+      ["333333333333333333", { data: Buffer.from([1]), ext: "png" as const }],
+    ]),
     chunks: [
       {
         speaker: 1,
@@ -343,9 +353,20 @@ test("the page's data has no Discord IDs, and a line of someone whose audio is n
   });
   expect(JSON.stringify(m)).not.toContain("111111111111111111");
   expect(JSON.stringify(m)).not.toContain("222222222222222222");
-  expect(m.speakers).toEqual([{ id: 1, name: "Aoi", file: "audio/s1.ogg" }]);
+  expect(JSON.stringify(m)).not.toContain("333333333333333333");
+  // People are told apart by their place in `participants`, which also
+  // names their icon's file (#155).
+  expect(m.participants).toEqual([
+    { name: "Aoi", avatar: "avatars/p0.webp" },
+    { name: "Ren", avatar: null },
+    { name: "Mio", avatar: "avatars/p2.png" },
+  ]);
+  expect(m.speakers).toEqual([
+    { id: 1, name: "Aoi", file: "audio/s1.ogg", p: 0 },
+  ]);
   expect(m.chunks).toEqual([{ s: 1, o: 0, b: 10, t: 1_000, d: 500 }]);
   expect(m.lines.map((l) => l.s)).toEqual([1, null]);
+  expect(m.lines.map((l) => l.p)).toEqual([0, 1]);
 });
 
 test("a byte range is read as browsers send it", () => {
@@ -395,6 +416,17 @@ class Port implements RecordingPort {
     this.events = events;
     return { leave: async () => {} };
   }
+  /** The icons Discord has, by user ID; one missing throws (#155). */
+  icons = new Map<string, Avatar | null>([
+    ["u1", { data: Buffer.from("aoi-icon"), ext: "webp" }],
+  ]);
+  iconsAsked: string[] = [];
+  async avatar(_g: string, userId: string) {
+    this.iconsAsked.push(userId);
+    const icon = this.icons.get(userId);
+    if (icon === undefined) throw new Error("Unknown User");
+    return icon;
+  }
 }
 
 async function sitesIn(root: string, siteEnabled = true) {
@@ -418,6 +450,7 @@ function recorderWith(
 ) {
   const port = new Port();
   const errors: unknown[] = [];
+  const warnings: object[] = [];
   const llm = {
     complete: async () =>
       ({
@@ -436,7 +469,7 @@ function recorderWith(
     llm,
     port,
     dir: join(root, "recordings"),
-    log: { info: () => {}, warn: () => {} },
+    log: { info: () => {}, warn: (record) => warnings.push(record) },
     report: (e) => errors.push(e),
     maxMs: 3 * 3600_000,
     maxSessions: 2,
@@ -449,7 +482,7 @@ function recorderWith(
     },
     now: options.now ?? (() => START),
   });
-  return { recorder, port, errors };
+  return { recorder, port, errors, warnings };
 }
 
 /** Someone speaks for `ms`, the packets arriving in time. */
@@ -492,10 +525,15 @@ describe("recording with audio", () => {
     const dir = join(root, "sites", site!.directory!);
     expect(readdirSync(dir).sort()).toEqual([
       "audio",
+      "avatars",
       "index.html",
       "manifest.json",
       "player.js",
     ]);
+    // The icon is kept in the artifact, not linked from Discord (#155).
+    expect(readFileSync(join(dir, "avatars", "p0.webp"), "utf8")).toBe(
+      "aoi-icon",
+    );
     const manifest = JSON.parse(
       readFileSync(join(dir, "manifest.json"), "utf8"),
     );
@@ -503,8 +541,11 @@ describe("recording with audio", () => {
       "Aoi",
       "Ren",
     ]);
+    expect(manifest.participants).toEqual([
+      { name: "Aoi", avatar: "avatars/p0.webp" },
+    ]);
     expect(manifest.lines).toEqual([
-      { t: 1_000, s: 1, name: "Aoi", text: "おはようございます" },
+      { t: 1_000, s: 1, p: 0, name: "Aoi", text: "おはようございます" },
     ]);
     expect(manifest.chunks.map((c: { t: number }) => c.t)).toEqual([
       1_000, 4_000,
@@ -702,5 +743,57 @@ describe("recording with audio", () => {
     await recorder.settled();
     const summary = port.sent.find((m) => m.content.includes("録音の要約"))!;
     expect(summary.content).not.toContain("🎧");
+  });
+});
+
+describe("participants' icons on the page (#155)", () => {
+  test("an icon that cannot be taken leaves the initial; the artifact is made all the same", async () => {
+    const root = tempDir();
+    const sites = await sitesIn(root);
+    const { recorder, port, errors, warnings } = recorderWith(root, sites);
+    // u1 has an icon; u2 throws (left Discord); u3 is a bot (none).
+    port.icons.set("u3", null);
+    await recorder.start("1001", "2001", "u1");
+    const events = port.events!;
+    speak(events, "u1", START + 1_000, 2_000);
+    events.utterance("u2", "Ren", START + 2_000, "どうも");
+    events.utterance("u3", "Bot", START + 3_000, "…");
+    await recorder.stop("1001", "u1");
+    await recorder.settled();
+    expect(errors).toEqual([]);
+    expect(warnings).toEqual([
+      expect.objectContaining({ failed: 1, taken: 1 }),
+    ]);
+    const [site] = sites.list();
+    const dir = join(root, "sites", site!.directory!);
+    expect(readdirSync(join(dir, "avatars"))).toEqual(["p0.webp"]);
+    const manifest = JSON.parse(
+      readFileSync(join(dir, "manifest.json"), "utf8"),
+    );
+    expect(manifest.participants).toEqual([
+      { name: "Aoi", avatar: "avatars/p0.webp" },
+      { name: "Ren", avatar: null },
+      { name: "Bot", avatar: null },
+    ]);
+  });
+
+  test(`at most ${RECORDING_AVATAR_MAX} icons are taken for one recording`, async () => {
+    const root = tempDir();
+    const sites = await sitesIn(root);
+    const { recorder, port, errors } = recorderWith(root, sites);
+    await recorder.start("1001", "2001", "u1");
+    const events = port.events!;
+    speak(events, "u1", START + 1_000, 2_000);
+    for (let i = 0; i < RECORDING_AVATAR_MAX + 5; i++) {
+      port.icons.set(`p${i}`, { data: Buffer.from([i]), ext: "png" });
+      events.utterance(`p${i}`, `人${i}`, START + 2_000 + i, "はい");
+    }
+    await recorder.stop("1001", "u1");
+    await recorder.settled();
+    expect(errors).toEqual([]);
+    expect(port.iconsAsked.length).toBe(RECORDING_AVATAR_MAX);
+    const [site] = sites.list();
+    const dir = join(root, "sites", site!.directory!);
+    expect(readdirSync(join(dir, "avatars")).length).toBe(RECORDING_AVATAR_MAX);
   });
 });

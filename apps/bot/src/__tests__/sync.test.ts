@@ -400,6 +400,23 @@ describe("budget status (#89)", () => {
     expect(runtime.budgetThreshold()).toBe(10);
   });
 
+  test("keeps the billing month the API decided for, for the notice", async () => {
+    const { api, runtime, sync } = fixture({
+      pollMs: 10,
+      maxMs: 40,
+      budgetMs: 0,
+    });
+    api.budget = { ...low, month: "2026-10" };
+    await sync.start();
+    await until(() => runtime.snapshot.budget?.month === "2026-10");
+    // Anything but `YYYY-MM` is ignored, not a failure: the month the answer
+    // was received in stands for it.
+    api.budget = { ...low, month: "October" };
+    await until(() => runtime.snapshot.budget?.month === undefined);
+    expect(runtime.budgetLow()).toBe(true);
+    expect(runtime.budgetMonth()).toMatch(/^\d{4}-\d{2}$/);
+  });
+
   test("is asked once per interval, not on every snapshot poll", async () => {
     const { api, runtime, sync } = fixture();
     api.budget = low;

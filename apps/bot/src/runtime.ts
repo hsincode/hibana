@@ -1,3 +1,4 @@
+import { billingMonth } from "@hibana/shared/billing";
 import {
   MODEL_PRESETS,
   canonicalPresetId,
@@ -55,6 +56,10 @@ export type Snapshot = {
    *  A snapshot from the API never carries it, so `replace` keeps it, and it
    *  is in the state file, so a restart keeps the last decision (#89). */
   budget?: BudgetState;
+  /** Written by the bot, not the API, like `budget` (#159): the billing month whose
+   *  switch the Discord notice was posted for, and where. A server is its
+   *  guild ID, a direct message `dm:<user ID>`. A new month starts over. */
+  budget_notice?: { month: string; told: string[] };
   artifact_commands?: {
     id: number;
     token: string;
@@ -76,6 +81,9 @@ export type BudgetState = {
   /** The threshold the API decided with, which an Administrator sets on the
    *  dashboard (#95). Absent when the API could not tell, or predates #95. */
   threshold_usd?: number;
+  /** The billing month (`YYYY-MM`, #81) the API decided for. Absent when the
+   *  API predates it. */
+  month?: string;
   /** When the bot received the answer (epoch ms). */
   checked_at: number;
 };
@@ -287,6 +295,32 @@ export class Runtime {
       DEFAULT_BUDGET_FALLBACK_THRESHOLD_USD
     );
   }
+  /** The billing month of the last answer: the one the API named, or, from
+   *  an API that names none, the one it was received in. */
+  budgetMonth(): string | undefined {
+    const budget = this.snapshot.budget;
+    if (!budget) return undefined;
+    return (
+      budget.month ??
+      billingMonth(new Date(budget.checked_at).toISOString().slice(0, 10))
+    );
+  }
+  /** Takes the Discord notice of this billing month's switch for `place` (a
+   *  guild ID, or `dm:<user ID>`): true only the first time, so a server is
+   *  told once however many channels it has. The settings API switches once
+   *  a billing month (#128), so neither the budget going back above the
+   *  threshold and below it again nor a restart tells it again. Taken before
+   *  anything is awaited, so two turns at once do not both post it. */
+  async takeBudgetNotice(place: string): Promise<boolean> {
+    const month = this.budgetMonth();
+    if (!month) return false;
+    const notice = this.snapshot.budget_notice;
+    const told = notice?.month === month ? notice.told : [];
+    if (told.includes(place)) return false;
+    this.snapshot.budget_notice = { month, told: [...told, place] };
+    await this.persist();
+    return true;
+  }
   /** The fallback the settings were switched to. A stored preset that was
    *  hidden since runs the default instead, as the settings API switches to
    *  it then (`budgetSwitchTarget`). */
@@ -298,8 +332,8 @@ export class Runtime {
   }
   /** Whether a turn's selection is what the switch writes (#121): the
    *  fallback, or, for an Anthropic API fallback, a Workspace preset of its
-   *  model at its effort. Such a turn says so once per channel while the
-   *  budget is low. A model picked after the switch is not, and runs as
+   *  model at its effort. Such a turn says so once a server a billing month
+   *  while the budget is low (`takeBudgetNotice`). A model picked after the switch is not, and runs as
    *  picked without a notice. The bot does not know which rows the switch
    *  wrote: a server that was on the fallback already is told too, which a
    *  fallback of another provider (#146) makes likelier. */

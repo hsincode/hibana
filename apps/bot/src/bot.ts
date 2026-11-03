@@ -128,8 +128,6 @@ export class Hibana {
   readonly workspace: Workspace;
   routes: RouteMemory;
   private fallbackAnnounced = new Set<string>();
-  /** Channels told that the budget fallback is on (#89), until it ends. */
-  private budgetAnnounced = new Set<string>();
   readonly tools: ToolRegistry;
   readonly sync: WebSync;
   readonly voice: Voice;
@@ -230,7 +228,6 @@ export class Hibana {
         : undefined;
     this.runtime.onChange = (id) => this.history.clearGuild(id);
     this.runtime.onBudgetChange = (state) => {
-      if (!state.low) this.budgetAnnounced.clear();
       this.log.info(
         {
           ...state,
@@ -767,13 +764,6 @@ export class Hibana {
       workspaceVariant(settings),
     );
     const ultracode = settings.ultracode;
-    // Once the month's budget is low, the settings API switches the stored
-    // settings to the fallback (#121); a turn runs on what is stored, so a
-    // model picked afterwards runs as picked. A turn still on what the switch
-    // wrote says so, once per channel.
-    const budgetNotice =
-      this.runtime.onBudgetFallback(settings.selection) &&
-      !this.budgetAnnounced.has(ctx.channelId);
     // An auto preset is replaced below, once the history is known.
     let selection = turnSelection(settings.selection, ultracode);
     const started = Date.now();
@@ -884,12 +874,18 @@ export class Hibana {
         );
       }
       let routeUsage: Usage | undefined;
-      if (budgetNotice) {
-        this.budgetAnnounced.add(ctx.channelId);
+      // Once the month's budget is low, the settings API switches the stored
+      // settings to the fallback (#121); a turn runs on what is stored, so a
+      // model picked afterwards runs as picked. A turn still on what the
+      // switch wrote says so, once a server (a user in direct messages) a
+      // billing month (#159): the API switches once a billing month (#128).
+      if (
+        this.runtime.onBudgetFallback(settings.selection) &&
+        (await this.runtime.takeBudgetNotice(ctx.guildId ?? `dm:${ctx.userId}`))
+      )
         await send(
           budgetHeader(settings.selection, this.runtime.budgetThreshold()),
         );
-      }
       if (isAutoRoute(settings.selection)) {
         const route = await this.autoRoute(ctx, text, prior, pending);
         routeUsage = route.usage;

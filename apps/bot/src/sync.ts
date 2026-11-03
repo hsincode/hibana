@@ -78,6 +78,7 @@ export class WebSync {
         low?: unknown;
         remaining_after_today_usd?: unknown;
         threshold_usd?: unknown;
+        month?: unknown;
       };
       if (body.configured === false) {
         await this.runtime.setBudget({
@@ -99,6 +100,10 @@ export class WebSync {
         ...(typeof body.threshold_usd === "number" &&
         Number.isFinite(body.threshold_usd)
           ? { threshold_usd: body.threshold_usd }
+          : {}),
+        // Which month's switch the Discord notice was posted for.
+        ...(typeof body.month === "string" && /^\d{4}-\d{2}$/.test(body.month)
+          ? { month: body.month }
           : {}),
         checked_at: now,
       });

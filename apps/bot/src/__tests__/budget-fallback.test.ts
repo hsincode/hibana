@@ -1,7 +1,8 @@
 // The budget fallback (#89, #121): once the settings API says this month's
 // budget is low, it switches the stored settings to the fallback (tested in
-// apps/api). The bot runs turns on what is stored, and says so once per
-// channel on a turn still on what the switch wrote.
+// apps/api). The bot runs turns on what is stored, and says so on a turn
+// still on what the switch wrote, once a server (a user in direct messages)
+// a billing month.
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,6 +30,7 @@ const config = (statePath = "") =>
 const low: BudgetState = {
   low: true,
   remaining_after_today_usd: 8,
+  month: "2026-10",
   checked_at: 1,
 };
 const opus = {
@@ -217,9 +219,12 @@ test("the Discord notice names the threshold and the model", () => {
   );
 });
 
-function turnBot(env: Record<string, string>) {
-  const dir = mkdtempSync(join(tmpdir(), "hibana-budget-turn-"));
-  dirs.push(dir);
+/** A bot on `dir`, or on a new data directory: the same `dir` is a restart. */
+function turnBot(env: Record<string, string>, dir?: string) {
+  if (!dir) {
+    dir = mkdtempSync(join(tmpdir(), "hibana-budget-turn-"));
+    dirs.push(dir);
+  }
   const bot = new Hibana(
     loadConfig({
       HIBANA_DATA_DIR: dir,
@@ -243,8 +248,18 @@ function turnBot(env: Record<string, string>) {
   };
   bot.runtime.snapshot.user_roles[ctx.userId] = "premium";
   const sent: string[] = [];
-  bot.client.channels.fetch = (async () => ({
-    id: ctx.channelId,
+  // Channels 11xxx are in server 50000 and 12xxx in 60000; the rest are
+  // direct messages.
+  const servers: Record<string, string> = { "11": "50000", "12": "60000" };
+  bot.client.channels.fetch = (async (id: string) => ({
+    id,
+    ...(servers[id.slice(0, 2)]
+      ? {
+          guildId: servers[id.slice(0, 2)],
+          guild: { members: { fetch: async () => ({}) } },
+          permissionsFor: () => ({ has: () => true }),
+        }
+      : {}),
     isSendable: () => true,
     sendTyping: async () => {},
     send: async (value: { content: string }) => {
@@ -285,7 +300,16 @@ function turnBot(env: Record<string, string>) {
     };
   };
   const notices = () => sent.filter((text) => text.startsWith("今月の利用料"));
-  return { bot, ctx, sent, used, seen, notices, routings: () => routings };
+  return {
+    bot,
+    dir,
+    ctx,
+    sent,
+    used,
+    seen,
+    notices,
+    routings: () => routings,
+  };
 }
 
 test("while low, a model picked after the switch runs as picked, without a notice", async () => {
@@ -305,28 +329,91 @@ test("while low, the auto preset picked again routes as usual", async () => {
   expect(t.notices()).toEqual([]);
 });
 
-test("a turn on what the switch wrote says so once per channel, and again after the next switch", async () => {
+test("a turn on what the switch wrote says so once a server, not again in its other channels", async () => {
   const t = turnBot({ LLM_MODEL: "claude-haiku-5-5", LLM_EFFORT: "high" });
   await t.bot.runtime.setBudget(low);
-  await t.bot.respond("難しい設計の相談", { ...t.ctx });
-  await t.bot.respond("続けて", { ...t.ctx });
-  expect(t.used).toEqual(["claude-haiku-5-5/high", "claude-haiku-5-5/high"]);
+  const guild = { ...t.ctx, channelId: "11000", guildId: "50000" };
+  await t.bot.respond("難しい設計の相談", { ...guild });
+  await t.bot.respond("続けて", { ...guild });
+  await t.bot.respond("別のチャンネル", { ...guild, channelId: "11001" });
+  expect(t.used).toEqual([
+    "claude-haiku-5-5/high",
+    "claude-haiku-5-5/high",
+    "claude-haiku-5-5/high",
+  ]);
   expect(t.notices()).toEqual([
     "今月の利用料の残りが $10 を切ったため、Anthropic のモデルを **Haiku 5.5 High** に切り替えました。設定から変更できます",
   ]);
   // The same conversation continues: the notice is not in the history.
-  expect(JSON.stringify(t.seen.at(-1))).toContain("難しい設計の相談");
-  expect(JSON.stringify(t.seen.at(-1))).not.toContain("今月の利用料");
+  expect(JSON.stringify(t.seen[1])).toContain("難しい設計の相談");
+  expect(JSON.stringify(t.seen[1])).not.toContain("今月の利用料");
 
-  // The budget is back, then low again, with the threshold the API decided
-  // with (#95): announced again.
-  await t.bot.runtime.setBudget({ ...low, low: false });
-  await t.bot.respond("まだ続く", { ...t.ctx });
-  expect(t.notices()).toHaveLength(1);
-  await t.bot.runtime.setBudget({ ...low, threshold_usd: 25 });
+  // Another server is told once, and a direct message once a user.
+  await t.bot.respond("こんにちは", {
+    ...guild,
+    channelId: "12000",
+    guildId: "60000",
+  });
+  await t.bot.respond("こんにちは", { ...t.ctx });
   await t.bot.respond("もう一度", { ...t.ctx });
-  expect(t.notices()).toHaveLength(2);
-  expect(t.notices().at(-1)).toBe(
-    "今月の利用料の残りが $25 を切ったため、Anthropic のモデルを **Haiku 5.5 High** に切り替えました。設定から変更できます",
+  expect(t.notices()).toHaveLength(3);
+});
+
+test("in the same billing month, neither the budget going back and below again nor a restart tells it again; the next month does", async () => {
+  const t = turnBot({ LLM_MODEL: "claude-haiku-5-5", LLM_EFFORT: "high" });
+  const guild = { ...t.ctx, channelId: "11000", guildId: "50000" };
+  await t.bot.runtime.setBudget(low);
+  await t.bot.respond("難しい設計の相談", { ...guild });
+  expect(t.notices()).toHaveLength(1);
+
+  // The settings API does not switch again this month (#128), so the notice
+  // is not posted again, whatever threshold the API decides with now.
+  await t.bot.runtime.setBudget({ ...low, low: false });
+  await t.bot.respond("まだ続く", { ...guild });
+  await t.bot.runtime.setBudget({ ...low, threshold_usd: 25 });
+  await t.bot.respond("もう一度", { ...guild });
+  expect(t.notices()).toHaveLength(1);
+
+  // A restart (a deploy) keeps which servers were told.
+  const again = turnBot(
+    { LLM_MODEL: "claude-haiku-5-5", LLM_EFFORT: "high" },
+    t.dir,
   );
+  await again.bot.runtime.load();
+  expect(again.bot.runtime.budgetLow()).toBe(true);
+  await again.bot.respond("再起動の後", { ...guild });
+  expect(again.notices()).toEqual([]);
+
+  // The next billing month's switch is told again.
+  await again.bot.runtime.setBudget({ ...low, low: false, month: "2026-11" });
+  await again.bot.runtime.setBudget({
+    ...low,
+    month: "2026-11",
+    threshold_usd: 25,
+  });
+  await again.bot.respond("翌月", { ...guild });
+  expect(again.notices()).toEqual([
+    "今月の利用料の残りが $25 を切ったため、Anthropic のモデルを **Haiku 5.5 High** に切り替えました。設定から変更できます",
+  ]);
+});
+
+test("an answer without the month counts in the billing month of when it was received", async () => {
+  const t = turnBot({ LLM_MODEL: "claude-haiku-5-5", LLM_EFFORT: "high" });
+  const guild = { ...t.ctx, channelId: "11000", guildId: "50000" };
+  const { month: _, ...answer } = low;
+  // 2026-11-04 UTC is still the October billing month (#81).
+  await t.bot.runtime.setBudget({
+    ...answer,
+    checked_at: Date.UTC(2026, 10, 4, 12),
+  });
+  await t.bot.respond("一回目", { ...guild });
+  await t.bot.runtime.setBudget({ ...low, month: "2026-10" });
+  await t.bot.respond("二回目", { ...guild });
+  expect(t.notices()).toHaveLength(1);
+  await t.bot.runtime.setBudget({
+    ...answer,
+    checked_at: Date.UTC(2026, 10, 5, 12),
+  });
+  await t.bot.respond("三回目", { ...guild });
+  expect(t.notices()).toHaveLength(2);
 });

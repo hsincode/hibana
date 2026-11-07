@@ -5,6 +5,8 @@ import { emptyGuild, emptyUserOverride } from "./settings";
 import {
   assertPostgresUrl,
   isStaleConnection,
+  loadAppSettings,
+  patchAppSettings,
   PostgresStore,
   type SqlClient,
 } from "./store";
@@ -291,6 +293,42 @@ describe.skipIf(!local)("PostgresStore against Postgres", () => {
     await store.putUserOverride("u1", emptyUserOverride());
     expect(await store.getUserOverride("u1")).toEqual(emptyUserOverride());
     expect(Object.keys(await store.allUserOverrides())).toContain("u1");
+  });
+
+  test("the app settings start once from what most server rows had, and the rows keep their copies (#161)", async () => {
+    await admin.unsafe(`DELETE FROM meta WHERE key = 'app_settings'`);
+    await admin.unsafe(`DELETE FROM guilds`);
+    // Rows as the API before #161 stored them, written behind the store's back.
+    for (const [id, temperature, exa] of [
+      ["a", 1, "on"],
+      ["b", 0.7, "on"],
+      ["c", 0.7, "auto"],
+    ] as const) {
+      const row = JSON.stringify({
+        ...emptyGuild(),
+        temperature,
+        exa_mode: exa,
+      });
+      // A literal, not a parameter: a prepared statement would store the
+      // text as a JSON string (the store itself runs with `prepare: false`).
+      await admin.unsafe(
+        `INSERT INTO guilds (guild_id, settings) VALUES ('${id}', '${row}'::jsonb)`,
+      );
+    }
+    await store.migrate();
+    const first = await loadAppSettings(store);
+    expect(first.temperature).toBe(0.7);
+    expect(first.exa_mode).toBe("on");
+    // The rows still hold what they had, for the previous bot and API.
+    const [a] =
+      (await admin`SELECT settings FROM guilds WHERE guild_id = 'a'`) as {
+        settings: { temperature: number };
+      }[];
+    expect(a!.settings.temperature).toBe(1);
+    // A later start keeps a change.
+    await patchAppSettings(store, { temperature: 1.9 });
+    await store.migrate();
+    expect((await loadAppSettings(store)).temperature).toBe(1.9);
   });
 
   test("users, sessions, OAuth state and the block list", async () => {

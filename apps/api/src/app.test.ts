@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createApp } from "./create-app";
 import { loadTestEnv, type WebEnv } from "./env";
 import {
+  appSettingsPatchSchema,
   applyUserOverridePatch,
   emptyUserOverride,
   guildPatchSchema,
@@ -79,7 +80,7 @@ describe("version", () => {
 });
 
 describe("authz", () => {
-  test("guild MCP settings survive PATCH and snapshot, reset independently, and require auth", async () => {
+  test("MCP on/off stays the server's and survives PATCH and snapshot; the URL is the app's (#161)", async () => {
     const { app } = await setup();
     const body = JSON.stringify({
       mcp_enabled: false,
@@ -89,6 +90,7 @@ describe("authz", () => {
       req("/api/guilds/g1/settings", { method: "PATCH", body }),
     );
     expect(denied.status).toBe(401);
+    // The previous dashboard still sends the URL here: accepted, not applied.
     const saved = await app.handle(
       req("/api/guilds/g1/settings", {
         method: "PATCH",
@@ -97,30 +99,43 @@ describe("authz", () => {
       }),
     );
     expect(saved.status).toBe(200);
-    const snapshot = await app.handle(
-      req("/internal/snapshot", {
-        headers: { authorization: "Bearer test-internal" },
+    const snapshot = async () =>
+      (await (
+        await app.handle(
+          req("/internal/snapshot", {
+            headers: { authorization: "Bearer test-internal" },
+          }),
+        )
+      ).json()) as {
+        guilds: Record<string, { mcp_enabled: boolean; mcp_url: string }>;
+        app_settings: { mcp_url: string };
+      };
+    let data = await snapshot();
+    expect(data.guilds.g1.mcp_enabled).toBe(false);
+    expect(data.guilds.g1.mcp_url).toBe("https://ww.hsincode.com/api/mcp");
+    const url = await app.handle(
+      req("/api/app-settings", {
+        method: "PATCH",
+        cookie: "sess-admin",
+        body: JSON.stringify({ mcp_url: "https://example.com/mcp" }),
       }),
     );
-    const data = (await snapshot.json()) as {
-      guilds: Record<string, { mcp_enabled: boolean; mcp_url: string }>;
-    };
-    expect(data.guilds.g1.mcp_enabled).toBe(false);
+    expect(url.status).toBe(200);
+    data = await snapshot();
+    expect(data.app_settings.mcp_url).toBe("https://example.com/mcp");
     expect(data.guilds.g1.mcp_url).toBe("https://example.com/mcp");
+    expect(data.guilds.g1.mcp_enabled).toBe(false);
     const reset = await app.handle(
-      req("/api/guilds/g1/settings", {
+      req("/api/app-settings", {
         method: "PATCH",
         cookie: "sess-admin",
         body: JSON.stringify({ mcp_url: null }),
       }),
     );
-    const restored = (await reset.json()) as {
-      settings: { mcp_url: string | null; mcp_enabled: boolean };
-    };
+    const restored = (await reset.json()) as { settings: { mcp_url: string } };
     expect(restored.settings.mcp_url).toEqual(
       "https://ww.hsincode.com/api/mcp",
     );
-    expect(restored.settings.mcp_enabled).toBe(false);
     for (const mcp_url of [
       "invalid",
       "http://example.com/mcp",
@@ -131,6 +146,7 @@ describe("authz", () => {
       "https://[::1]/mcp",
     ]) {
       expect(guildPatchSchema.safeParse({ mcp_url }).success).toBe(false);
+      expect(appSettingsPatchSchema.safeParse({ mcp_url }).success).toBe(false);
     }
   });
   test("oauth start redirects to discord with PKCE", async () => {
@@ -979,16 +995,16 @@ describe("guild settings", () => {
       req("/api/guilds/g1/settings", {
         method: "PATCH",
         cookie: "sess-free",
-        body: JSON.stringify({ temperature: 0.2 }),
+        body: JSON.stringify({ thread_only: true }),
       }),
     );
     expect(res.status).toBe(200);
     const g1 = await store.getGuild("g1");
-    expect(g1.temperature).toBe(0.2);
+    expect(g1.thread_only).toBe(true);
     expect("fast_enabled" in g1).toBe(false);
     expect("verify_enabled" in g1).toBe(false);
     const g2 = await store.getGuild("g2");
-    expect(g2.temperature).toEqual(0.7);
+    expect(g2.thread_only).toBe(false);
   });
 
   test("internal snapshot PUT leaves personal overrides alone", async () => {

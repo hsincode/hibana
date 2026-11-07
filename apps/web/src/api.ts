@@ -1,9 +1,9 @@
 import type {
+  AppSettings,
   MultiAgentRoles,
   SubagentModel,
   SubagentEffort,
   ServiceTier,
-  ThreadCompactionMode,
 } from "@hibana/shared/settings";
 const API =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(
@@ -70,6 +70,8 @@ export type Me = {
   can_view_analytics?: boolean;
   /** 利用料ページの利用状況を見られるか（#110。Administrator だけ）。旧 API は返さない。 */
   can_view_usage?: boolean;
+  /** 全体の設定を変えられるか（#161。Moderator 以上）。旧 API は返さない。 */
+  can_manage_app_settings?: boolean;
 };
 
 export type GuildSummary = {
@@ -125,9 +127,12 @@ export type Catalog = {
   triggers?: string[];
 };
 
+/**
+ * サーバーの設定。全体の設定に移した項目（#161）も API は返すが、全体の値なので
+ * ここでは扱わない（AppSettings を使う）。
+ */
 export type GuildSettings = Record<string, unknown> & {
   mcp_enabled?: boolean | null;
-  mcp_url?: string | null;
   selection?: {
     provider?: string;
     model?: string;
@@ -147,16 +152,8 @@ export type GuildSettings = Record<string, unknown> & {
   thread_only?: boolean;
   /** API returns a concrete boolean; nullable only for older responses. */
   suppress_embeds?: boolean | null;
-  voice_mode?: string;
-  filler_removal?: boolean;
   /** 録音の要約に使うモデル（#118）。旧 API は返さない。 */
   text_model?: { preset: string; effort: string } | null;
-  temperature?: number | null;
-  exa_mode?: string | null;
-  thread_history_max_age_secs?: number | null;
-  /** スレッドの要約の方式と、始める大きさ（履歴の推定トークン数）（#124）。旧 API は返さない。 */
-  thread_compaction?: ThreadCompactionMode | null;
-  thread_compaction_tokens?: number | null;
   extra_triggers?: string[] | null;
   disabled_triggers?: string[];
   context?: { text: string; persona_override: boolean } | null;
@@ -180,4 +177,12 @@ export type UserSettings = {
   jev_enabled?: boolean | null;
   jev_task_enabled?: boolean | null;
   context?: { text: string; persona_override: boolean } | null;
+};
+
+/** GET /api/app-settings（#161）。全サーバーと DM で 1 つの値。 */
+export type AppSettingsResponse = {
+  settings: AppSettings;
+  /** リセット（PATCH で null）したときに戻る値。 */
+  defaults: AppSettings;
+  can_edit: boolean;
 };

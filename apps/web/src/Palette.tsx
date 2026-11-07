@@ -9,7 +9,13 @@ import {
 import { useNavigate } from "react-router-dom";
 import * as Dialog from "@radix-ui/react-dialog";
 import type { GuildSummary, Me } from "./api";
-import { GUILD_PAGES, GUILD_SETTINGS, guildPath } from "./nav";
+import {
+  APP_SETTINGS,
+  APP_SETTINGS_PATH,
+  GUILD_PAGES,
+  GUILD_SETTINGS,
+  guildPath,
+} from "./nav";
 import { GUILD_PAGE_ICON, Icon } from "./ui";
 
 type Item = {
@@ -97,6 +103,13 @@ export function Palette({
     });
     items.push({
       group: "ページ",
+      icon: <Icon.sliders />,
+      label: "全体の設定",
+      where: "全体",
+      to: APP_SETTINGS_PATH,
+    });
+    items.push({
+      group: "ページ",
       icon: <Icon.box />,
       label: "すべての成果物",
       where: "全体",
@@ -139,6 +152,15 @@ export function Palette({
         });
       }
     }
+    for (const s of APP_SETTINGS)
+      items.push({
+        group: "設定項目",
+        icon: <Icon.sliders />,
+        label: s.label,
+        where: "全体の設定",
+        to: APP_SETTINGS_PATH,
+        row: s.row,
+      });
     return items;
   }, [guilds, currentId, me]);
 

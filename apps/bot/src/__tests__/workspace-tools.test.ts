@@ -624,13 +624,24 @@ describe("the tool list", () => {
       expect(toolsFingerprint(without)).not.toBe(
         toolsFingerprint(workspaceToolParams(list, { web: true })),
       );
-      // The server's `exa_mode: off` switches every web tool off (#46).
-      on.runtime.snapshot.guilds["1"] = {
-        ...on.runtime.guild("1"),
+      // `exa_mode: off` switches every web tool off (#46). It is one value
+      // for every server since #161; a server row's own copy is not read
+      // once the settings API hands out the app's.
+      on.runtime.snapshot.app_settings = {
+        ...on.runtime.app(),
+        exa_mode: "on",
+      };
+      on.runtime.snapshot.guilds["2"] = {
+        ...on.runtime.guild("2"),
+        exa_mode: "off",
+      };
+      expect(on.tools.workspaceWeb(context({ guildId: "2" }))).toBe(true);
+      on.runtime.snapshot.app_settings = {
+        ...on.runtime.app(),
         exa_mode: "off",
       };
       expect(on.tools.workspaceWeb(context())).toBe(false);
-      expect(on.tools.workspaceWeb(context({ guildId: "2" }))).toBe(true);
+      expect(on.tools.workspaceWeb(context({ guildId: "2" }))).toBe(false);
     } finally {
       await on.close();
     }

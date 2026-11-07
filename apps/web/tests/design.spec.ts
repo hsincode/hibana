@@ -1,12 +1,18 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
 import {
+  emptyAppSettings,
   emptyGuild,
   emptyUserOverride,
   subagentModePatch,
 } from "@hibana/shared/settings";
 import { AUTO_ROUTE_FALLBACK } from "@hibana/shared/catalog";
-import { GUILD_PAGES, GUILD_SETTINGS, guildPath } from "../src/nav";
+import {
+  APP_SETTINGS,
+  GUILD_PAGES,
+  GUILD_SETTINGS,
+  guildPath,
+} from "../src/nav";
 
 const guilds = [
   { id: "100", name: "Design workspace", icon: null, preset: "DeepSeek V4" },
@@ -43,6 +49,7 @@ const catalog = {
 
 async function mockApi(page: Page, retainSettings = false) {
   const settingsByPath = new Map<string, Record<string, unknown>>();
+  let appSettings: Record<string, unknown> = emptyAppSettings();
   const writes: { path: string; body: Record<string, unknown> }[] = [];
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -63,6 +70,26 @@ async function mockApi(page: Page, retainSettings = false) {
       };
     else if (path === "/api/guilds") data = { guilds };
     else if (path === "/api/catalog") data = catalog;
+    // 全体の設定 (#161). A PATCH keeps what it wrote, like the API.
+    else if (path === "/api/app-settings") {
+      appSettings = { ...appSettings, ...body };
+      data = {
+        settings: appSettings,
+        defaults: emptyAppSettings(),
+        can_edit: true,
+      };
+    } else if (path === "/api/budget-fallback")
+      data = {
+        fallback: { preset: "claude", effort: "high" },
+        threshold_usd: 10,
+        threshold_range: { min_usd: 0, max_usd: 200, default_usd: 10 },
+        presets: [
+          { id: "claude", label: "Claude Kiro / Claude Opus", published: true },
+        ],
+        efforts: ["high"],
+        can_edit: true,
+        status: { configured: false },
+      };
     // The models page also lists ChatGPT master accounts.
     else if (path === "/api/chatgpt/accounts") data = { accounts: [] };
     else if (path.endsWith("/settings")) {
@@ -329,7 +356,7 @@ test("personal defaults follow the server until a control is changed", async ({
   ).toBe(true);
 });
 
-test("MCP endpoint and enable setting save on desktop and mobile", async ({
+test("MCP on/off saves on the server's page and the endpoint on 全体の設定 (#161), on desktop and mobile", async ({
   page,
 }) => {
   const writes = await mockApi(page);
@@ -345,23 +372,22 @@ test("MCP endpoint and enable setting save on desktop and mobile", async ({
     await expect(page.locator("#runtime")).toHaveCount(0);
     await expect(page.getByRole("group", { name: "fast" })).toHaveCount(0);
     await expect(page.getByRole("group", { name: "verify" })).toHaveCount(0);
-    const input = page.getByRole("textbox", { name: "MCP サーバー URL" });
-    await expect(input).toHaveValue("https://ww.hsincode.com/api/mcp");
-    await input.fill(`https://example.com/mcp-${width}`);
-    await input.press("Tab");
-    await expect
-      .poll(() =>
-        writes.some(
-          (write) => write.body.mcp_url === `https://example.com/mcp-${width}`,
-        ),
-      )
-      .toBe(true);
+    // The endpoint is one for every server now.
+    await expect(
+      page.getByRole("textbox", { name: "MCP サーバー URL" }),
+    ).toHaveCount(0);
     await page
       .locator("#mcp")
       .getByRole("button", { name: "OFF", exact: true })
       .click();
     await expect
-      .poll(() => writes.some((write) => write.body.mcp_enabled === false))
+      .poll(() =>
+        writes.some(
+          (write) =>
+            write.path === "/api/guilds/100/settings" &&
+            write.body.mcp_enabled === false,
+        ),
+      )
       .toBe(true);
     await page.locator("#mcp").scrollIntoViewIfNeeded();
     expect(
@@ -373,7 +399,76 @@ test("MCP endpoint and enable setting save on desktop and mobile", async ({
       path: `test-results/mcp-${width}.png`,
       animations: "disabled",
     });
+
+    await page.locator(".moved-note").getByRole("link").click();
+    await expect(page).toHaveURL(/\/settings$/);
+    const input = page.getByRole("textbox", { name: "MCP サーバー URL" });
+    // The mock keeps what the first width saved, as the API would.
+    await expect(input).toHaveValue(
+      width === 1440
+        ? "https://ww.hsincode.com/api/mcp"
+        : "https://example.com/mcp-1440",
+    );
+    await input.fill(`https://example.com/mcp-${width}`);
+    await input.press("Tab");
+    await expect
+      .poll(() =>
+        writes.some(
+          (write) =>
+            write.path === "/api/app-settings" &&
+            write.body.mcp_url === `https://example.com/mcp-${width}`,
+        ),
+      )
+      .toBe(true);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/app-settings-${width}.png`,
+      fullPage: true,
+      animations: "disabled",
+    });
   }
+});
+
+test("全体の設定 shows a member below Moderator the values without letting them change any (#161)", async ({
+  page,
+}) => {
+  const writes = await mockApi(page);
+  await page.route("**/api/app-settings", (route) =>
+    route.fulfill({
+      json: {
+        settings: { ...emptyAppSettings(), exa_mode: "off" },
+        defaults: emptyAppSettings(),
+        can_edit: false,
+      },
+    }),
+  );
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/settings");
+  await expect(
+    page.getByRole("heading", { name: "全体の設定", level: 1 }),
+  ).toBeVisible();
+  await expect(page.locator(".app-fields-note")).toHaveText(
+    "変更できるのは Moderator と Administrator です。",
+  );
+  const exa = page.getByRole("combobox", { name: "exa", exact: true });
+  await expect(exa).toHaveText("off");
+  await expect(exa).toBeDisabled();
+  await expect(
+    page.getByRole("spinbutton", { name: "temperature" }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("textbox", { name: "MCP サーバー URL" }),
+  ).toBeDisabled();
+  await expect(
+    page
+      .locator('[data-row="a-filler"]')
+      .getByRole("button", { name: "OFF", exact: true }),
+  ).toBeDisabled();
+  expect(writes.filter((w) => w.path === "/api/app-settings")).toEqual([]);
 });
 
 test("responsive pages, theme persistence, and account menu", async ({
@@ -1165,8 +1260,8 @@ test("command palette reaches servers, pages and every listed setting from the k
   await expect(palette.getByRole("option")).toHaveCount(1);
   await page.keyboard.press("Enter");
   await expect(palette).toBeHidden();
-  await expect(page).toHaveURL(/\/g\/100\/tools$/);
-  await expect(page.locator('[data-row="g-exa"]')).toHaveClass(/is-target/);
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page.locator('[data-row="a-exa"]')).toHaveClass(/is-target/);
   await expect(
     page.getByRole("combobox", { name: "exa", exact: true }),
   ).toBeFocused();
@@ -1224,6 +1319,22 @@ test("command palette reaches servers, pages and every listed setting from the k
     await expect(page).toHaveURL(
       new RegExp(`${guildPath("100", setting.page)}$`),
     );
+    await expect(
+      page.locator(`[data-row="${setting.row}"]`),
+      setting.label,
+    ).toBeVisible();
+  }
+  // And every app setting (#161) exists on 全体の設定.
+  for (const setting of APP_SETTINGS) {
+    await page.keyboard.press("Control+k");
+    await input.fill(setting.label);
+    await palette
+      .getByRole("option")
+      .filter({ hasText: "全体の設定" })
+      .filter({ hasText: setting.label })
+      .first()
+      .click();
+    await expect(page).toHaveURL(/\/settings$/);
     await expect(
       page.locator(`[data-row="${setting.row}"]`),
       setting.label,
@@ -1321,19 +1432,18 @@ test("a save shows on the row and in the top bar, and a failed save rolls the co
   // Leaving a field without changing it writes nothing.
   await page
     .getByRole("navigation", { name: "メイン", exact: true })
-    .getByRole("link", { name: "ツールと挙動" })
+    .getByRole("link", { name: "全体の設定" })
     .click();
+  await expect(page).toHaveURL(/\/settings$/);
   const before = writes.length;
   await page.getByRole("textbox", { name: "MCP サーバー URL" }).focus();
   await page.keyboard.press("Tab");
   await page.getByRole("spinbutton", { name: "temperature" }).focus();
   await page.keyboard.press("Tab");
-  await page
-    .locator("#mcp")
-    .getByRole("button", { name: "OFF", exact: true })
-    .click();
+  await page.getByRole("combobox", { name: "voice-mode", exact: true }).click();
+  await page.getByRole("option", { name: "s2s", exact: true }).click();
   await expect
-    .poll(() => writes.slice(before).some((w) => w.body.mcp_enabled === false))
+    .poll(() => writes.slice(before).some((w) => w.body.voice_mode === "s2s"))
     .toBe(true);
   expect(
     writes
@@ -1342,7 +1452,7 @@ test("a save shows on the row and in the top bar, and a failed save rolls the co
   ).toBe(false);
 
   // The API refuses the next change.
-  await page.route("**/api/guilds/100/settings", (route) =>
+  await page.route("**/api/app-settings", (route) =>
     route.request().method() === "PATCH"
       ? route.fulfill({ status: 500, json: { error: "書き込めませんでした" } })
       : route.fallback(),
@@ -1353,7 +1463,7 @@ test("a save shows on the row and in the top bar, and a failed save rolls the co
   await page.getByRole("option", { name: "off", exact: true }).click();
   await expect(status).toHaveText("保存に失敗");
   await expect(exa).toHaveText("auto");
-  await expect(page.locator('[data-row="g-exa"] .row-mark')).toHaveText(
+  await expect(page.locator('[data-row="a-exa"] .row-mark')).toHaveText(
     "保存に失敗",
   );
   await expect(page.locator(".toast.is-danger")).toContainText(

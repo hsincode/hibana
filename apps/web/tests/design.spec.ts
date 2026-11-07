@@ -13,6 +13,33 @@ const guilds = [
   { id: "200", name: "開発コミュニティ", icon: null, preset: "Claude Opus" },
   { id: "300", name: "Research lab", icon: null, preset: "GPT" },
 ];
+// 定時アクション: one saved, and what the bot found on its host.
+const scheduleFixture = {
+  id: "s1",
+  name: "2時のエマ",
+  enabled: true,
+  time: "02:00",
+  time_zone: "Asia/Tokyo",
+  actions: [
+    {
+      type: "post",
+      channel_id: "400000000000000001",
+      text: "",
+      file: "ema.png",
+    },
+    { type: "voice_clip", audio: "ema.wav" },
+  ],
+};
+const scheduleAssets = [
+  { name: "ema.mp4", kind: "video", size: 601074 },
+  { name: "ema.png", kind: "image", size: 812345 },
+  { name: "ema.wav", kind: "audio", size: 782020 },
+];
+const scheduleChannels = [
+  { id: "400000000000000001", name: "general", category: null },
+  { id: "400000000000000002", name: "night-owls", category: "雑談" },
+];
+
 const catalog = {
   presets: [
     {
@@ -48,7 +75,9 @@ async function mockApi(page: Page, retainSettings = false) {
     const request = route.request();
     const path = new URL(request.url()).pathname;
     const body =
-      request.method() === "PATCH" || request.method() === "POST"
+      request.method() === "PATCH" ||
+      request.method() === "POST" ||
+      request.method() === "PUT"
         ? request.postDataJSON()
         : undefined;
     if (body) writes.push({ path, body });
@@ -112,6 +141,16 @@ async function mockApi(page: Page, retainSettings = false) {
           },
         ],
       };
+    else if (path.endsWith("/schedules"))
+      data = body
+        ? { schedules: body.schedules, version: 2 }
+        : {
+            schedules: [scheduleFixture],
+            assets: scheduleAssets,
+            assets_reported_at: 1788652800000,
+            can_edit: true,
+          };
+    else if (path.endsWith("/channels")) data = { channels: scheduleChannels };
     else if (path === "/api/users")
       data = {
         users: [
@@ -1013,11 +1052,11 @@ for (const [url, path, width] of [
   });
 
 /* ============================================================
-   Layout introduced with the redesign (#61): five pages per server,
+   Layout introduced with the redesign (#61): six pages per server,
    the command palette, the server switcher and how a save is shown.
    ============================================================ */
 
-test("server settings are split into five pages, reachable from the sidebar and the tab strip", async ({
+test("server settings are split into six pages, reachable from the sidebar and the tab strip", async ({
   page,
 }) => {
   await mockApi(page);
@@ -1040,6 +1079,7 @@ test("server settings are split into five pages, reachable from the sidebar and 
     context: "サーバーコンテキスト",
     skills: "スキル",
     artifacts: "成果物",
+    schedules: "定時アクション",
   };
   await expect(
     page.getByRole("heading", { name: "/switch モデル", level: 2 }),
@@ -1067,7 +1107,7 @@ test("server settings are split into five pages, reachable from the sidebar and 
   // The pages share one copy of the settings: moving between them does not load it again.
   expect(settingsReads).toBe(readsAfterLoad);
 
-  // Narrow screens: the sidebar is a drawer, so the same five pages are a tab strip.
+  // Narrow screens: the sidebar is a drawer, so the same six pages are a tab strip.
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(nav).toBeHidden();
   await expect(tabs.getByRole("link")).toHaveText(
@@ -1085,8 +1125,8 @@ test("server settings are split into five pages, reachable from the sidebar and 
   ).toBe(true);
 });
 
-// The first of the five pages is covered with the other routes in "responsive pages";
-// the four new ones get their own test so that one stays within its time on CI (#56).
+// The first of the six pages is covered with the other routes in "responsive pages";
+// the others get their own test so that one stays within its time on CI (#56).
 test("the pages split off from server settings fit every width", async ({
   page,
 }) => {
@@ -1107,6 +1147,94 @@ test("the pages split off from server settings fit every width", async ({
       ).toBe(true);
     }
   }
+});
+
+test("scheduled actions: a new one is filled in and the whole list is saved", async ({
+  page,
+}) => {
+  const writes = await mockApi(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/g/100/schedules");
+  const saved = page.getByRole("listitem", { name: "2時のエマ" });
+  await expect(saved.getByLabel("毎日")).toHaveValue("02:00");
+  await expect(saved.getByRole("combobox", { name: "チャンネル" })).toHaveText(
+    /#general/,
+  );
+  await expect(saved.getByRole("combobox", { name: "音声" })).toHaveText(
+    /ema\.wav/,
+  );
+  const save = page.getByRole("button", { name: "保存", exact: true });
+  await expect(save).toBeDisabled();
+
+  await page.getByRole("button", { name: "追加", exact: true }).click();
+  const added = page.getByRole("listitem", { name: "定時アクション 2" });
+  await added.getByLabel("名前").fill("朝");
+  const morning = page.getByRole("listitem", { name: "朝" });
+  await morning.getByLabel("毎日").fill("07:30");
+  await morning.getByRole("combobox", { name: "チャンネル" }).click();
+  await page.getByRole("option", { name: "雑談 / #night-owls" }).click();
+  await morning.getByRole("combobox", { name: "添付（画像・動画）" }).click();
+  // Audio is never offered as an attachment.
+  await expect(page.getByRole("option", { name: /ema\.wav/ })).toHaveCount(0);
+  await page.getByRole("option", { name: /ema\.mp4/ }).click();
+  await morning.getByRole("button", { name: "通話中なら音声" }).click();
+  await expect(page.getByText("未保存の変更があります")).toBeVisible();
+  await save.click();
+  await expect(page.getByText("保存しました。")).toBeVisible();
+
+  const put = writes.find((w) => w.path === "/api/guilds/100/schedules");
+  expect(put?.body.schedules).toEqual([
+    scheduleFixture,
+    {
+      id: expect.any(String),
+      name: "朝",
+      enabled: true,
+      time: "07:30",
+      time_zone: "Asia/Tokyo",
+      actions: [
+        {
+          type: "post",
+          channel_id: "400000000000000002",
+          text: "",
+          file: "ema.mp4",
+        },
+        { type: "voice_clip", audio: "ema.wav" },
+      ],
+    },
+  ]);
+  await expect(save).toBeDisabled();
+});
+
+test("scheduled actions: without Manage Server they are shown and cannot be changed", async ({
+  page,
+}) => {
+  await mockApi(page);
+  await page.route("**/api/guilds/100/schedules", (route) =>
+    route.fulfill({
+      json: {
+        schedules: [scheduleFixture],
+        assets: scheduleAssets,
+        assets_reported_at: null,
+        can_edit: false,
+      },
+    }),
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/g/100/schedules");
+  await expect(page.getByRole("alert")).toContainText("サーバー管理");
+  await expect(
+    page.getByRole("button", { name: "追加", exact: true }),
+  ).toBeDisabled();
+  const saved = page.getByRole("listitem", { name: "2時のエマ" });
+  await expect(saved.getByLabel("毎日")).toBeDisabled();
+  await expect(
+    page.getByText("bot からの一覧はまだ届いていません"),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
 });
 
 test("links from the one-page layout and the old skills page lead to where the content now lives", async ({

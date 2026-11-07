@@ -39,7 +39,7 @@ async function source() {
       g1: {
         ...emptyGuild(),
         thread_only: true,
-        mcp_url: "https://example.com/mcp",
+        extra_triggers: ["例え"],
       },
       g2: emptyGuild(),
     },

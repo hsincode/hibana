@@ -273,12 +273,12 @@ describe.skipIf(!local)("PostgresStore against Postgres", () => {
   test("guilds, user contexts and user overrides round-trip JSONB", async () => {
     const guild = {
       ...emptyGuild(),
-      mcp_url: "https://例え.jp/mcp",
+      extra_triggers: ["例え"],
       thread_only: true,
     };
     await store.putGuild("g1", guild);
     expect(await store.getGuild("g1")).toMatchObject({
-      mcp_url: "https://例え.jp/mcp",
+      extra_triggers: ["例え"],
       thread_only: true,
     });
     expect(Object.keys(await store.allGuilds())).toEqual(["g1"]);
@@ -295,7 +295,7 @@ describe.skipIf(!local)("PostgresStore against Postgres", () => {
     expect(Object.keys(await store.allUserOverrides())).toContain("u1");
   });
 
-  test("the app settings start once from what most server rows had, and the rows keep their copies (#161)", async () => {
+  test("the app settings start once from what most server rows had, before the rows are rewritten without them (#161)", async () => {
     await admin.unsafe(`DELETE FROM meta WHERE key = 'app_settings'`);
     await admin.unsafe(`DELETE FROM guilds`);
     // Rows as the API before #161 stored them, written behind the store's back.
@@ -319,12 +319,13 @@ describe.skipIf(!local)("PostgresStore against Postgres", () => {
     const first = await loadAppSettings(store);
     expect(first.temperature).toBe(0.7);
     expect(first.exa_mode).toBe("on");
-    // The rows still hold what they had, for the previous bot and API.
+    // The rewrite at start leaves them out of the rows.
     const [a] =
       (await admin`SELECT settings FROM guilds WHERE guild_id = 'a'`) as {
-        settings: { temperature: number };
+        settings: Record<string, unknown>;
       }[];
-    expect(a!.settings.temperature).toBe(1);
+    expect("temperature" in a!.settings).toBe(false);
+    expect("exa_mode" in a!.settings).toBe(false);
     // A later start keeps a change.
     await patchAppSettings(store, { temperature: 1.9 });
     await store.migrate();

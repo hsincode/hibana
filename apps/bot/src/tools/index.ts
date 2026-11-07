@@ -580,7 +580,7 @@ export class ToolRegistry {
       config.toolsEnabled &&
       config.webSearch &&
       config.anthropicWorkspace.web &&
-      this.runtime.guild(ctx.guildId).exa_mode !== "off"
+      this.runtime.app().exa_mode !== "off"
     );
   }
   tools(ctx: Context) {

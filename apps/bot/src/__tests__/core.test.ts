@@ -462,10 +462,11 @@ test("legacy state preserves global defaults and strips retired settings", async
   const runtime = new Runtime(config());
   runtime.replace(snapshot);
   expect(runtime.resolve().selection.provider).toBe("deepseek");
-  // One value for every server and DM (#161): what most servers had.
-  expect(runtime.resolve("100").temperature).toBe(1);
-  expect(runtime.resolve("101").temperature).toBe(1);
-  expect(runtime.resolve().temperature).toBe(1);
+  // An app setting since #161: one value for every server and DM, never a
+  // server row's (a state file's are counted when it is loaded).
+  expect("temperature" in runtime.guild("100")).toBe(false);
+  expect(runtime.resolve("100").temperature).toBe(runtime.app().temperature);
+  expect(runtime.resolve().temperature).toBe(runtime.app().temperature);
   expect("fast_enabled" in runtime.resolve()).toBe(false);
   expect("verify_enabled" in runtime.resolve()).toBe(false);
   expect(JSON.stringify(snapshot)).not.toMatch(

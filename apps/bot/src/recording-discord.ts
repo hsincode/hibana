@@ -2,11 +2,15 @@
 // connection, one xAI stream per speaker, and the posts. The recorder itself
 // (`recording.ts`) only sees `RecordingPort`.
 import {
+  AudioPlayerStatus,
   EndBehaviorType,
   VoiceConnectionStatus,
+  createAudioPlayer,
+  createAudioResource,
   entersState,
   getVoiceConnection,
   joinVoiceChannel,
+  type AudioPlayer,
 } from "@discordjs/voice";
 import {
   AttachmentBuilder,
@@ -15,7 +19,7 @@ import {
   type GuildBasedChannel,
 } from "discord.js";
 import { PassThrough } from "node:stream";
-import { sleep } from "./io";
+import { Serial, sleep } from "./io";
 import type { RecordingEvents, RecordingPort, VoiceHandle } from "./recording";
 import type { Avatar } from "./recording-audio";
 import type { Runtime } from "./runtime";
@@ -58,6 +62,8 @@ export class DiscordRecordingPort implements RecordingPort {
       getVoiceConnection?: typeof getVoiceConnection;
       streamSpeech?: typeof streamSpeech;
       fetch?: (url: string, init: RequestInit) => Promise<Response>;
+      createAudioPlayer?: () => AudioPlayer;
+      createAudioResource?: typeof createAudioResource;
     } = {},
   ) {}
 
@@ -200,7 +206,8 @@ export class DiscordRecordingPort implements RecordingPort {
       guildId,
       adapterCreator: guild.voiceAdapterCreator,
       selfDeaf: false,
-      // A recording never speaks.
+      // A recording never answers. It unmutes only while a scheduled clip
+      // plays (play below).
       selfMute: true,
     });
     try {
@@ -354,10 +361,47 @@ export class DiscordRecordingPort implements RecordingPort {
         if (!abort.signal.aborted) events.disconnected();
       }
     });
+    // Scheduled clips, one at a time: a connection plays one player.
+    const playback = new Serial();
+    let playing: AudioPlayer | undefined;
+    const mute = (selfMute: boolean) => {
+      if (connection.state.status !== VoiceConnectionStatus.Destroyed)
+        connection.rejoin({ ...connection.joinConfig, selfMute });
+    };
     return {
+      play: (path, maxMs) =>
+        playback.run(async () => {
+          if (
+            abort.signal.aborted ||
+            connection.state.status !== VoiceConnectionStatus.Ready
+          )
+            return false;
+          const player = (this.deps.createAudioPlayer ?? createAudioPlayer)();
+          player.on("error", this.report);
+          // Through ffmpeg, whatever the file's format.
+          const resource = (
+            this.deps.createAudioResource ?? createAudioResource
+          )(path);
+          playing = player;
+          // Ready already, so this only sends the new voice state: no
+          // reconnect, and the receive streams go on.
+          mute(false);
+          const subscription = connection.subscribe(player);
+          try {
+            player.play(resource);
+            await waitFor(player, AudioPlayerStatus.Idle, maxMs);
+          } finally {
+            player.stop(true);
+            subscription?.unsubscribe();
+            if (playing === player) playing = undefined;
+            if (!abort.signal.aborted) mute(true);
+          }
+          return true;
+        }),
       leave: async (flush) => {
         if (abort.signal.aborted) return;
         abort.abort();
+        playing?.stop(true);
         connection.receiver.speaking.off("start", listen);
         if (flush) {
           for (const s of speakers.values()) s.end?.();

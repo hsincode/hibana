@@ -8,6 +8,7 @@ import {
   StreamType,
   AudioPlayerStatus,
   type AudioPlayer,
+  type AudioResource,
   type VoiceConnection,
 } from "@discordjs/voice";
 import { Client, ChannelType, PermissionFlagsBits } from "discord.js";
@@ -25,7 +26,11 @@ type Session = {
   player?: AudioPlayer;
   websockets: Set<{ close(): void }>;
   timer: ReturnType<typeof setTimeout>;
+  /** Turns, one at a time: an answer, from the words to its audio. */
   queue: Serial;
+  /** Audio, one at a time: answers and scheduled clips. One playing is never
+   *  cut off by the next; a connection plays one player. */
+  playback: Serial;
 };
 export class Voice {
   private sessions = new Map<string, Session>();
@@ -84,6 +89,7 @@ export class Voice {
       websockets: new Set(),
       timer: setTimeout(() => this.leave(guildId), 1800000),
       queue: new Serial(),
+      playback: new Serial(),
     };
     this.sessions.set(guildId, session);
     connection.on("error", this.report);
@@ -110,6 +116,37 @@ export class Voice {
   /** Whether this guild is in a voice conversation. */
   active(guildId: string) {
     return this.sessions.has(guildId);
+  }
+  /** Plays a file (a scheduled clip) in this guild's voice conversation,
+   *  after the audio playing or waiting there, and resolves once it has
+   *  played. False when the guild has no voice conversation, or it ended
+   *  while the clip waited; this never joins one. */
+  async play(guildId: string, path: string, maxMs: number) {
+    const session = this.sessions.get(guildId);
+    if (!session) return false;
+    return session.playback.run(async () => {
+      if (session.abort.signal.aborted) return false;
+      // A file goes through ffmpeg, whatever its format.
+      await this.playOn(session, createAudioResource(path), maxMs);
+      return true;
+    });
+  }
+  private async playOn(
+    session: Session,
+    resource: AudioResource,
+    maxMs: number,
+  ) {
+    const player = createAudioPlayer();
+    session.player = player;
+    player.on("error", this.report);
+    session.connection.subscribe(player);
+    player.play(resource);
+    try {
+      await entersState(player, AudioPlayerStatus.Idle, maxMs);
+    } finally {
+      player.stop(true);
+      if (session.player === player) session.player = undefined;
+    }
   }
   leave(guildId: string) {
     const session = this.sessions.get(guildId);
@@ -323,21 +360,16 @@ export class Voice {
           for (let j = 0; j < 4; j++)
             stereo.writeInt16LE(sample, i * 4 + j * 2);
         }
-        const player = createAudioPlayer();
-        session.player = player;
-        player.on("error", this.report);
-        session.connection.subscribe(player);
-        player.play(
-          createAudioResource(Readable.from([stereo]), {
-            inputType: StreamType.Raw,
-          }),
-        );
-        try {
-          await entersState(player, AudioPlayerStatus.Idle, 180000);
-        } finally {
-          player.stop(true);
-          if (session.player === player) session.player = undefined;
-        }
+        await session.playback.run(async () => {
+          session.abort.signal.throwIfAborted();
+          await this.playOn(
+            session,
+            createAudioResource(Readable.from([stereo]), {
+              inputType: StreamType.Raw,
+            }),
+            180000,
+          );
+        });
       }
     } finally {
       clearTimeout(timer);

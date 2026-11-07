@@ -15,7 +15,8 @@ COPY apps apps
 RUN bun run --cwd apps/bot build
 
 FROM oven/bun:1.4.4
-RUN apt-get update && apt-get install -y --no-install-recommends docker.io ca-certificates && rm -rf /var/lib/apt/lists/*
+# ffmpeg: scheduled clips in voice are files of any format (docs/schedules.md).
+RUN apt-get update && apt-get install -y --no-install-recommends docker.io ca-certificates ffmpeg && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY --from=build /app/packages ./packages

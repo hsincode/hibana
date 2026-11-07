@@ -32,6 +32,8 @@ import { Voice } from "./voice";
 import { Recorder } from "./recording";
 import { AudioQuota } from "./recording-audio";
 import { DiscordRecordingPort } from "./recording-discord";
+import { Scheduler } from "./schedules";
+import { DiscordScheduleTarget } from "./schedule-discord";
 import { recordingPlayer } from "./recording-player/build";
 import { commands, handleCommand } from "./commands";
 import { imagePrompt, shouldRespond, splitMessage } from "./triggers";
@@ -133,6 +135,8 @@ export class Hibana {
   readonly voice: Voice;
   /** Meeting recordings (#118). */
   readonly recorder: Recorder;
+  /** Scheduled actions (定時アクション), started once Discord is ready. */
+  readonly scheduler: Scheduler;
   private active = new Map<string, Active>();
   /** Steering prompts that carried the "ultracode" keyword. */
   private keywordPrompts = new WeakSet<Message>();
@@ -220,6 +224,29 @@ export class Hibana {
       },
       // The dashboard lists the artifact a recording became (#138).
       published: () => this.track(this.sync.publishAssets()),
+    });
+    this.scheduler = new Scheduler({
+      dataDir: config.dataDir,
+      statePath: join(config.dataDir, "schedules_state.json"),
+      schedules: () => this.runtime.snapshot.schedules ?? {},
+      disabled: (id) => this.runtime.guild(id).bot_disabled,
+      // Where the bot already is in voice: never joins for a clip.
+      target: new DiscordScheduleTarget(this.client, [
+        this.voice,
+        this.recorder,
+      ]),
+      report: (e) => this.report(e),
+      log: (message, fields) => this.log.info(fields, message),
+      reportAssets:
+        config.webApiUrl && config.internalToken
+          ? (guilds) =>
+              this.runtime.remote(
+                "/internal/schedule-assets",
+                "PUT",
+                { guilds },
+                this.shutdown.signal,
+              )
+          : undefined,
     });
     // A server has one voice connection: a recording keeps `/join` out.
     this.voice.busy = (id) =>
@@ -357,6 +384,7 @@ export class Hibana {
     this.track(this.recorder.recover());
     for (const id of this.client.guilds.cache.keys())
       await this.runtime.initializeGuild(id);
+    this.scheduler.start();
     const applicationId = this.client.application!.id;
     await this.client.rest.put(
       this.config.commandGuildId
@@ -1227,6 +1255,7 @@ export class Hibana {
   async close() {
     this.shutdown.abort(new Error("Shutdown"));
     this.sync.stop();
+    await this.scheduler.close();
     this.voice.close();
     // Leaves at once; what was recorded stays on disk for the next start.
     await this.recorder.close();

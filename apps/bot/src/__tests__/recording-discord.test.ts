@@ -28,6 +28,8 @@ function setup(
     closeAfterReady?: "quietly" | "with an error";
     /** A voice connection already open in the server. */
     existing?: { state: { status: string } };
+    /** Clips play until `finishClip()`; without, they end at once. */
+    holdClips?: boolean;
   } = {},
 ) {
   const runtime = new Runtime(
@@ -48,6 +50,31 @@ function setup(
   const connection = Object.assign(new EventEmitter(), {
     state: { status: "ready" },
     destroyed: false,
+    joinConfig: {
+      channelId: "vc1",
+      guildId: "g1",
+      group: "default",
+      selfDeaf: false,
+      selfMute: true,
+    },
+    /** selfMute of each voice state sent after joining. */
+    mutes: [] as boolean[],
+    rejoin(config: { selfMute: boolean }) {
+      this.mutes.push(config.selfMute);
+      this.joinConfig = { ...this.joinConfig, ...config };
+      return true;
+    },
+    /** The players subscribed, and how many were unsubscribed. */
+    players: [] as unknown[],
+    unsubscribed: 0,
+    subscribe(player: unknown) {
+      this.players.push(player);
+      return {
+        unsubscribe: () => {
+          this.unsubscribed++;
+        },
+      };
+    },
     destroy() {
       this.destroyed = true;
       this.state.status = "destroyed";
@@ -124,15 +151,38 @@ function setup(
     };
   }) as typeof streamSpeech;
   const errors: unknown[] = [];
+  const players: { played: string[]; stopped: boolean }[] = [];
+  const clipEnds: (() => void)[] = [];
   const port = new DiscordRecordingPort(
     client as never,
     runtime,
     (e) => errors.push(e),
     {
       joinVoiceChannel: (() => connection) as never,
-      entersState: (async () => connection) as never,
+      // A player reaches Idle when its clip ends; the connection is Ready.
+      entersState: (async (target: unknown) => {
+        if (options.holdClips && players.includes(target as never))
+          await new Promise<void>((r) => clipEnds.push(r));
+        return target;
+      }) as never,
       getVoiceConnection: (() => options.existing) as never,
       streamSpeech: fakeStream,
+      createAudioPlayer: (() => {
+        const player = Object.assign(new EventEmitter(), {
+          played: [] as string[],
+          stopped: false,
+          play(resource: { path: string }) {
+            this.played.push(resource.path);
+          },
+          stop() {
+            this.stopped = true;
+            return true;
+          },
+        });
+        players.push(player);
+        return player;
+      }) as never,
+      createAudioResource: ((path: string) => ({ path })) as never,
     },
   );
   const heard: { userId: string; name: string; text: string }[] = [];
@@ -169,6 +219,9 @@ function setup(
     audio,
     disconnected: () => disconnected,
     failing: () => failing,
+    players,
+    /** The clip playing now ends. */
+    finishClip: () => clipEnds.shift()?.(),
     join: () => port.join("g1", "vc1", events),
     /** The speaker sends a packet. */
     say: (userId: string, packet: string) =>
@@ -425,6 +478,51 @@ describe("DiscordRecordingPort.join", () => {
     s.connection.emit("disconnected");
     await tick();
     expect(s.disconnected()).toBe(1);
+  });
+});
+
+describe("scheduled clips during a recording", () => {
+  test("a clip unmutes the recording while it plays, then mutes it again", async () => {
+    const s = setup();
+    const handle = await s.join();
+    expect(await handle.play("/assets/ema.wav", 300_000)).toBe(true);
+    expect(s.players.map((p) => p.played)).toEqual([["/assets/ema.wav"]]);
+    expect(s.connection.mutes).toEqual([false, true]);
+    expect(s.connection.unsubscribed).toBe(1);
+    expect(s.players[0]!.stopped).toBe(true);
+    expect(s.errors).toEqual([]);
+  });
+
+  test("a second clip waits for the one playing, which is not cut off", async () => {
+    const s = setup({ holdClips: true });
+    const handle = await s.join();
+    const first = handle.play("/assets/a.wav", 300_000);
+    const second = handle.play("/assets/b.wav", 300_000);
+    await tick();
+    expect(s.players).toHaveLength(1);
+    expect(s.players[0]!.stopped).toBe(false);
+    s.finishClip();
+    await first;
+    await tick();
+    expect(s.players).toHaveLength(2);
+    s.finishClip();
+    await second;
+    expect(s.connection.mutes).toEqual([false, true, false, true]);
+  });
+
+  test("leaving stops the clip, and nothing plays after", async () => {
+    const s = setup({ holdClips: true });
+    const handle = await s.join();
+    const playing = handle.play("/assets/a.wav", 300_000);
+    await tick();
+    await handle.leave(false);
+    expect(s.players[0]!.stopped).toBe(true);
+    s.finishClip();
+    await playing;
+    // Left: no voice state is sent on a destroyed connection.
+    expect(s.connection.mutes).toEqual([false]);
+    expect(await handle.play("/assets/b.wav", 300_000)).toBe(false);
+    expect(s.players).toHaveLength(1);
   });
 });
 

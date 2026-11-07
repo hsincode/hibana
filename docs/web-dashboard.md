@@ -17,6 +17,7 @@ flowchart LR
       context["/g/:id/context<br>コンテキスト"]
       skills["/g/:id/skills<br>スキル"]
       gart["/g/:id/artifacts<br>成果物"]
+      sched["/g/:id/schedules<br>定時アクション"]
     end
     subgraph all["全体"]
       servers["/<br>サーバー一覧"]
@@ -42,6 +43,7 @@ flowchart LR
 | `/g/:id/context`   | コンテキスト   | サーバーコンテキスト、persona override                                                                                                                          | 同上                                                                                                                                                                  |
 | `/g/:id/skills`    | スキル         | 一覧、作成、他サーバーからのインポート、有効・無効、削除、ダウンロード                                                                                          | 同上                                                                                                                                                                  |
 | `/g/:id/artifacts` | 成果物         | このサーバーの公開サイトと会議の録音（#138）、延命・永久化・解除（録音はできない）                                                                              | 同上                                                                                                                                                                  |
+| `/g/:id/schedules` | 定時アクション | 毎日の時刻に投稿と、通話中なら音声の再生（#163、[定時アクション](schedules.md)）。一覧ごと「保存」で送る                                                        | 同上。変えられるのは Discord の「サーバー管理」か「管理者」権限を持つ人、オーナー、Administrator・Moderator だけ（#163）                                              |
 | `/me`              | マイ設定       | 「あなたの上書き」、モデル・サブエージェント・Jev の上書き、ユーザーコンテキスト                                                                                | ログイン済み                                                                                                                                                          |
 | `/artifacts`       | すべての成果物 | 管理できるサーバー全部の公開サイトと会議の録音                                                                                                                  | ログイン済み                                                                                                                                                          |
 | `/users`           | ユーザー       | ロールの変更                                                                                                                                                    | `can_manage_users`                                                                                                                                                    |

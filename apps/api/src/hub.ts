@@ -27,6 +27,11 @@ export type CachedSnapshot = {
    * Dashboard is the writer (`budget_fallback` meta); PUT must not replace this.
    */
   budget_fallback: import("@hibana/shared/budget").BudgetFallback;
+  /**
+   * Scheduled actions per server (定時アクション). Dashboard is the writer
+   * (`guild_schedules`); PUT /internal/snapshot must not replace this.
+   */
+  schedules: Record<string, import("@hibana/shared/schedules").Schedule[]>;
   /** Dashboard pin/unpin/month-extend waiting for the bot. */
   artifact_commands: {
     id: number;

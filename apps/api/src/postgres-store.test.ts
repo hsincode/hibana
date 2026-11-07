@@ -180,6 +180,7 @@ const TABLES = [
   "logs",
   "usage_daily",
   "site_history",
+  "guild_schedules",
 ];
 
 function logEntry(over: Partial<LogEntry>): LogEntry {
@@ -255,6 +256,33 @@ describe.skipIf(!local)("PostgresStore against Postgres", () => {
     expect(await store.getMeta("rls_probe")).toBe("secret");
     await admin.unsafe(`REVOKE ALL ON meta FROM hibana_anon_probe`);
     await admin.unsafe(`DROP ROLE hibana_anon_probe`);
+  });
+
+  test("scheduled actions are kept per server, replaced whole and bump the version", async () => {
+    const schedule = {
+      id: "a1",
+      name: "2時",
+      enabled: true,
+      time: "02:00",
+      time_zone: "Asia/Tokyo",
+      actions: [{ type: "voice_clip" as const, audio: "ema.wav" }],
+    };
+    const before = await store.version();
+    await store.putSchedules("g-sched", [schedule]);
+    expect(await store.version()).toBe(before + 1);
+    expect(await store.getSchedules("g-sched")).toEqual([schedule]);
+    expect((await store.allSchedules())["g-sched"]).toEqual([schedule]);
+    // A row the schema no longer accepts is left out, not served. (`::text`
+    // first: this client prepares statements and would send the JSON as a
+    // JSON string.)
+    await admin`UPDATE guild_schedules SET schedules = ${JSON.stringify([
+      schedule,
+      { ...schedule, id: "b", time: "25:00" },
+    ])}::text::jsonb WHERE guild_id = 'g-sched'`;
+    expect(await store.getSchedules("g-sched")).toEqual([schedule]);
+    await store.putSchedules("g-sched", []);
+    expect(await store.getSchedules("g-sched")).toEqual([]);
+    expect((await store.allSchedules())["g-sched"]).toBeUndefined();
   });
 
   test("meta, compareMeta and the version counter", async () => {

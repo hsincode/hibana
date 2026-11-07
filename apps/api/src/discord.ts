@@ -11,7 +11,82 @@ export type DiscordGuild = {
   id: string;
   name: string;
   icon: string | null;
+  /** Only on the user's own list: whether they own the server. */
+  owner?: boolean;
+  /** Only on the user's own list: their permissions there, as a decimal string. */
+  permissions?: string;
 };
+
+const ADMINISTRATOR = 0x8n;
+const MANAGE_GUILD = 0x20n;
+
+/** Whether an entry of the user's guild list lets them manage that server. */
+export function canManageGuild(guild: DiscordGuild): boolean {
+  if (guild.owner) return true;
+  try {
+    const bits = BigInt(guild.permissions ?? "0");
+    return (bits & (ADMINISTRATOR | MANAGE_GUILD)) !== 0n;
+  } catch {
+    return false;
+  }
+}
+
+export type DiscordChannel = {
+  id: string;
+  name: string;
+  /** The category it sits in, by name; null outside one. */
+  category: string | null;
+};
+
+const TEXT_CHANNEL = 0;
+const ANNOUNCEMENT_CHANNEL = 5;
+const CATEGORY = 4;
+const channelsCache = new Map<string, CacheEntry<DiscordChannel[]>>();
+
+/** A server's text and announcement channels, in Discord's order. */
+export async function fetchGuildChannels(
+  env: WebEnv,
+  guildId: string,
+): Promise<DiscordChannel[]> {
+  const now = Date.now();
+  const hit = channelsCache.get(guildId);
+  if (hit && now - hit.at < TTL_MS) return hit.value;
+  const res = await fetch(
+    `https://discord.com/api/guilds/${encodeURIComponent(guildId)}/channels`,
+    { headers: { Authorization: `Bot ${env.discordToken}` } },
+  );
+  if (!res.ok) throw new Error(`discord guild channels failed (${res.status})`);
+  const raw = (await res.json()) as {
+    id: string;
+    name: string;
+    type: number;
+    position: number;
+    parent_id?: string | null;
+  }[];
+  const categories = new Map(
+    raw.filter((c) => c.type === CATEGORY).map((c) => [c.id, c]),
+  );
+  const rank = (c: (typeof raw)[number]) => {
+    const parent = c.parent_id ? categories.get(c.parent_id) : undefined;
+    // Channels outside a category come first, as in the Discord client.
+    return [parent ? parent.position + 1 : 0, c.position] as const;
+  };
+  const value = raw
+    .filter((c) => c.type === TEXT_CHANNEL || c.type === ANNOUNCEMENT_CHANNEL)
+    .sort((a, b) => {
+      const [pa, ca] = rank(a);
+      const [pb, cb] = rank(b);
+      return pa - pb || ca - cb;
+    })
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      category: (c.parent_id && categories.get(c.parent_id)?.name) || null,
+    }));
+  if (channelsCache.size > 500) channelsCache.clear();
+  channelsCache.set(guildId, { at: now, value });
+  return value;
+}
 
 type CacheEntry<T> = { at: number; value: T };
 const botGuildsCache: { current: CacheEntry<DiscordGuild[]> | null } = {

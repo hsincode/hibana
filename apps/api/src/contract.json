@@ -15,6 +15,7 @@
     "GET /api/guilds/:id/artifacts",
     "GET /api/guilds/:id/channels",
     "GET /api/guilds/:id/context",
+    "GET /api/guilds/:id/schedules",
     "GET /api/guilds/:id/settings",
     "GET /api/guilds/:id/skills",
     "GET /api/logs",
@@ -56,6 +57,8 @@
     "POST /internal/skills/ack",
     "POST /internal/skills/chunk",
     "PUT /api/budget-fallback",
+    "PUT /api/guilds/:id/schedules",
+    "PUT /internal/schedule-assets",
     "PUT /internal/snapshot"
   ],
   "guildPatchKeys": [
@@ -113,6 +116,7 @@
     "chatgpt_available",
     "guilds",
     "premium_presets",
+    "schedules",
     "skill_commands",
     "unpublished_presets",
     "user_contexts",

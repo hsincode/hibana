@@ -38,12 +38,20 @@ import {
 } from "./audit";
 import {
   authorizeUrl,
+  canManageGuild,
   exchangeCode,
   fetchBotGuilds,
+  fetchGuildChannels,
   fetchMe,
   fetchUserGuilds,
   intersectGuilds,
+  type DiscordChannel,
 } from "./discord";
+import {
+  scheduleAssetsReportSchema,
+  schedulesSchema,
+  type ScheduleAsset,
+} from "@hibana/shared/schedules";
 import { cookieCrossOrigin, type WebEnv } from "./env";
 import { randomUrlSafe, s256Challenge } from "./pkce";
 import {
@@ -154,6 +162,7 @@ async function loadSnapshot(
   const skill_commands = (await store.listSkillCommands()).filter(
     (c) => c.result === null,
   );
+  const schedules = await store.allSchedules();
   const versionAfter = await store.version();
   const body: CachedSnapshot = {
     version: versionAfter,
@@ -167,6 +176,7 @@ async function loadSnapshot(
     budget_fallback,
     artifact_commands,
     skill_commands,
+    schedules,
     chatgpt_available: (await chatgpt?.available()) ?? false,
   };
   // Skip caching a torn read: a write between the loads and versionAfter
@@ -189,7 +199,31 @@ export type AppHooks = {
   listBotGuilds?: () => Promise<
     { id: string; name: string; icon: string | null }[]
   >;
+  /** Whether the user may manage the server (Discord's Manage Server or Administrator). */
+  guildManage?: (accessToken: string, guildId: string) => Promise<boolean>;
+  /** A server's text channels, in place of Discord's REST API. */
+  listChannels?: (guildId: string) => Promise<DiscordChannel[]>;
 };
+
+/** What the bot last reported of the asset files on its host. */
+type StoredScheduleAssets = {
+  at: number;
+  guilds: Record<string, ScheduleAsset[]>;
+};
+
+function parseScheduleAssets(raw: string | null): StoredScheduleAssets | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<StoredScheduleAssets>;
+    const parsed = scheduleAssetsReportSchema.safeParse({
+      guilds: value.guilds,
+    });
+    if (!parsed.success || typeof value.at !== "number") return null;
+    return { at: value.at, guilds: parsed.data.guilds };
+  } catch {
+    return null;
+  }
+}
 
 export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
   const chatgpt = new ChatgptAccounts(
@@ -760,6 +794,98 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           return { settings: next, version: await store.version() };
         },
       )
+      .get("/api/guilds/:id/schedules", async ({ cookie, set, params }) => {
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const access = await scheduleAccess(
+          env,
+          hooks,
+          s.access_token,
+          params.id,
+          s.role,
+        );
+        if (!access.open) {
+          set.status = 404;
+          return { error: "guild not found" };
+        }
+        const assets = parseScheduleAssets(
+          await store.getMeta("schedule_assets"),
+        );
+        return {
+          schedules: await store.getSchedules(params.id),
+          assets: assets?.guilds[params.id] ?? [],
+          assets_reported_at: assets?.at ?? null,
+          can_edit: access.manage,
+        };
+      })
+      .put(
+        "/api/guilds/:id/schedules",
+        async ({ cookie, set, params, body }) => {
+          const s = await requireSession(cookieSid(cookie as never));
+          if (!s) {
+            set.status = 401;
+            return { error: "unauthorized" };
+          }
+          const access = await scheduleAccess(
+            env,
+            hooks,
+            s.access_token,
+            params.id,
+            s.role,
+          );
+          if (!access.open) {
+            set.status = 404;
+            return { error: "guild not found" };
+          }
+          // Scheduled actions post to channels with nobody watching, so they
+          // take more than being a member: Discord's Manage Server (#163).
+          if (!access.manage) {
+            set.status = 403;
+            return { error: "Manage Server permission required" };
+          }
+          const parsed = schedulesSchema.safeParse(
+            body && typeof body === "object"
+              ? (body as { schedules?: unknown }).schedules
+              : undefined,
+          );
+          if (!parsed.success) {
+            set.status = 400;
+            return {
+              error: parsed.error.issues
+                .map((i) => `${i.path.join(".")}: ${i.message}`)
+                .join("; "),
+            };
+          }
+          await store.putSchedules(params.id, parsed.data);
+          await publish();
+          return {
+            schedules: await store.getSchedules(params.id),
+            version: await store.version(),
+          };
+        },
+      )
+      .put("/internal/schedule-assets", async ({ request, set, body }) => {
+        if (
+          !requireInternal(request.headers.get("authorization") ?? undefined)
+        ) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const parsed = scheduleAssetsReportSchema.safeParse(body);
+        if (!parsed.success) {
+          set.status = 400;
+          return { error: "invalid asset report" };
+        }
+        // Read by the dashboard only, so the snapshot is not bumped.
+        await store.setMeta(
+          "schedule_assets",
+          JSON.stringify({ at: now(), guilds: parsed.data.guilds }),
+        );
+        return { ok: true };
+      })
       .get("/internal/snapshot", async ({ request, set }) => {
         if (
           !requireInternal(request.headers.get("authorization") ?? undefined)
@@ -1638,7 +1764,26 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
       .post("/api/guilds/:id/clear", unavailable)
       .post("/api/guilds/:id/retry", unavailable)
       .get("/api/guilds/:id/context", unavailable)
-      .get("/api/guilds/:id/channels", unavailable)
+      .get("/api/guilds/:id/channels", async ({ cookie, set, params }) => {
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        if (!(await guildOk(env, hooks, s.access_token, params.id, s.role))) {
+          set.status = 404;
+          return { error: "guild not found" };
+        }
+        try {
+          const channels = hooks.listChannels
+            ? await hooks.listChannels(params.id)
+            : await fetchGuildChannels(env, params.id);
+          return { channels };
+        } catch {
+          set.status = 502;
+          return { error: "could not list the server's channels" };
+        }
+      })
       .get("/api/vpn/status", unavailable)
       .get("/api/github/status", unavailable)
   );
@@ -1714,6 +1859,53 @@ async function guildOk(
     return intersectGuilds(userG, botG).some((g) => g.id === guildId);
   } catch {
     return false;
+  }
+}
+
+/**
+ * guildOk (`open`), and whether the user may also change the server's
+ * scheduled actions (`manage`): Discord's Manage Server or Administrator
+ * there, or its owner. One read of the user's guild list answers both, so a
+ * second call cannot be rate limited into a wrong "no" (#163).
+ */
+async function scheduleAccess(
+  env: WebEnv,
+  hooks: AppHooks,
+  accessToken: string,
+  guildId: string,
+  role: Role,
+): Promise<{ open: boolean; manage: boolean }> {
+  if (canViewAllGuilds(role)) {
+    try {
+      const bot = hooks.listBotGuilds
+        ? await hooks.listBotGuilds()
+        : await fetchBotGuilds(env);
+      if (bot.some((g) => g.id === guildId))
+        return { open: true, manage: true };
+    } catch {
+      /* fall through to the member check */
+    }
+  }
+  if (hooks.guildAccess) {
+    const open = await hooks.guildAccess(accessToken, guildId);
+    const manage =
+      open && hooks.guildManage
+        ? await hooks.guildManage(accessToken, guildId)
+        : false;
+    return { open, manage };
+  }
+  try {
+    const [userG, botG] = await Promise.all([
+      fetchUserGuilds(accessToken),
+      fetchBotGuilds(env),
+    ]);
+    const guild = intersectGuilds(userG, botG).find((g) => g.id === guildId);
+    return {
+      open: Boolean(guild),
+      manage: Boolean(guild && canManageGuild(guild)),
+    };
+  } catch {
+    return { open: false, manage: false };
   }
 }
 

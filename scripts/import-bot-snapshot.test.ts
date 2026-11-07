@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createApp } from "../apps/api/src/create-app";
 import { loadTestEnv } from "../apps/api/src/env";
 import { emptyGuild, emptyUserOverride } from "../apps/api/src/settings";
-import { MemoryStore } from "../apps/api/src/store";
+import { MemoryStore, patchAppSettings } from "../apps/api/src/store";
 import {
   SELECTABLE_PRESETS,
   catalogPublished,
@@ -72,6 +72,12 @@ async function source() {
     "budget_fallback",
     JSON.stringify({ preset: "anthropic-haiku-5-5", effort: "low" }),
   );
+  // The app settings (#161), away from their defaults.
+  await patchAppSettings(store, {
+    temperature: 1.3,
+    exa_mode: "off",
+    voice_mode: "s2s",
+  });
   return store;
 }
 

@@ -226,43 +226,46 @@ function dedupeTriggers(words: string[]): string[] {
   return out;
 }
 
+export const DEFAULT_MCP_URL = "https://ww.hsincode.com/api/mcp";
+
+const mcpUrlSchema = z
+  .string()
+  .trim()
+  .max(2048)
+  .url()
+  .refine(
+    (value) => {
+      try {
+        const url = new URL(value);
+        // The bot additionally resolves and pins public DNS addresses on connect.
+        return (
+          url.protocol === "https:" &&
+          !url.username &&
+          !url.password &&
+          !url.search &&
+          !url.hash &&
+          url.hostname !== "localhost" &&
+          !url.hostname.endsWith(".localhost") &&
+          !url.hostname.endsWith(".local") &&
+          !url.hostname.endsWith(".internal") &&
+          !url.hostname.startsWith("[") &&
+          !/^\d+(\.\d+){3}$/.test(url.hostname)
+        );
+      } catch {
+        return false;
+      }
+    },
+    {
+      message:
+        "MCP URL must be public HTTPS without credentials, query or fragment",
+    },
+  );
+
 /** Partial PATCH body. Legacy null writes are materialized as default values. */
 export const guildPatchSchema = z
   .object({
+    // Whether this server uses the remote MCP. Its URL is an app setting (#161).
     mcp_enabled: z.boolean().nullable(),
-    mcp_url: z
-      .string()
-      .trim()
-      .max(2048)
-      .url()
-      .refine(
-        (value) => {
-          try {
-            const url = new URL(value);
-            // The bot additionally resolves and pins public DNS addresses on connect.
-            return (
-              url.protocol === "https:" &&
-              !url.username &&
-              !url.password &&
-              !url.search &&
-              !url.hash &&
-              url.hostname !== "localhost" &&
-              !url.hostname.endsWith(".localhost") &&
-              !url.hostname.endsWith(".local") &&
-              !url.hostname.endsWith(".internal") &&
-              !url.hostname.startsWith("[") &&
-              !/^\d+(\.\d+){3}$/.test(url.hostname)
-            );
-          } catch {
-            return false;
-          }
-        },
-        {
-          message:
-            "MCP URL must be public HTTPS without credentials, query or fragment",
-        },
-      )
-      .nullable(),
     preset: z.string().refine((s) => s === "reset" || isPresetId(s), {
       message: "unknown preset",
     }),
@@ -288,17 +291,9 @@ export const guildPatchSchema = z
     thread_only: z.boolean(),
     // true disables Discord URL previews.
     suppress_embeds: z.boolean().nullable(),
-    voice_mode: z.enum(["stt", "s2s"]),
-    filler_removal: z.boolean(),
     // A whole value, so the dashboard's two pickers never leave half of one.
     // null returns to DEFAULT_TEXT_MODEL.
     text_model: textModelSchema.nullable(),
-    temperature: z.number().min(0).max(2).nullable(),
-    exa_mode: exaSchema.nullable(),
-    thread_history_max_age_secs: z.number().int().min(0).nullable(),
-    // null returns to the default (`cache`, 30,000 tokens).
-    thread_compaction: threadCompactionSchema.nullable(),
-    thread_compaction_tokens: threadCompactionTokensSchema.nullable(),
     extra_triggers: z
       .array(triggerWordSchema)
       .max(TRIGGER_EXTRA_MAX)
@@ -313,15 +308,18 @@ export const guildPatchSchema = z
 
 export type GuildPatch = z.infer<typeof guildPatchSchema>;
 
+/**
+ * A server's settings. The app settings (#161: temperature, exa, the thread
+ * history, the voice settings and the MCP URL) are not here: they are one
+ * for every server (`AppSettings`). A row stored before they moved still
+ * holds them in JSONB; `normalizeGuild` leaves them out.
+ */
 export type GuildRow = {
   mcp_enabled: boolean | null;
-  mcp_url: string | null;
   server_tools: boolean;
   bot_disabled: boolean;
   thread_only: boolean;
   suppress_embeds: boolean | null;
-  voice_mode: "stt" | "s2s";
-  filler_removal: boolean;
   text_model: TextModel;
   selection: { provider: string; model: string; effort?: string | null } | null;
   effort: string | null;
@@ -337,22 +335,14 @@ export type GuildRow = {
   extra_triggers: string[] | null;
   disabled_triggers: string[];
   context: { text: string; persona_override: boolean } | null;
-  temperature: number | null;
-  exa_mode: string | null;
-  thread_history_max_age_secs: number | null;
-  thread_compaction: ThreadCompactionMode;
-  thread_compaction_tokens: number;
 };
 
 export const emptyGuild = (): GuildRow => ({
   mcp_enabled: true,
-  mcp_url: "https://ww.hsincode.com/api/mcp",
   server_tools: true,
   bot_disabled: false,
   thread_only: false,
   suppress_embeds: false,
-  voice_mode: "stt",
-  filler_removal: true,
   text_model: { ...DEFAULT_TEXT_MODEL },
   selection: { provider: "codex_plus", model: "gpt-6-luna", effort: "max" },
   effort: "max",
@@ -368,17 +358,25 @@ export const emptyGuild = (): GuildRow => ({
   extra_triggers: [],
   disabled_triggers: [],
   context: { text: "", persona_override: false },
-  temperature: 0.7,
-  exa_mode: "auto",
-  thread_history_max_age_secs: 3600,
-  thread_compaction: "cache",
-  thread_compaction_tokens: DEFAULT_THREAD_COMPACTION_TOKENS,
 });
 
 export function modelEffort(model: string): string {
   if (model === "ox-alpha-free") return "default";
   if (model.includes("fable")) return "medium";
   return /gpt-|deepseek/.test(model) ? "max" : "high";
+}
+
+/** Reads a boolean environment variable; unset (or empty) is `fallback`. */
+function envFlag(
+  env: Record<string, string | undefined>,
+  name: string,
+  fallback: boolean,
+): boolean {
+  const value = env[name]?.trim().toLowerCase();
+  if (!value) return fallback;
+  if (["1", "true", "yes", "on"].includes(value)) return true;
+  if (["0", "false", "no", "off"].includes(value)) return false;
+  throw new Error(`${name} must be a boolean`);
 }
 
 /** Environment values seed new rows once; saved rows never consult them again. */
@@ -411,13 +409,8 @@ export function settingsDefaults(
     effort: effort === "ultra" ? "max" : effort,
   };
   row.effort = row.selection.effort!;
-  const flag = (name: string, fallback: boolean) => {
-    const value = env[name]?.trim().toLowerCase();
-    if (!value) return fallback;
-    if (["1", "true", "yes", "on"].includes(value)) return true;
-    if (["0", "false", "no", "off"].includes(value)) return false;
-    throw new Error(`${name} must be a boolean`);
-  };
+  const flag = (name: string, fallback: boolean) =>
+    envFlag(env, name, fallback);
   row.subagent_enabled = flag("SUBAGENT_ENABLED", true);
   row.ultra_mode = flag("ULTRA_MODE", effort === "ultra");
   row.multi_agent = flag("MULTI_AGENT", false);
@@ -427,33 +420,166 @@ export function settingsDefaults(
   row.jev_enabled = flag("JEV_ENABLED", true);
   row.jev_task_enabled = flag("JEV_TASK_ENABLED", false);
   row.suppress_embeds = flag("DISCORD_SUPPRESS_EMBEDS", false);
-  row.exa_mode =
-    env.EXA_ENABLED === undefined
-      ? "auto"
-      : flag("EXA_ENABLED", true)
-        ? "on"
-        : "off";
-  row.temperature = env.LLM_TEMPERATURE?.trim()
-    ? Number(env.LLM_TEMPERATURE)
-    : 0.7;
-  row.thread_history_max_age_secs = env.THREAD_HISTORY_MAX_AGE_SECS?.trim()
-    ? Number(env.THREAD_HISTORY_MAX_AGE_SECS)
-    : 3600;
-  row.thread_compaction_tokens = env.THREAD_COMPACTION_TOKENS?.trim()
-    ? Number(env.THREAD_COMPACTION_TOKENS)
-    : DEFAULT_THREAD_COMPACTION_TOKENS;
   row.extra_triggers = (env.EXTRA_TRIGGERS || "")
     .split(",")
     .map((x) => x.trim())
     .filter(Boolean);
   // Reuse public validation without including credentials in settings or errors.
-  guildPatchSchema.parse({
-    temperature: row.temperature,
-    thread_history_max_age_secs: row.thread_history_max_age_secs,
-    thread_compaction_tokens: row.thread_compaction_tokens,
-    effort: row.effort,
-  });
+  guildPatchSchema.parse({ effort: row.effort });
   return row;
+}
+
+/* ------------------------------------------------------------
+   App settings (#161): one value for every server and every DM. Moderators
+   and Administrators change them on the dashboard's 全体の設定 page and with
+   the Discord commands of the same settings. Stored in `meta.app_settings`.
+   ------------------------------------------------------------ */
+
+export const APP_SETTING_KEYS = [
+  "temperature",
+  "exa_mode",
+  "thread_history_max_age_secs",
+  "thread_compaction",
+  "thread_compaction_tokens",
+  "voice_mode",
+  "filler_removal",
+  "mcp_url",
+] as const;
+export type AppSettingKey = (typeof APP_SETTING_KEYS)[number];
+
+export type AppSettings = {
+  temperature: number;
+  exa_mode: (typeof EXA_MODES)[number];
+  thread_history_max_age_secs: number;
+  thread_compaction: ThreadCompactionMode;
+  thread_compaction_tokens: number;
+  voice_mode: "stt" | "s2s";
+  filler_removal: boolean;
+  mcp_url: string;
+};
+
+/** null in a PATCH returns the field to its default. */
+export const appSettingsPatchSchema = z
+  .object({
+    temperature: z.number().min(0).max(2).nullable(),
+    exa_mode: exaSchema.nullable(),
+    thread_history_max_age_secs: z.number().int().min(0).nullable(),
+    // null returns to the default (`cache`, 30,000 tokens).
+    thread_compaction: threadCompactionSchema.nullable(),
+    thread_compaction_tokens: threadCompactionTokensSchema.nullable(),
+    voice_mode: z.enum(["stt", "s2s"]),
+    filler_removal: z.boolean(),
+    mcp_url: mcpUrlSchema.nullable(),
+  })
+  .partial()
+  .strict();
+export type AppSettingsPatch = z.infer<typeof appSettingsPatchSchema>;
+
+/** A whole value of each field, or undefined when `raw` is not one. */
+const appFieldSchemas = {
+  temperature: z.number().min(0).max(2),
+  exa_mode: exaSchema,
+  thread_history_max_age_secs: z.number().int().min(0),
+  thread_compaction: threadCompactionSchema,
+  thread_compaction_tokens: threadCompactionTokensSchema,
+  voice_mode: z.enum(["stt", "s2s"]),
+  filler_removal: z.boolean(),
+  mcp_url: mcpUrlSchema,
+} satisfies Record<AppSettingKey, z.ZodType>;
+
+/** The defaults without any environment: those of a server row before #161. */
+export const emptyAppSettings = (): AppSettings => ({
+  temperature: 0.7,
+  exa_mode: "auto",
+  thread_history_max_age_secs: 3600,
+  thread_compaction: "cache",
+  thread_compaction_tokens: DEFAULT_THREAD_COMPACTION_TOKENS,
+  voice_mode: "stt",
+  filler_removal: true,
+  mcp_url: DEFAULT_MCP_URL,
+});
+
+/**
+ * The defaults from the settings API's environment, which seeded new server
+ * rows before #161: what a field returns to when it is reset, and the first
+ * app settings when there are no servers.
+ */
+export function appSettingsDefaults(
+  env: Record<string, string | undefined>,
+): AppSettings {
+  const app = emptyAppSettings();
+  if (env.EXA_ENABLED !== undefined)
+    app.exa_mode = envFlag(env, "EXA_ENABLED", true) ? "on" : "off";
+  if (env.LLM_TEMPERATURE?.trim())
+    app.temperature = Number(env.LLM_TEMPERATURE);
+  if (env.THREAD_HISTORY_MAX_AGE_SECS?.trim())
+    app.thread_history_max_age_secs = Number(env.THREAD_HISTORY_MAX_AGE_SECS);
+  if (env.THREAD_COMPACTION_TOKENS?.trim())
+    app.thread_compaction_tokens = Number(env.THREAD_COMPACTION_TOKENS);
+  // Reuse public validation without including credentials in settings or errors.
+  appSettingsPatchSchema.parse({
+    temperature: app.temperature,
+    thread_history_max_age_secs: app.thread_history_max_age_secs,
+    thread_compaction_tokens: app.thread_compaction_tokens,
+  });
+  return app;
+}
+
+/** Each field that is not a valid value takes the default's. */
+export function normalizeAppSettings(
+  raw: unknown,
+  defaults: AppSettings,
+): AppSettings {
+  const src = (raw && typeof raw === "object" ? raw : {}) as Record<
+    string,
+    unknown
+  >;
+  const out = { ...defaults } as Record<AppSettingKey, unknown>;
+  for (const key of APP_SETTING_KEYS) {
+    const parsed = appFieldSchemas[key].safeParse(src[key]);
+    if (parsed.success) out[key] = parsed.data;
+  }
+  return out as AppSettings;
+}
+
+export function applyAppSettingsPatch(
+  current: AppSettings,
+  patch: AppSettingsPatch,
+  defaults: AppSettings,
+): AppSettings {
+  const next: Record<string, unknown> = { ...current };
+  for (const key of APP_SETTING_KEYS) {
+    const value = patch[key];
+    if (value === undefined) continue;
+    next[key] = value === null ? defaults[key] : value;
+  }
+  return normalizeAppSettings(next, defaults);
+}
+
+/**
+ * The first app settings, made once from the server rows as they were stored
+ * before #161 (raw JSONB, which still holds these fields): each field takes
+ * the value most servers had, and a tie takes the default. With no servers,
+ * or rows that hold none of them, it is the default.
+ */
+export function initialAppSettings(
+  rows: unknown[],
+  defaults: AppSettings,
+): AppSettings {
+  const values = rows.map((row) => normalizeAppSettings(row, defaults));
+  const out = { ...defaults } as Record<AppSettingKey, unknown>;
+  for (const key of APP_SETTING_KEYS) {
+    const counts = new Map<string, number>();
+    for (const row of values) {
+      const k = JSON.stringify(row[key]);
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    const ranked = [...counts].sort((a, b) => b[1] - a[1]);
+    const [first, second] = ranked;
+    if (first && (!second || second[1] < first[1]))
+      out[key] = JSON.parse(first[0]);
+  }
+  return out as AppSettings;
 }
 
 export const SUBAGENT_MODES = ["off", "on", "ultra", "multi"] as const;
@@ -565,15 +691,11 @@ export function applyPatch(
   const clean = normalizeGuild(row, defaults);
   const next = { ...clean, disabled_triggers: [...clean.disabled_triggers] };
   if (patch.mcp_enabled !== undefined) next.mcp_enabled = patch.mcp_enabled;
-  if (patch.mcp_url !== undefined) next.mcp_url = patch.mcp_url;
   if (patch.server_tools !== undefined) next.server_tools = patch.server_tools;
   if (patch.bot_disabled !== undefined) next.bot_disabled = patch.bot_disabled;
   if (patch.thread_only !== undefined) next.thread_only = patch.thread_only;
   if (patch.suppress_embeds !== undefined)
     next.suppress_embeds = patch.suppress_embeds;
-  if (patch.voice_mode !== undefined) next.voice_mode = patch.voice_mode;
-  if (patch.filler_removal !== undefined)
-    next.filler_removal = patch.filler_removal;
   if (patch.text_model !== undefined)
     next.text_model = patch.text_model ?? { ...DEFAULT_TEXT_MODEL };
   if (patch.jev_enabled !== undefined) next.jev_enabled = patch.jev_enabled;
@@ -583,17 +705,6 @@ export function applyPatch(
     next.subagent_model = normalizeSubagentModel(patch.subagent_model);
   if (patch.subagent_effort !== undefined)
     next.subagent_effort = normalizeSubagentEffort(patch.subagent_effort);
-  if (patch.temperature !== undefined) next.temperature = patch.temperature;
-  if (patch.exa_mode !== undefined) next.exa_mode = patch.exa_mode;
-  if (patch.thread_history_max_age_secs !== undefined) {
-    next.thread_history_max_age_secs = patch.thread_history_max_age_secs;
-  }
-  if (patch.thread_compaction !== undefined)
-    next.thread_compaction =
-      patch.thread_compaction ?? defaults.thread_compaction;
-  if (patch.thread_compaction_tokens !== undefined)
-    next.thread_compaction_tokens =
-      patch.thread_compaction_tokens ?? defaults.thread_compaction_tokens;
   if (
     patch.extra_triggers !== undefined ||
     patch.disabled_triggers !== undefined
@@ -881,17 +992,6 @@ export function normalizeGuild(
     textModelSchema.safeParse(defaults.text_model).data ?? {
       ...DEFAULT_TEXT_MODEL,
     };
-  // A row from before #124, or one holding a value that is no longer valid.
-  row.thread_compaction =
-    threadCompactionSchema.safeParse(raw?.thread_compaction).data ??
-    threadCompactionSchema.safeParse(defaults.thread_compaction).data ??
-    "cache";
-  row.thread_compaction_tokens =
-    threadCompactionTokensSchema.safeParse(raw?.thread_compaction_tokens)
-      .data ??
-    threadCompactionTokensSchema.safeParse(defaults.thread_compaction_tokens)
-      .data ??
-    DEFAULT_THREAD_COMPACTION_TOKENS;
   return normalizeMode(row);
 }
 

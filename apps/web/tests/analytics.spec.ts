@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { emptyAppSettings } from "@hibana/shared/settings";
 
 // The page only renders what GET /api/analytics/cost returns; the arithmetic is
 // tested with the API (apps/api/src/analytics.test.ts). These fixtures follow
@@ -172,6 +173,15 @@ async function mockApi(
       todays.count++;
       return route.fulfill(today());
     }
+    // 全体の設定 (#161), where the budget fallback is now.
+    if (url.pathname === "/api/app-settings")
+      return route.fulfill({
+        json: {
+          settings: emptyAppSettings(),
+          defaults: emptyAppSettings(),
+          can_edit: true,
+        },
+      });
     if (url.pathname === "/api/budget-fallback") {
       if (route.request().method() === "PUT") {
         const { threshold_usd, ...fallback } = route.request().postDataJSON();
@@ -488,7 +498,7 @@ test("analytics explains a missing key and shows an upstream error", async ({
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
-test.describe("budget fallback (#89)", () => {
+test.describe("budget fallback (#89), on 全体の設定 since #161", () => {
   const panel = (page: Page) => page.locator(".budget-panel");
 
   for (const width of [1440, 390]) {
@@ -497,7 +507,7 @@ test.describe("budget fallback (#89)", () => {
     }) => {
       const { budgetWrites } = await mockApi(page, byMonth);
       await page.setViewportSize({ width, height: 900 });
-      await page.goto("/analytics");
+      await page.goto("/settings");
       await expect(
         panel(page).getByRole("heading", { name: "予算が少ないときのモデル" }),
       ).toBeVisible();
@@ -590,7 +600,7 @@ test.describe("budget fallback (#89)", () => {
         }),
       }),
     });
-    await page.goto("/analytics");
+    await page.goto("/settings");
     await expect(panel(page)).toContainText("閾値を下回っています");
     await expect(panel(page)).toContainText("今日の推計を含めた残り $7.50");
     await expect(panel(page)).toContainText(
@@ -601,7 +611,7 @@ test.describe("budget fallback (#89)", () => {
     );
     await expect(panel(page)).toContainText("閾値$10.00");
     await expect(panel(page)).toContainText(
-      "変更できるのは Administrator です",
+      "変更できるのは Moderator と Administrator です",
     );
     await expect(panel(page).getByRole("combobox")).toHaveCount(0);
     await expect(panel(page).getByRole("spinbutton")).toHaveCount(0);
@@ -614,7 +624,7 @@ test.describe("budget fallback (#89)", () => {
     page,
   }) => {
     const { budgetWrites } = await mockApi(page, byMonth);
-    await page.goto("/analytics");
+    await page.goto("/settings");
     const threshold = panel(page).getByRole("spinbutton", {
       name: "切り替える閾値（USD）",
     });
@@ -638,6 +648,23 @@ test.describe("budget fallback (#89)", () => {
       ]);
   });
 
+  test("the 利用料 page no longer holds it and points to 全体の設定", async ({
+    page,
+  }) => {
+    await mockApi(page, byMonth);
+    await page.goto("/analytics");
+    await expect(page.locator(".cost-table tbody tr")).toHaveCount(8);
+    await expect(panel(page)).toHaveCount(0);
+    await page
+      .locator("main")
+      .getByRole("link", { name: "全体の設定" })
+      .click();
+    await expect(page).toHaveURL(/\/settings$/);
+    await expect(
+      panel(page).getByRole("heading", { name: "予算が少ないときのモデル" }),
+    ).toBeVisible();
+  });
+
   test("says when it cannot tell, and why", async ({ page }) => {
     await mockApi(page, byMonth, {
       budget: () => ({
@@ -649,7 +676,7 @@ test.describe("budget fallback (#89)", () => {
         }),
       }),
     });
-    await page.goto("/analytics");
+    await page.goto("/settings");
     await expect(panel(page)).toContainText("判定できません");
     await expect(panel(page)).toContainText("HTTP 500");
     await expect(panel(page)).toContainText("最後に読めた判定のまま");

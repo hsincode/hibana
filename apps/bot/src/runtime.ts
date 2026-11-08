@@ -10,8 +10,13 @@ import {
   WORKSPACE_PROVIDER,
 } from "@hibana/shared/catalog";
 import {
+  emptyAppSettings,
+  appSettingsPatchSchema,
+  applyAppSettingsPatch,
   applyPatch,
   applyUserOverridePatch,
+  initialAppSettings,
+  normalizeAppSettings,
   effectiveSubagentMode,
   normalizeGuild,
   normalizeUserOverride,
@@ -22,6 +27,7 @@ import {
   DEFAULT_TEXT_MODEL,
   textModelSelection,
   userOverridePatchSchema,
+  type AppSettings,
   type GuildRow,
   type GuildPatch,
   type UserOverrideRow,
@@ -52,6 +58,10 @@ export type Snapshot = {
   /** The model the settings are switched to once the budget is low (#89,
    *  #121). The dashboard writes it; absent before the API served one. */
   budget_fallback?: BudgetFallback;
+  /** The settings that are one for every server and DM (#161). Absent from
+   *  an API that predates them, and in a state file without the API until
+   *  one is changed: `app()` then takes what most servers have. */
+  app_settings?: AppSettings;
   /** Written by the bot, not the API: the last answer of `/internal/budget`.
    *  A snapshot from the API never carries it, so `replace` keeps it, and it
    *  is in the state file, so a restart keeps the last decision (#89). */
@@ -111,7 +121,15 @@ export class Runtime {
       // Restoring is not a change: stored conversations were written under
       // these settings, and reporting every guild here would clear them all
       // on each start (#59).
-      this.replace(await readJson(this.config.statePath, this.snapshot), false);
+      const state = await readJson(this.config.statePath, this.snapshot);
+      // A state file from before #161 has no app settings, and its server
+      // rows still hold them: start them from what most servers have, as the
+      // settings API does, before the rows are read without them.
+      state.app_settings ??= initialAppSettings(
+        Object.values(state.guilds ?? {}),
+        this.defaultAppSettings(),
+      );
+      this.replace(state, false);
       if (!this.config.webApiUrl) this.withholdWorkspacePresets();
       await this.persist();
     }
@@ -184,11 +202,31 @@ export class Runtime {
         this.onChange?.(id);
     }
   }
+  /** A server's settings, or a DM's without an id. The settings that are
+   *  one for every server and DM (#161) are `app()`. */
   guild(id?: string) {
     return normalizeGuild(
       id ? this.snapshot.guilds[id] : null,
       normalizeGuild(this.snapshot.defaults, this.defaultSettings()),
     );
+  }
+  /** The app settings (#161): temperature, exa, the thread history and its
+   *  summary, the voice settings and the MCP URL, for every server and DM. */
+  app(): AppSettings {
+    return normalizeAppSettings(
+      this.snapshot.app_settings,
+      this.defaultAppSettings(),
+    );
+  }
+  /** The bot's own environment, for a field the settings API has not sent. */
+  private defaultAppSettings(): AppSettings {
+    return {
+      ...emptyAppSettings(),
+      temperature: this.config.temperature,
+      exa_mode: this.config.exaMode as AppSettings["exa_mode"],
+      thread_history_max_age_secs: this.config.threadHistoryAge,
+      thread_compaction_tokens: this.config.compactionTokens,
+    };
   }
   async initializeGuild(id: string) {
     return this.serial.run(async () => {
@@ -216,11 +254,7 @@ export class Runtime {
       jev_enabled: this.config.jevEnabled,
       jev_task_enabled: this.config.jevTaskEnabled,
       suppress_embeds: this.config.suppressEmbeds,
-      temperature: this.config.temperature,
-      exa_mode: this.config.exaMode,
       extra_triggers: [...this.config.extraTriggers],
-      thread_history_max_age_secs: this.config.threadHistoryAge,
-      thread_compaction_tokens: this.config.compactionTokens,
     };
   }
   role(userId: string) {
@@ -422,6 +456,8 @@ export class Runtime {
       effectiveSubagentMode(stored, selection) === "ultra";
     return {
       ...guild,
+      // One value for every server and DM (#161).
+      ...this.app(),
       selection: selection as Selection,
       service_tier: pick(user.service_tier, guild.service_tier!),
       subagent_enabled: subagentEnabled,
@@ -441,8 +477,6 @@ export class Runtime {
       jev_task_enabled: pick(user.jev_task_enabled, guild.jev_task_enabled!),
       context,
       suppress_embeds: guild.suppress_embeds!,
-      temperature: guild.temperature!,
-      exa_mode: guild.exa_mode!,
       // Present for Workspace only, so what `/info` and `get_bot_settings`
       // print for every other provider is what it was.
       ...(workspace ? { workspace_ultra: workspaceUltra } : {}),
@@ -488,6 +522,31 @@ export class Runtime {
         await this.persist();
       }
       return this.guild(guildId);
+    });
+  }
+  /** Changes the app settings (#161). Moderators and Administrators only, as
+   *  on the dashboard; the settings API trusts the bot to have checked. */
+  async patchApp(raw: unknown, userId: string) {
+    const patch = appSettingsPatchSchema.parse(raw);
+    if (!["administrator", "moderator"].includes(this.role(userId)))
+      throw new Error(
+        "全体の設定を変えられるのは Moderator と Administrator だけです。",
+      );
+    return this.serial.run(async () => {
+      if (this.config.webApiUrl) {
+        await this.remote("/internal/app-settings", "PATCH", patch);
+        this.replace(
+          (await this.remote("/internal/snapshot", "GET")) as Snapshot,
+        );
+      } else {
+        this.snapshot.app_settings = applyAppSettingsPatch(
+          this.app(),
+          patch,
+          this.defaultAppSettings(),
+        );
+        await this.persist();
+      }
+      return this.app();
     });
   }
   async setContext(

@@ -177,10 +177,7 @@ export class Voice {
     );
     const stream = streamSpeech({
       opus,
-      query: conversationQuery(
-        this.runtime.guild(guildId).filler_removal,
-        words,
-      ),
+      query: conversationQuery(this.runtime.app().filler_removal, words),
       key: this.runtime.config.xaiKey,
       sockets: session.websockets,
       maxMs: 120000,
@@ -207,7 +204,7 @@ export class Voice {
           void session.queue
             .run(async () => {
               session.abort.signal.throwIfAborted();
-              if (this.runtime.guild(guildId).voice_mode === "s2s")
+              if (this.runtime.app().voice_mode === "s2s")
                 await this.speak(session, text, ctx);
               else await this.respond(text, ctx);
             })

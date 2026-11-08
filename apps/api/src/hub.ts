@@ -32,6 +32,9 @@ export type CachedSnapshot = {
    * (`guild_schedules`); PUT /internal/snapshot must not replace this.
    */
   schedules: Record<string, import("@hibana/shared/schedules").Schedule[]>;
+  /** The settings that are one for every server and DM (#161). Dashboard and
+   *  the bot's commands are the writers (`app_settings` meta). */
+  app_settings: import("@hibana/shared/settings").AppSettings;
   /** Dashboard pin/unpin/month-extend waiting for the bot. */
   artifact_commands: {
     id: number;

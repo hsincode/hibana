@@ -17,6 +17,7 @@ import {
 } from "./catalog";
 import {
   canAssignRole,
+  canManageAppSettings,
   canManageBudget,
   canManageUsers,
   canModerate,
@@ -46,6 +47,7 @@ import {
   fetchUserGuilds,
   intersectGuilds,
   type DiscordChannel,
+  type DiscordGuild,
 } from "./discord";
 import {
   scheduleAssetsReportSchema,
@@ -65,6 +67,7 @@ import {
 import {
   applyPatch,
   applyUserOverridePatch,
+  appSettingsPatchSchema,
   emptyGuild,
   normalizeGuild,
   guildPatchSchema,
@@ -72,7 +75,10 @@ import {
   userOverridePatchSchema,
 } from "./settings";
 import {
+  appDefaults,
   isArtifactAction,
+  loadAppSettings,
+  patchAppSettings,
   type ArtifactAction,
   type ArtifactRow,
   type Store,
@@ -130,6 +136,7 @@ async function loadSnapshot(
 ): Promise<CachedSnapshot> {
   const cached = hub.get();
   if (cached && cached.version === knownVersion) return cached;
+  const app_settings = await loadAppSettings(store);
   const guilds = await store.allGuilds();
   const user_contexts = await store.allUserContexts();
   const user_overrides = await store.allUserOverrides();
@@ -174,6 +181,7 @@ async function loadSnapshot(
     unpublished_presets,
     premium_presets,
     budget_fallback,
+    app_settings,
     artifact_commands,
     skill_commands,
     schedules,
@@ -192,15 +200,14 @@ export type AppHooks = {
   /** Clock for the cost report: which UTC day is "today", and its cache age. */
   now?: () => number;
   guildAccess?: (accessToken: string, guildId: string) => Promise<boolean>;
-  listGuilds?: (
-    accessToken: string,
-  ) => Promise<{ id: string; name: string; icon: string | null }[]>;
+  /** With guildAccess: whether the user may also change the server's settings (#166). */
+  guildManage?: (accessToken: string, guildId: string) => Promise<boolean>;
+  /** The user's servers that the bot is in, with `owner` and `permissions` when known. */
+  listGuilds?: (accessToken: string) => Promise<DiscordGuild[]>;
   /** Every guild the **bot** is in — what admins/mods see instead of the intersection. */
   listBotGuilds?: () => Promise<
     { id: string; name: string; icon: string | null }[]
   >;
-  /** Whether the user may manage the server (Discord's Manage Server or Administrator). */
-  guildManage?: (accessToken: string, guildId: string) => Promise<boolean>;
   /** A server's text channels, in place of Discord's REST API. */
   listChannels?: (guildId: string) => Promise<DiscordChannel[]>;
 };
@@ -470,6 +477,7 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           can_view_all_guilds: canViewAllGuilds(s.role),
           can_view_analytics: canViewAnalytics(s.role),
           can_view_usage: canViewUsage(s.role),
+          can_manage_app_settings: canManageAppSettings(s.role),
         };
       })
       .get("/api/me/settings", async ({ cookie, set }) => {
@@ -715,6 +723,12 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
         // extra rows read as moderation scope, not as "you joined 200 servers".
         const all = canViewAllGuilds(s.role) ? await botGuilds() : mine;
         const mineIds = new Set(mine.map((g) => g.id));
+        // Which of them the user may change (#166): every one for staff, else
+        // their Discord permissions there. The all-artifacts page reads it.
+        const manageIds = new Set(
+          mine.filter((g) => canManageGuild(g)).map((g) => g.id),
+        );
+        const staff = canViewAllGuilds(s.role);
         const guilds = await Promise.all(
           all.map(async (g) => {
             const row = await store.getGuild(g.id);
@@ -728,6 +742,7 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
               provider: row.selection?.provider ?? null,
               bot_disabled: row.bot_disabled,
               member: mineIds.has(g.id),
+              can_manage: staff || manageIds.has(g.id),
             };
           }),
         );
@@ -739,11 +754,20 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           set.status = 401;
           return { error: "unauthorized" };
         }
-        if (!(await guildOk(env, hooks, s.access_token, params.id, s.role))) {
+        const access = await guildAccess(
+          env,
+          hooks,
+          s.access_token,
+          params.id,
+          s.role,
+        );
+        if (!access.open) {
           set.status = 404;
           return { error: "guild not found" };
         }
         return {
+          // Members may look; only those who manage the server may change it (#166).
+          can_edit: access.manage,
           settings: await store.getGuild(params.id),
           version: await store.version(),
         };
@@ -756,9 +780,20 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
             set.status = 401;
             return { error: "unauthorized" };
           }
-          if (!(await guildOk(env, hooks, s.access_token, params.id, s.role))) {
+          const access = await guildAccess(
+            env,
+            hooks,
+            s.access_token,
+            params.id,
+            s.role,
+          );
+          if (!access.open) {
             set.status = 404;
             return { error: "guild not found" };
+          }
+          if (!access.manage) {
+            set.status = 403;
+            return { error: MANAGE_REQUIRED };
           }
           const parsed = guildPatchSchema.safeParse(body);
           if (!parsed.success) {
@@ -766,6 +801,11 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
             return {
               error: parsed.error.issues.map((i) => i.message).join("; "),
             };
+          }
+          const killSwitch = refuseKillSwitchPatch(s.role, parsed.data);
+          if (killSwitch) {
+            set.status = 403;
+            return { error: killSwitch };
           }
           const gated = refuseRestrictedPatch(
             s.role,
@@ -791,7 +831,10 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           );
           await store.putGuild(params.id, next);
           await publish();
-          return { settings: next, version: await store.version() };
+          return {
+            settings: next,
+            version: await store.version(),
+          };
         },
       )
       .get("/api/guilds/:id/schedules", async ({ cookie, set, params }) => {
@@ -800,7 +843,7 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           set.status = 401;
           return { error: "unauthorized" };
         }
-        const access = await scheduleAccess(
+        const access = await guildAccess(
           env,
           hooks,
           s.access_token,
@@ -829,7 +872,7 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
             set.status = 401;
             return { error: "unauthorized" };
           }
-          const access = await scheduleAccess(
+          const access = await guildAccess(
             env,
             hooks,
             s.access_token,
@@ -840,11 +883,11 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
             set.status = 404;
             return { error: "guild not found" };
           }
-          // Scheduled actions post to channels with nobody watching, so they
-          // take more than being a member: Discord's Manage Server (#163).
+          // Like every server setting, only those who manage the server
+          // (#163, #166).
           if (!access.manage) {
             set.status = 403;
-            return { error: "Manage Server permission required" };
+            return { error: MANAGE_REQUIRED };
           }
           const parsed = schedulesSchema.safeParse(
             body && typeof body === "object"
@@ -1065,7 +1108,10 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
         );
         await store.putGuild(params.id, next);
         await publish();
-        return { settings: next, version: await store.version() };
+        return {
+          settings: next,
+          version: await store.version(),
+        };
       })
       .patch(
         "/internal/users/:id/settings",
@@ -1099,6 +1145,72 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           return { settings: next, version: await store.version() };
         },
       )
+      // The app settings (#161): one value for every server and DM. Everyone
+      // signed in may read them; Moderators and Administrators change them.
+      .get("/api/app-settings", async ({ cookie, set }) => {
+        set.headers["cache-control"] = "no-store";
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        return {
+          settings: await loadAppSettings(store),
+          // What a field returns to when it is reset (null in a PATCH).
+          defaults: appDefaults(store),
+          can_edit: canManageAppSettings(s.role),
+        };
+      })
+      .patch("/api/app-settings", async ({ cookie, set, body }) => {
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        if (!canManageAppSettings(s.role)) {
+          set.status = 403;
+          return { error: "forbidden" };
+        }
+        const parsed = appSettingsPatchSchema.safeParse(body);
+        if (!parsed.success) {
+          set.status = 400;
+          return {
+            error: parsed.error.issues.map((i) => i.message).join("; "),
+          };
+        }
+        const next = await patchAppSettings(store, parsed.data);
+        if (!next) {
+          set.status = 409;
+          return { error: "the app settings changed meanwhile; try again" };
+        }
+        await publish();
+        return { settings: next, version: await store.version() };
+      })
+      // The bot's Discord commands of the same settings. The bot checks that
+      // the member is a Moderator or an Administrator first, as it checks a
+      // preset's plan before a server PATCH.
+      .patch("/internal/app-settings", async ({ request, set, body }) => {
+        if (
+          !requireInternal(request.headers.get("authorization") ?? undefined)
+        ) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const parsed = appSettingsPatchSchema.safeParse(body);
+        if (!parsed.success) {
+          set.status = 400;
+          return {
+            error: parsed.error.issues.map((i) => i.message).join("; "),
+          };
+        }
+        const next = await patchAppSettings(store, parsed.data);
+        if (!next) {
+          set.status = 409;
+          return { error: "the app settings changed meanwhile; try again" };
+        }
+        await publish();
+        return { settings: next, version: await store.version() };
+      })
       .get("/api/blocked", async ({ cookie, set }) => {
         const s = await requireSession(cookieSid(cookie as never));
         if (!s) {
@@ -1267,8 +1379,8 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
       })
       // The model Anthropic API turns switch to while the month's budget is
       // nearly spent, the threshold that switches them, and whether they do now
-      // (#89, #95). Everyone who may read the cost may read this; only an
-      // Administrator changes it.
+      // (#89, #95). Everyone who may read the cost may read this; Moderators
+      // and Administrators change it, as the other app settings (#161).
       .get("/api/budget-fallback", async ({ cookie, set }) => {
         set.headers["cache-control"] = "no-store";
         const s = await requireSession(cookieSid(cookie as never));
@@ -1569,14 +1681,15 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           set.status = 401;
           return { error: "unauthorized" };
         }
-        if (
-          !guildId.safeParse(params.id).success ||
-          !(await guildOk(env, hooks, s.access_token, params.id, s.role))
-        ) {
+        const access = guildId.safeParse(params.id).success
+          ? await guildAccess(env, hooks, s.access_token, params.id, s.role)
+          : { open: false, manage: false };
+        if (!access.open) {
           set.status = 404;
           return { error: "guild not found" };
         }
         return {
+          can_edit: access.manage,
           skills: guildSkills(await store.listSkills(), params.id),
           commands: (await store.listSkillCommands()).filter(
             (c) => c.guild_id === params.id,
@@ -1589,12 +1702,17 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           set.status = 401;
           return { error: "unauthorized" };
         }
-        if (
-          !guildId.safeParse(params.id).success ||
-          !(await guildOk(env, hooks, s.access_token, params.id, s.role))
-        ) {
+        const access = guildId.safeParse(params.id).success
+          ? await guildAccess(env, hooks, s.access_token, params.id, s.role)
+          : { open: false, manage: false };
+        if (!access.open) {
           set.status = 404;
           return { error: "guild not found" };
+        }
+        // An import changes this server only: the source just has to open (#166).
+        if (!access.manage) {
+          set.status = 403;
+          return { error: MANAGE_REQUIRED };
         }
         const parsed = skillAction.safeParse(body);
         if (!parsed.success) {
@@ -1710,7 +1828,14 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           set.status = 401;
           return { error: "unauthorized" };
         }
-        if (!(await guildOk(env, hooks, s.access_token, params.id, s.role))) {
+        const access = await guildAccess(
+          env,
+          hooks,
+          s.access_token,
+          params.id,
+          s.role,
+        );
+        if (!access.open) {
           set.status = 404;
           return { error: "guild not found" };
         }
@@ -1718,7 +1843,10 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           store.listArtifacts(params.id),
           store.listArtifactCommands(),
         ]);
-        return { sites: decorateArtifacts(sites, commands) };
+        return {
+          can_edit: access.manage,
+          sites: decorateArtifacts(sites, commands),
+        };
       })
       .patch(
         "/api/guilds/:id/artifacts/:token",
@@ -1728,9 +1856,20 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
             set.status = 401;
             return { error: "unauthorized" };
           }
-          if (!(await guildOk(env, hooks, s.access_token, params.id, s.role))) {
+          const access = await guildAccess(
+            env,
+            hooks,
+            s.access_token,
+            params.id,
+            s.role,
+          );
+          if (!access.open) {
             set.status = 404;
             return { error: "guild not found" };
+          }
+          if (!access.manage) {
+            set.status = 403;
+            return { error: MANAGE_REQUIRED };
           }
           const action = parseArtifactAction(body);
           if (!action) {
@@ -1835,47 +1974,33 @@ async function guildOk(
   guildId: string,
   role: Role,
 ): Promise<boolean> {
-  // Moderation scope: an admin/mod may open any server the bot is in, even one
-  // they do not share. Everyone else still needs the OAuth intersection.
-  // A failed bot-guild fetch falls through to the member check rather than
-  // returning false, so a Discord hiccup cannot lock an admin out of a server
-  // they are actually in.
-  if (canViewAllGuilds(role)) {
-    try {
-      const bot = hooks.listBotGuilds
-        ? await hooks.listBotGuilds()
-        : await fetchBotGuilds(env);
-      if (bot.some((g) => g.id === guildId)) return true;
-    } catch {
-      /* fall through to the member check */
-    }
-  }
-  if (hooks.guildAccess) return hooks.guildAccess(accessToken, guildId);
-  try {
-    const [userG, botG] = await Promise.all([
-      fetchUserGuilds(accessToken),
-      fetchBotGuilds(env),
-    ]);
-    return intersectGuilds(userG, botG).some((g) => g.id === guildId);
-  } catch {
-    return false;
-  }
+  return (await guildAccess(env, hooks, accessToken, guildId, role)).open;
 }
 
+/** Refusal of a server settings write by someone who may only look (#166). */
+const MANAGE_REQUIRED = "Manage Server permission required";
+
 /**
- * guildOk (`open`), and whether the user may also change the server's
- * scheduled actions (`manage`): Discord's Manage Server or Administrator
- * there, or its owner. One read of the user's guild list answers both, so a
- * second call cannot be rate limited into a wrong "no" (#163).
+ * Whether the user may open a server's settings (`open`: a member, or an
+ * Administrator / Moderator for any server the bot is in) and change them
+ * (`manage`, #166): Discord's Manage Server or Administrator there, its owner,
+ * or an Administrator / Moderator. One read of the user's guild list answers
+ * both, so a second call cannot be rate limited into a wrong "no".
  */
-async function scheduleAccess(
+async function guildAccess(
   env: WebEnv,
   hooks: AppHooks,
   accessToken: string,
   guildId: string,
   role: Role,
 ): Promise<{ open: boolean; manage: boolean }> {
-  if (canViewAllGuilds(role)) {
+  const staff = canViewAllGuilds(role);
+  // Moderation scope: an admin/mod may open any server the bot is in, even one
+  // they do not share. Everyone else still needs the OAuth intersection.
+  // A failed bot-guild fetch falls through to the member check rather than
+  // returning false, so a Discord hiccup cannot lock an admin out of a server
+  // they are actually in.
+  if (staff) {
     try {
       const bot = hooks.listBotGuilds
         ? await hooks.listBotGuilds()
@@ -1888,10 +2013,12 @@ async function scheduleAccess(
   }
   if (hooks.guildAccess) {
     const open = await hooks.guildAccess(accessToken, guildId);
+    if (!open) return { open, manage: false };
     const manage =
-      open && hooks.guildManage
+      staff ||
+      (hooks.guildManage
         ? await hooks.guildManage(accessToken, guildId)
-        : false;
+        : false);
     return { open, manage };
   }
   try {
@@ -1902,11 +2029,25 @@ async function scheduleAccess(
     const guild = intersectGuilds(userG, botG).find((g) => g.id === guildId);
     return {
       open: Boolean(guild),
-      manage: Boolean(guild && canManageGuild(guild)),
+      manage: Boolean(guild && (staff || canManageGuild(guild))),
     };
   } catch {
     return { open: false, manage: false };
   }
+}
+
+/**
+ * Stopping or resuming the bot for a whole server is a moderation power
+ * (`canModerate`, decision record #64). The refusal covers the whole request,
+ * so a mixed PATCH is never half-saved.
+ */
+function refuseKillSwitchPatch(
+  role: Role,
+  patch: { bot_disabled?: boolean },
+): string | null {
+  return patch.bot_disabled !== undefined && !canModerate(role)
+    ? "only a moderator or administrator can stop or resume the bot for a server"
+    : null;
 }
 
 function unavailable({ set }: { set: { status?: number | string } }) {

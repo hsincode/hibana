@@ -1,6 +1,7 @@
 // Slash commands of the meeting recording (#118): `/recording start|stop`
 // and the server's Text Generation Model, `/text-model`.
 import { describe, expect, test } from "bun:test";
+import { PermissionFlagsBits, PermissionsBitField } from "discord.js";
 import { commands, handleCommand } from "../commands";
 import { loadConfig } from "../config";
 import type { Recorder } from "../recording";
@@ -29,6 +30,9 @@ async function slash(
     commandName: name,
     user: { id: user },
     guildId: "g1",
+    // The person manages the server (#166); guild-permission.test.ts
+    // covers the members who may only look.
+    memberPermissions: new PermissionsBitField(PermissionFlagsBits.ManageGuild),
     channelId: "t1",
     client: { user: { id: "bot" } },
     channel: { isThread: () => false },

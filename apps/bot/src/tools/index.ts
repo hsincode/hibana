@@ -12,6 +12,10 @@ import {
   triggerWordSchema,
 } from "@hibana/shared/settings";
 import { roleAllowsTool, workflowAgentAllowsTool } from "../agent-roles";
+import {
+  MANAGE_SERVER_REQUIRED,
+  canManageServerSettings,
+} from "../guild-permission";
 import { workflowsEnabled } from "../ultracode";
 import {
   sandboxFiles,
@@ -580,7 +584,7 @@ export class ToolRegistry {
       config.toolsEnabled &&
       config.webSearch &&
       config.anthropicWorkspace.web &&
-      this.runtime.guild(ctx.guildId).exa_mode !== "off"
+      this.runtime.app().exa_mode !== "off"
     );
   }
   tools(ctx: Context) {
@@ -792,6 +796,25 @@ export class ToolRegistry {
       );
     refuseFileArguments(name, args);
     return runWorkspaceTool(this.workspaceHost, name, args, ctx);
+  }
+  /**
+   * A server's settings change only for those who manage it (#166), whoever
+   * the model is acting for. Staff are known without asking Discord; anyone
+   * else is looked up as a member, as `gh_login` does.
+   */
+  private async requireServerManager(guildId: string, userId: string) {
+    const role = this.runtime.role(userId);
+    if (role === "administrator" || role === "moderator") return;
+    const guild = await this.client.guilds.fetch(guildId);
+    const member = await guild.members.fetch(userId);
+    if (
+      !canManageServerSettings({
+        role,
+        owner: guild.ownerId === userId,
+        permissions: member.permissions,
+      })
+    )
+      throw new Error(MANAGE_SERVER_REQUIRED);
   }
   private async runTool(name: string, a: Json, ctx: Context): Promise<unknown> {
     if (name === "image_generation_status") return this.image.status(ctx);
@@ -1117,6 +1140,8 @@ export class ToolRegistry {
     if (name === "get_user_context")
       return this.runtime.resolve(ctx.guildId, ctx.userId).context;
     if (name === "set_user_context") {
+      // In a server this is the server's context, which every speaker shares.
+      if (ctx.guildId) await this.requireServerManager(ctx.guildId, ctx.userId);
       const current = this.runtime.resolve(ctx.guildId, ctx.userId).context;
       await this.runtime.setContext(ctx.guildId, ctx.userId, {
         text:
@@ -1135,10 +1160,37 @@ export class ToolRegistry {
           this.runtime.config.extraTriggers,
         ),
       };
-    if (
-      ["set_bot_model", "set_thread_history", "set_triggers"].includes(name)
-    ) {
+    // The thread history is an app setting (#161): one value for every
+    // server and DM, which only a Moderator or an Administrator may change.
+    if (name === "set_thread_history") {
+      // The summary fields change only themselves (#124); the retention is
+      // written when asked for, or when nothing else is.
+      const summary =
+        a.compaction !== undefined || a.compaction_tokens !== undefined;
+      const age =
+        a.reset || a.seconds !== undefined || a.hours !== undefined || !summary;
+      const patch: Json = {
+        ...(age
+          ? {
+              thread_history_max_age_secs: a.reset
+                ? null
+                : Number(a.seconds ?? Number(a.hours) * 3600),
+            }
+          : {}),
+        ...(a.compaction === undefined
+          ? {}
+          : {
+              thread_compaction: a.compaction === "reset" ? null : a.compaction,
+            }),
+        ...(a.compaction_tokens === undefined
+          ? {}
+          : { thread_compaction_tokens: Number(a.compaction_tokens) }),
+      };
+      return this.runtime.patchApp(patch, ctx.userId);
+    }
+    if (["set_bot_model", "set_triggers"].includes(name)) {
       if (!ctx.guildId) throw new Error("Settings changes require a guild");
+      await this.requireServerManager(ctx.guildId, ctx.userId);
       let patch: Json = {};
       if (name === "set_bot_model") {
         const preset =
@@ -1162,35 +1214,6 @@ export class ToolRegistry {
                 ? {}
                 : { effort: a.effort === "default" ? null : a.effort }),
             };
-      }
-      if (name === "set_thread_history") {
-        // The summary fields change only themselves (#124); the retention is
-        // written when asked for, or when nothing else is.
-        const summary =
-          a.compaction !== undefined || a.compaction_tokens !== undefined;
-        const age =
-          a.reset ||
-          a.seconds !== undefined ||
-          a.hours !== undefined ||
-          !summary;
-        patch = {
-          ...(age
-            ? {
-                thread_history_max_age_secs: a.reset
-                  ? null
-                  : Number(a.seconds ?? Number(a.hours) * 3600),
-              }
-            : {}),
-          ...(a.compaction === undefined
-            ? {}
-            : {
-                thread_compaction:
-                  a.compaction === "reset" ? null : a.compaction,
-              }),
-          ...(a.compaction_tokens === undefined
-            ? {}
-            : { thread_compaction_tokens: Number(a.compaction_tokens) }),
-        };
       }
       if (name === "set_triggers") {
         const guild = this.runtime.guild(ctx.guildId);

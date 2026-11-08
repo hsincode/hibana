@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createApp } from "./create-app";
 import { loadTestEnv, type WebEnv } from "./env";
 import {
+  appSettingsPatchSchema,
   applyUserOverridePatch,
   emptyUserOverride,
   guildPatchSchema,
@@ -45,6 +46,9 @@ async function setup(envOverrides: Partial<WebEnv> = {}) {
   );
   const app = createApp(env, store, {
     guildAccess: async () => true,
+    // These tests write as a member who manages the server (#166);
+    // guild-manage.test.ts covers the members who may only look.
+    guildManage: async () => true,
     listGuilds: async () => [{ id: "g1", name: "One", icon: null }],
   });
   return { app, store, env };
@@ -79,16 +83,22 @@ describe("version", () => {
 });
 
 describe("authz", () => {
-  test("guild MCP settings survive PATCH and snapshot, reset independently, and require auth", async () => {
+  test("MCP on/off stays the server's and survives PATCH and snapshot; the URL is the app's (#161)", async () => {
     const { app } = await setup();
-    const body = JSON.stringify({
-      mcp_enabled: false,
-      mcp_url: "https://example.com/mcp",
-    });
+    const body = JSON.stringify({ mcp_enabled: false });
     const denied = await app.handle(
       req("/api/guilds/g1/settings", { method: "PATCH", body }),
     );
     expect(denied.status).toBe(401);
+    // The URL is not a server setting any more.
+    const refused = await app.handle(
+      req("/api/guilds/g1/settings", {
+        method: "PATCH",
+        cookie: "sess-admin",
+        body: JSON.stringify({ mcp_url: "https://example.com/mcp" }),
+      }),
+    );
+    expect(refused.status).toBe(400);
     const saved = await app.handle(
       req("/api/guilds/g1/settings", {
         method: "PATCH",
@@ -97,30 +107,42 @@ describe("authz", () => {
       }),
     );
     expect(saved.status).toBe(200);
-    const snapshot = await app.handle(
-      req("/internal/snapshot", {
-        headers: { authorization: "Bearer test-internal" },
+    const snapshot = async () =>
+      (await (
+        await app.handle(
+          req("/internal/snapshot", {
+            headers: { authorization: "Bearer test-internal" },
+          }),
+        )
+      ).json()) as {
+        guilds: Record<string, { mcp_enabled: boolean; mcp_url?: string }>;
+        app_settings: { mcp_url: string };
+      };
+    let data = await snapshot();
+    expect(data.guilds.g1.mcp_enabled).toBe(false);
+    expect("mcp_url" in data.guilds.g1).toBe(false);
+    const url = await app.handle(
+      req("/api/app-settings", {
+        method: "PATCH",
+        cookie: "sess-admin",
+        body: JSON.stringify({ mcp_url: "https://example.com/mcp" }),
       }),
     );
-    const data = (await snapshot.json()) as {
-      guilds: Record<string, { mcp_enabled: boolean; mcp_url: string }>;
-    };
+    expect(url.status).toBe(200);
+    data = await snapshot();
+    expect(data.app_settings.mcp_url).toBe("https://example.com/mcp");
     expect(data.guilds.g1.mcp_enabled).toBe(false);
-    expect(data.guilds.g1.mcp_url).toBe("https://example.com/mcp");
     const reset = await app.handle(
-      req("/api/guilds/g1/settings", {
+      req("/api/app-settings", {
         method: "PATCH",
         cookie: "sess-admin",
         body: JSON.stringify({ mcp_url: null }),
       }),
     );
-    const restored = (await reset.json()) as {
-      settings: { mcp_url: string | null; mcp_enabled: boolean };
-    };
+    const restored = (await reset.json()) as { settings: { mcp_url: string } };
     expect(restored.settings.mcp_url).toEqual(
       "https://ww.hsincode.com/api/mcp",
     );
-    expect(restored.settings.mcp_enabled).toBe(false);
     for (const mcp_url of [
       "invalid",
       "http://example.com/mcp",
@@ -130,7 +152,7 @@ describe("authz", () => {
       "https://127.0.0.1/mcp",
       "https://[::1]/mcp",
     ]) {
-      expect(guildPatchSchema.safeParse({ mcp_url }).success).toBe(false);
+      expect(appSettingsPatchSchema.safeParse({ mcp_url }).success).toBe(false);
     }
   });
   test("oauth start redirects to discord with PKCE", async () => {
@@ -609,6 +631,8 @@ describe("anthropic workspace", () => {
         provider: "codex_plus",
         bot_disabled: false,
         member: true,
+        // The hook's list carries no Discord permissions (#166).
+        can_manage: false,
       },
     ]);
 
@@ -649,6 +673,7 @@ describe("anthropic workspace", () => {
         provider: "anthropic_workspace",
         bot_disabled: false,
         member: true,
+        can_manage: false,
       },
     ]);
 
@@ -979,16 +1004,16 @@ describe("guild settings", () => {
       req("/api/guilds/g1/settings", {
         method: "PATCH",
         cookie: "sess-free",
-        body: JSON.stringify({ temperature: 0.2 }),
+        body: JSON.stringify({ thread_only: true }),
       }),
     );
     expect(res.status).toBe(200);
     const g1 = await store.getGuild("g1");
-    expect(g1.temperature).toBe(0.2);
+    expect(g1.thread_only).toBe(true);
     expect("fast_enabled" in g1).toBe(false);
     expect("verify_enabled" in g1).toBe(false);
     const g2 = await store.getGuild("g2");
-    expect(g2.temperature).toEqual(0.7);
+    expect(g2.thread_only).toBe(false);
   });
 
   test("internal snapshot PUT leaves personal overrides alone", async () => {
@@ -1884,12 +1909,12 @@ test("initial settings reads save concrete defaults once and reset never restore
   expect((await store.allGuilds())["new-guild"]).toEqual(guild);
   expect((await store.allUserOverrides())["new-user"]).toEqual(user);
   const version = await store.version();
-  store.defaults.temperature = 1.2;
+  store.defaults.thread_only = true;
   store.defaults.jev_enabled = false;
   expect(await store.getGuild("new-guild")).toEqual(guild);
   expect(await store.getUserOverride("new-user")).toEqual(user);
   expect(await store.version()).toBe(version);
-  expect((await store.getGuild("another-guild")).temperature).toBe(1.2);
+  expect((await store.getGuild("another-guild")).thread_only).toBe(true);
   expect((await store.getUserOverride("another-user")).jev_enabled).toBeNull();
 });
 

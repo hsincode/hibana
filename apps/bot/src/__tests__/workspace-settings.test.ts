@@ -10,6 +10,7 @@ import {
   unpublishedPresetIds,
 } from "@hibana/shared/catalog";
 import {
+  APP_SETTING_KEYS,
   SUBAGENT_MODES,
   emptyGuild,
   emptyUserOverride,
@@ -516,7 +517,13 @@ test("which path a turn takes, and keys that never continue another path's conve
 
 test("resolve turns Hibana's own delegation off for Workspace and reports Haiku Ultra apart", () => {
   const runtime = published();
-  const keys = [...Object.keys(emptyGuild()), "ultracode", "workspace_ultra"];
+  // The app settings (#161) follow the server's own.
+  const keys = [
+    ...Object.keys(emptyGuild()),
+    ...APP_SETTING_KEYS,
+    "ultracode",
+    "workspace_ultra",
+  ];
   for (const preset of MODEL_PRESETS.filter(
     (p) => p.provider === WORKSPACE_PROVIDER,
   ))
@@ -648,7 +655,7 @@ test("resolve turns Hibana's own delegation off for Workspace and reports Haiku 
 });
 
 test("other providers resolve to exactly the same object as before", () => {
-  const keys = [...Object.keys(emptyGuild()), "ultracode"];
+  const keys = [...Object.keys(emptyGuild()), ...APP_SETTING_KEYS, "ultracode"];
   const runtime = published();
   for (const preset of MODEL_PRESETS.filter(
     (p) => p.provider !== WORKSPACE_PROVIDER,

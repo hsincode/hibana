@@ -310,7 +310,7 @@ export class DiscordRecordingPort implements RecordingPort {
           } = {};
           const speech = stream({
             opus: input,
-            query: recordingQuery(this.runtime.guild(guildId).filler_removal),
+            query: recordingQuery(this.runtime.app().filler_removal),
             key: this.runtime.config.xaiKey,
             sockets,
             maxMs: STREAM_MAX_MS,

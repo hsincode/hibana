@@ -12,6 +12,10 @@ import {
   type ThreadCompactionMode,
 } from "@hibana/shared/settings";
 import type { Runtime } from "./runtime";
+import {
+  MANAGE_SERVER_REQUIRED,
+  canManageServerSettings,
+} from "./guild-permission";
 import type { ToolRegistry } from "./tools";
 import type { History } from "./history";
 import type { Voice } from "./voice";
@@ -63,7 +67,7 @@ export function commands(runtime: Runtime) {
     ...flags.map(([name, desc]) =>
       command(name, desc, [string("mode", "on / off", ["on", "off"], true)]),
     ),
-    command("temperature", "生成温度を変更", [
+    command("temperature", "生成温度を変更（全体の設定・Moderator 以上）", [
       {
         type: 10,
         name: "value",
@@ -72,29 +76,33 @@ export function commands(runtime: Runtime) {
         max_value: 2,
       },
     ]),
-    command("exa", "検索方式を変更", [
+    command("exa", "検索方式を変更（全体の設定・Moderator 以上）", [
       string("mode", "検索方式", ["on", "off", "auto", "reset"], true),
     ]),
-    command("thread-history", "スレッド履歴の保持期間と要約", [
-      {
-        type: 4,
-        name: "seconds",
-        description: "0で期限なし。全項目を省略するとデフォルト値を設定",
-        min_value: 0,
-      },
-      string(
-        "compaction",
-        "要約の方式（cache: キャッシュを使う / transcript: JSON / off: しない）",
-        ["cache", "transcript", "off", "reset"],
-      ),
-      {
-        type: 4,
-        name: "compaction_tokens",
-        description: "要約を始める大きさ（履歴の推定トークン数、既定 30000）",
-        min_value: 1000,
-        max_value: 1_000_000,
-      },
-    ]),
+    command(
+      "thread-history",
+      "スレッド履歴の保持期間と要約（全体の設定・Moderator 以上）",
+      [
+        {
+          type: 4,
+          name: "seconds",
+          description: "0で期限なし。全項目を省略するとデフォルト値を設定",
+          min_value: 0,
+        },
+        string(
+          "compaction",
+          "要約の方式（cache: キャッシュを使う / transcript: JSON / off: しない）",
+          ["cache", "transcript", "off", "reset"],
+        ),
+        {
+          type: 4,
+          name: "compaction_tokens",
+          description: "要約を始める大きさ（履歴の推定トークン数、既定 30000）",
+          min_value: 1000,
+          max_value: 1_000_000,
+        },
+      ],
+    ),
     ...["server-context", "user-context"].map((name) =>
       command(name, "人格や継続的な指示を設定", [
         string("text", "継続的な指示"),
@@ -118,12 +126,14 @@ export function commands(runtime: Runtime) {
             },
           ]),
           command("leave", "ボイスチャンネルから退出"),
-          command("voice-mode", "通話モード", [
+          command("voice-mode", "通話モード（全体の設定・Moderator 以上）", [
             string("mode", "通話モード", ["stt", "s2s"], true),
           ]),
-          command("filler-words", "通話のフィラー処理", [
-            string("mode", "フィラー", ["remove", "keep"], true),
-          ]),
+          command(
+            "filler-words",
+            "通話のフィラー処理（全体の設定・Moderator 以上）",
+            [string("mode", "フィラー", ["remove", "keep"], true)],
+          ),
           // Meeting recording (#118): the voice channel is the one the
           // member is in, and the summary goes to this channel.
           command("recording", "会議の録音と文字起こし", [
@@ -223,11 +233,24 @@ export async function handleCommand(
   try {
     let result: unknown;
     let patch: Json = {};
+    let appPatch: Json | undefined;
     // Shown above the JSON, which is cut to what the message has room for.
     let note: string | undefined;
     const guild = () => {
       if (!i.guildId) throw new Error("サーバー内で使用してください。");
       return i.guildId;
+    };
+    // A server's settings change only for those who manage it (#166). The
+    // interaction carries the member's permissions, so Discord is not asked.
+    const manager = () => {
+      if (
+        !canManageServerSettings({
+          role: runtime.role(i.user.id),
+          owner: !!i.guild && i.guild.ownerId === i.user.id,
+          permissions: i.memberPermissions,
+        })
+      )
+        throw new Error(MANAGE_SERVER_REQUIRED);
     };
     switch (i.commandName) {
       case "info": {
@@ -284,11 +307,13 @@ export async function handleCommand(
         if (!Object.keys(patch).length)
           result = runtime.resolve(ctx.guildId, ctx.userId).selection;
         break;
+      // The app settings (#161): one value for every server and DM, changed
+      // by Moderators and Administrators only (`Runtime.patchApp`).
       case "temperature":
-        patch = { temperature: i.options.getNumber("value") };
+        appPatch = { temperature: i.options.getNumber("value") };
         break;
       case "exa":
-        patch = { exa_mode: s("mode") === "reset" ? null : s("mode") };
+        appPatch = { exa_mode: s("mode") === "reset" ? null : s("mode") };
         break;
       case "thread-history": {
         const seconds = i.options.getInteger("seconds");
@@ -296,7 +321,7 @@ export async function handleCommand(
         const tokens = i.options.getInteger("compaction_tokens");
         // Without any option it resets the retention, as before. The summary
         // options change only themselves (#124).
-        patch =
+        appPatch =
           mode === null && tokens === null
             ? { thread_history_max_age_secs: seconds }
             : {
@@ -327,6 +352,8 @@ export async function handleCommand(
         )
           result = runtime.resolve(ctx.guildId, ctx.userId).context;
         else {
+          // In a server both commands write the server's context.
+          if (ctx.guildId) manager();
           await runtime.setContext(ctx.guildId, ctx.userId, {
             text: s("text") ?? undefined,
             persona_override: b("persona_override") ?? undefined,
@@ -381,10 +408,10 @@ export async function handleCommand(
         break;
       }
       case "voice-mode":
-        patch = { voice_mode: s("mode") };
+        appPatch = { voice_mode: s("mode") };
         break;
       case "filler-words":
-        patch = { filler_removal: s("mode") === "remove" };
+        appPatch = { filler_removal: s("mode") === "remove" };
         break;
       case "login-github":
       case "status-github":
@@ -433,8 +460,14 @@ export async function handleCommand(
         throw new Error("不明なコマンドです。");
       }
     }
+    if (appPatch) {
+      result = await runtime.patchApp(appPatch, i.user.id);
+      note = "全体の設定を変えました。すべてのサーバーと DM に使われます。";
+    }
     if (Object.keys(patch).length) {
-      result = await runtime.patch(guild(), patch, i.user.id);
+      const id = guild();
+      manager();
+      result = await runtime.patch(id, patch, i.user.id);
       if (i.commandName === "text-model")
         result = runtime.guild(guild()).text_model;
       // The switch is stored either way; on Anthropic Workspace it only

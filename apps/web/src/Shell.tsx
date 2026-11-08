@@ -324,6 +324,8 @@ export function Shell({
             <div className="nav-group">
               {link("/", <Icon.grid />, "サーバー一覧", true)}
               {link("/me", <Icon.user />, "マイ設定")}
+              {/* 全体の設定（#161）は誰でも見られ、Moderator 以上が変える。 */}
+              {link("/settings", <Icon.sliders />, "全体の設定")}
               {link("/artifacts", <Icon.box />, "すべての成果物")}
               {/* 利用料は全ユーザーが見られる（#85）。古い API はフラグを返さないことがある。 */}
               {me.can_view_analytics &&

@@ -3,6 +3,7 @@ import { Link, Navigate, Route, Routes } from "react-router-dom";
 import { AnalyticsPage } from "./Analytics";
 import { apiCached, type GuildSummary, type Me } from "./api";
 import { ArtifactsPage } from "./Artifacts";
+import { GlobalSettingsPage } from "./Global";
 import { GuildPage } from "./Guild";
 import { Login } from "./Login";
 import { MePage } from "./Me";
@@ -44,6 +45,7 @@ export function App() {
               <Routes>
                 <Route path="/" element={<GuildList />} />
                 <Route path="/me" element={<MePage />} />
+                <Route path="/settings" element={<GlobalSettingsPage />} />
                 <Route path="/artifacts" element={<ArtifactsPage />} />
                 <Route path="/skills" element={<SkillsRedirect />} />
                 <Route path="/g/:id/*" element={<GuildPage />} />

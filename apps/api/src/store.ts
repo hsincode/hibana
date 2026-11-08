@@ -18,6 +18,13 @@ import {
   emptyGuild,
   emptyUserOverride,
   settingsDefaults,
+  appSettingsDefaults,
+  applyAppSettingsPatch,
+  emptyAppSettings,
+  initialAppSettings,
+  normalizeAppSettings,
+  type AppSettings,
+  type AppSettingsPatch,
   type GuildRow,
   type UserOverrideRow,
 } from "./settings";
@@ -75,6 +82,8 @@ export function isArtifactAction(raw: string): raw is ArtifactAction {
 
 export interface Store {
   readonly defaults: GuildRow;
+  /** What an app setting returns to when it is reset (#161). */
+  readonly appDefaults: AppSettings;
   replaceSkills(rows: SkillRow[]): Promise<void>;
   listSkills(): Promise<SkillRow[]>;
   enqueueSkillCommand(
@@ -103,6 +112,9 @@ export interface Store {
   putSchedules(guildId: string, schedules: Schedule[]): Promise<void>;
   /** Every server that has at least one scheduled action. */
   allSchedules(): Promise<Record<string, Schedule[]>>;
+  /** The server rows as stored, before `normalizeGuild` reads them: a row
+   *  from before #161 still holds the app settings. */
+  storedGuilds(): Promise<unknown[]>;
   allUserContexts(): Promise<Record<string, UserContextEntry>>;
   getUserOverride(id: string): Promise<UserOverrideRow>;
   putUserOverride(id: string, settings: UserOverrideRow): Promise<void>;
@@ -175,7 +187,10 @@ function matchesLogQuery(r: LogRow, q: LogQuery): boolean {
 }
 
 export class MemoryStore implements Store {
-  constructor(readonly defaults: GuildRow = emptyGuild()) {}
+  constructor(
+    readonly defaults: GuildRow = emptyGuild(),
+    readonly appDefaults: AppSettings = emptyAppSettings(),
+  ) {}
   private meta = new Map<string, string>();
   private guilds = new Map<string, GuildRow>();
   private schedules = new Map<string, Schedule[]>();
@@ -234,6 +249,7 @@ export class MemoryStore implements Store {
     if (!this.meta.has("snapshot_version"))
       this.meta.set("snapshot_version", "0");
     await installPersonalDefaults(this);
+    await installAppSettings(this);
   }
   async getMeta(key: string) {
     return this.meta.get(key) ?? null;
@@ -289,6 +305,9 @@ export class MemoryStore implements Store {
     return out;
   }
 
+  async storedGuilds() {
+    return structuredClone([...this.guilds.values()]) as unknown[];
+  }
   async allUserContexts() {
     return Object.fromEntries(this.userContexts);
   }
@@ -576,6 +595,7 @@ export function assertPostgresUrl(databaseUrl: string): string {
 
 export class PostgresStore implements Store {
   readonly defaults: GuildRow;
+  readonly appDefaults: AppSettings;
   private db: SqlClient;
   private readonly url: string;
   private readonly connect: (url: string) => SqlClient;
@@ -589,6 +609,7 @@ export class PostgresStore implements Store {
     opts: {
       logs?: boolean;
       defaults?: GuildRow;
+      appDefaults?: AppSettings;
       /** Opens a pool. Tests pass a stand-in; the default is Bun's `SQL`. */
       connect?: (url: string) => SqlClient;
     } = {},
@@ -599,6 +620,7 @@ export class PostgresStore implements Store {
     this.db = this.connect(this.url);
     this.logs = opts.logs ?? false;
     this.defaults = opts.defaults ?? emptyGuild();
+    this.appDefaults = opts.appDefaults ?? emptyAppSettings();
   }
 
   /** Closes the pool. For scripts and tests; the API keeps it for the instance's life. */
@@ -830,6 +852,9 @@ export class PostgresStore implements Store {
     if (!(await this.getMeta("snapshot_version"))) {
       await this.setMeta("snapshot_version", "0");
     }
+    // Before the shape rewrite below, which leaves the app settings out of
+    // the server rows: the first app settings are made from them (#161).
+    await installAppSettings(this);
     // Persist legacy nulls once, before serving snapshots. Later environment
     // edits must not change what a dashboard already displayed as selected.
     await this.allGuilds();
@@ -941,6 +966,13 @@ export class PostgresStore implements Store {
       if (parsed.length) out[r.guild_id] = parsed;
     }
     return out;
+  }
+
+  async storedGuilds() {
+    const rows = (await this.sql`SELECT settings FROM guilds`) as {
+      settings: unknown;
+    }[];
+    return rows.map((r) => r.settings);
   }
 
   async allUserContexts() {
@@ -1407,18 +1439,89 @@ export async function installPersonalDefaults(store: Store) {
   await store.setMeta(key, "1");
 }
 
+export const APP_SETTINGS_META = "app_settings";
+
+/** The defaults of the app settings (#161): what a new server row was seeded
+ *  with (`appSettingsDefaults(env)`) before they moved. */
+export const appDefaults = (store: Store): AppSettings => store.appDefaults;
+
+function parseAppSettings(raw: string | null, defaults: AppSettings) {
+  let parsed: unknown = null;
+  try {
+    parsed = raw === null ? null : JSON.parse(raw);
+  } catch {
+    // A broken value reads as the defaults rather than taking the API down.
+  }
+  return normalizeAppSettings(parsed, defaults);
+}
+
+/** The app settings (#161). Each field missing or not valid takes the default. */
+export async function loadAppSettings(store: Store): Promise<AppSettings> {
+  return parseAppSettings(
+    await store.getMeta(APP_SETTINGS_META),
+    appDefaults(store),
+  );
+}
+
+/**
+ * Applies a PATCH to the app settings and bumps the snapshot version. The
+ * write only lands on the value it was read from, so two saves at once on
+ * two API instances do not drop each other's fields; a save that keeps losing
+ * that race returns null.
+ */
+export async function patchAppSettings(
+  store: Store,
+  patch: AppSettingsPatch,
+): Promise<AppSettings | null> {
+  const defaults = appDefaults(store);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const raw = await store.getMeta(APP_SETTINGS_META);
+    const next = applyAppSettingsPatch(
+      parseAppSettings(raw, defaults),
+      patch,
+      defaults,
+    );
+    if (await store.compareMeta(APP_SETTINGS_META, raw, JSON.stringify(next))) {
+      await store.bumpVersion();
+      return next;
+    }
+  }
+  return null;
+}
+
+/**
+ * One shot (#161): the app settings start from what most servers had, read
+ * from the rows as stored. It runs before anything rewrites a row without
+ * them (`PostgresStore.migrate`). Written only when there is none yet, so two
+ * instances starting at once agree, and a later change is never replaced.
+ */
+export async function installAppSettings(store: Store) {
+  if ((await store.getMeta(APP_SETTINGS_META)) !== null) return;
+  const first = initialAppSettings(
+    await store.storedGuilds(),
+    appDefaults(store),
+  );
+  // No version bump: until a change bumps it, a bot answered 304 keeps the
+  // values it had, which these were made from.
+  await store.compareMeta(APP_SETTINGS_META, null, JSON.stringify(first));
+}
+
 export async function openStore(
   databaseUrl: string | null,
   opts: { logs?: boolean } = {},
 ): Promise<Store> {
   if (!databaseUrl) {
-    const mem = new MemoryStore(settingsDefaults(process.env));
+    const mem = new MemoryStore(
+      settingsDefaults(process.env),
+      appSettingsDefaults(process.env),
+    );
     await mem.migrate();
     return mem;
   }
   const store = new PostgresStore(databaseUrl, {
     logs: opts.logs ?? false,
     defaults: settingsDefaults(process.env),
+    appDefaults: appSettingsDefaults(process.env),
   });
   await store.migrate();
   return store;

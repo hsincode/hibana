@@ -19,6 +19,13 @@ import {
   TEXT_MODEL_EFFORTS,
   isTextModelPreset,
   textModelSelection,
+  APP_SETTING_KEYS,
+  appSettingsDefaults,
+  appSettingsPatchSchema,
+  applyAppSettingsPatch,
+  emptyAppSettings,
+  initialAppSettings,
+  normalizeAppSettings,
   type GuildRow,
   type UserOverrideRow,
   type UserOverridePatch,
@@ -77,10 +84,11 @@ test("new and legacy settings contain concrete values and preserve false, zero a
       selection: null,
       effort: null,
       ultra_mode: null,
+      // An app setting since #161: left out of the server's row.
       temperature: 0,
       jev_enabled: false,
       extra_triggers: [],
-    },
+    } as never,
     defaults,
   );
   expect(
@@ -92,7 +100,7 @@ test("new and legacy settings contain concrete values and preserve false, zero a
     effort: "low",
   });
   expect(migrated.ultra_mode).toBe(true);
-  expect(migrated.temperature).toBe(0);
+  expect("temperature" in migrated).toBe(false);
   expect(migrated.jev_enabled).toBe(false);
   expect(migrated.extra_triggers).toEqual([]);
   expect(normalizeGuild(migrated, emptyGuild())).toEqual(migrated);
@@ -758,7 +766,7 @@ test("Text Generation Model is a server setting: Haiku 5.5 medium by default, An
   expect(applyPatch(written, { text_model: null }).text_model).toEqual(
     DEFAULT_TEXT_MODEL,
   );
-  expect(applyPatch(written, { temperature: 1 }).text_model).toEqual(sonnet);
+  expect(applyPatch(written, { thread_only: true }).text_model).toEqual(sonnet);
 
   // A row stored before the setting existed, or holding a preset that no
   // longer qualifies, reads as the default.
@@ -778,68 +786,140 @@ test("Text Generation Model is a server setting: Haiku 5.5 medium by default, An
   expect(patchPresetIds({ text_model: null })).toEqual([]);
 });
 
-test("a server picks how threads are summarized and at what size (#124)", () => {
+test("the app settings pick how threads are summarized and at what size (#124, #161)", () => {
   // Defaults: the summary that reads the conversation's cache, at 30,000
   // estimated tokens of history.
-  expect(emptyGuild().thread_compaction).toBe("cache");
-  expect(emptyGuild().thread_compaction_tokens).toBe(30_000);
+  expect(emptyAppSettings().thread_compaction).toBe("cache");
+  expect(emptyAppSettings().thread_compaction_tokens).toBe(30_000);
   for (const mode of ["cache", "transcript", "off", null])
     expect(
-      guildPatchSchema.safeParse({ thread_compaction: mode }).success,
+      appSettingsPatchSchema.safeParse({ thread_compaction: mode }).success,
     ).toBe(true);
   expect(
-    guildPatchSchema.safeParse({ thread_compaction: "fast" }).success,
+    appSettingsPatchSchema.safeParse({ thread_compaction: "fast" }).success,
   ).toBe(false);
   for (const tokens of [1000, 50_000, 1_000_000, null])
     expect(
-      guildPatchSchema.safeParse({ thread_compaction_tokens: tokens }).success,
+      appSettingsPatchSchema.safeParse({ thread_compaction_tokens: tokens })
+        .success,
     ).toBe(true);
   for (const tokens of [999, 1_000_001, 1500.5, "30000"])
     expect(
-      guildPatchSchema.safeParse({ thread_compaction_tokens: tokens }).success,
+      appSettingsPatchSchema.safeParse({ thread_compaction_tokens: tokens })
+        .success,
     ).toBe(false);
 
   // Writing one changes nothing else; null returns to the default.
-  const base = emptyGuild();
-  const off = applyPatch(base, {
+  const base = emptyAppSettings();
+  const off = applyAppSettingsPatch(
+    base,
+    { thread_compaction: "off", thread_compaction_tokens: 70_000 },
+    base,
+  );
+  expect(off).toEqual({
+    ...base,
     thread_compaction: "off",
     thread_compaction_tokens: 70_000,
   });
-  expect(off.thread_compaction).toBe("off");
-  expect(off.thread_compaction_tokens).toBe(70_000);
-  expect({
-    ...off,
-    thread_compaction: base.thread_compaction,
-    thread_compaction_tokens: base.thread_compaction_tokens,
-  }).toEqual(normalizeGuild(base));
-  const reset = applyPatch(off, {
-    thread_compaction: null,
-    thread_compaction_tokens: null,
-  });
-  expect(reset.thread_compaction).toBe("cache");
-  expect(reset.thread_compaction_tokens).toBe(30_000);
-  expect(applyPatch(off, { temperature: 1 }).thread_compaction).toBe("off");
+  const reset = applyAppSettingsPatch(
+    off,
+    { thread_compaction: null, thread_compaction_tokens: null },
+    base,
+  );
+  expect(reset).toEqual(base);
+  expect(
+    applyAppSettingsPatch(off, { temperature: 1 }, base).thread_compaction,
+  ).toBe("off");
 
-  // A row stored before the settings existed, or holding a value that is no
-  // longer valid, reads as the default.
-  const {
-    thread_compaction: _mode,
-    thread_compaction_tokens: _tokens,
-    ...legacy
-  } = emptyGuild();
-  expect(normalizeGuild(legacy).thread_compaction).toBe("cache");
-  expect(normalizeGuild(legacy).thread_compaction_tokens).toBe(30_000);
-  const broken = normalizeGuild({
-    thread_compaction: "fast",
-    thread_compaction_tokens: 5,
-  } as never);
+  // A value that is missing or no longer valid reads as the default.
+  const broken = normalizeAppSettings(
+    { thread_compaction: "fast", thread_compaction_tokens: 5 },
+    base,
+  );
   expect(broken.thread_compaction).toBe("cache");
   expect(broken.thread_compaction_tokens).toBe(30_000);
+  expect(normalizeAppSettings(null, base)).toEqual(base);
 
-  // THREAD_COMPACTION_TOKENS seeds new rows, as THREAD_HISTORY_MAX_AGE_SECS does.
-  expect(settingsDefaults({}).thread_compaction_tokens).toBe(30_000);
+  // THREAD_COMPACTION_TOKENS seeds the defaults, as THREAD_HISTORY_MAX_AGE_SECS does.
+  expect(appSettingsDefaults({})).toEqual(base);
   expect(
-    settingsDefaults({ THREAD_COMPACTION_TOKENS: "50000" })
+    appSettingsDefaults({ THREAD_COMPACTION_TOKENS: "50000" })
       .thread_compaction_tokens,
   ).toBe(50_000);
+});
+
+test("the API's environment seeds the app settings' defaults, as it seeded new server rows (#161)", () => {
+  expect(
+    appSettingsDefaults({
+      EXA_ENABLED: "true",
+      LLM_TEMPERATURE: "1.1",
+      THREAD_HISTORY_MAX_AGE_SECS: "600",
+    }),
+  ).toMatchObject({
+    exa_mode: "on",
+    temperature: 1.1,
+    thread_history_max_age_secs: 600,
+  });
+  expect(appSettingsDefaults({ EXA_ENABLED: "false" }).exa_mode).toBe("off");
+  expect(() => appSettingsDefaults({ EXA_ENABLED: "maybe" })).toThrow(
+    "EXA_ENABLED must be a boolean",
+  );
+  expect(() => appSettingsDefaults({ LLM_TEMPERATURE: "3" })).toThrow();
+});
+
+test("a server's settings no longer hold the app settings (#161)", () => {
+  // Accepted and ignored for one deployment (docs/adr/0006); refused since.
+  const patch = {
+    temperature: 1.5,
+    exa_mode: "off",
+    thread_history_max_age_secs: 60,
+    thread_compaction: "off",
+    thread_compaction_tokens: 70_000,
+    voice_mode: "s2s",
+    filler_removal: false,
+    mcp_url: "https://mcp.example.com/mcp",
+  } as const;
+  for (const key of APP_SETTING_KEYS) {
+    expect(key in patch).toBe(true);
+    expect(guildPatchSchema.safeParse({ [key]: patch[key] }).success, key).toBe(
+      false,
+    );
+    expect(key in emptyGuild()).toBe(false);
+  }
+  // A row stored before they moved still holds them in JSONB; reading it
+  // leaves them out, and keeps the server's own settings.
+  const stored = { ...emptyGuild(), ...patch, thread_only: true };
+  const read = normalizeGuild(stored);
+  for (const key of APP_SETTING_KEYS) expect(key in read).toBe(false);
+  expect(read.thread_only).toBe(true);
+  expect(read.mcp_enabled).toBe(true);
+});
+
+test("the first app settings take what most servers had, and the default on a tie (#161)", () => {
+  const defaults = emptyAppSettings();
+  expect(initialAppSettings([], defaults)).toEqual(defaults);
+  // Rows as they were stored before #161.
+  const server = (fields: Record<string, unknown>) => ({
+    ...emptyGuild(),
+    ...fields,
+  });
+  const rows = [
+    server({ temperature: 1, exa_mode: "on", voice_mode: "s2s" }),
+    server({ temperature: 0.7, exa_mode: "on", voice_mode: "s2s" }),
+    server({ temperature: 0.7, exa_mode: "auto", voice_mode: "stt" }),
+    server({ temperature: 0.7, exa_mode: "on", voice_mode: "stt" }),
+  ];
+  const first = initialAppSettings(rows, { ...defaults, exa_mode: "off" });
+  expect(first.temperature).toBe(0.7);
+  expect(first.exa_mode).toBe("on");
+  // Two against two: the default, not the first one seen.
+  expect(initialAppSettings(rows, defaults).voice_mode).toBe("stt");
+  expect(
+    initialAppSettings(rows, { ...defaults, voice_mode: "s2s" }).voice_mode,
+  ).toBe("s2s");
+  // A server value that is not valid any more counts as the default.
+  expect(
+    initialAppSettings([{ thread_compaction: "fast" } as never], defaults)
+      .thread_compaction,
+  ).toBe("cache");
 });

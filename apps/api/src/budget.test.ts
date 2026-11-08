@@ -208,13 +208,13 @@ describe("GET /internal/budget", () => {
 });
 
 describe("/api/budget-fallback", () => {
-  test("every logged-in user sees the model, the threshold and the status; only an Administrator may edit (#95)", async () => {
+  test("every logged-in user sees the model, the threshold and the status; Moderators and Administrators may edit (#95, #161)", async () => {
     const { call } = await setup(ADMIN_KEY, anthropic("18500", 1_500_000));
     expect((await call("/api/budget-fallback")).status).toBe(401);
     for (const [user, edit] of [
       ["free-1", false],
       ["premium-1", false],
-      ["mod-1", false],
+      ["mod-1", true],
       ["admin-1", true],
     ] as const) {
       const res = await call("/api/budget-fallback", { session: user });
@@ -313,7 +313,7 @@ describe("/api/budget-fallback", () => {
     ).toBe("anthropic-sonnet-5-5");
   });
 
-  test("only an Administrator may change it, and only to a public preset other than Auto and Workspace", async () => {
+  test("only a Moderator or an Administrator may change it, and only to a public preset other than Auto and Workspace", async () => {
     const { call, store } = await setup(ADMIN_KEY);
     const put = (session: string | undefined, body: unknown) =>
       call("/api/budget-fallback", { session, method: "PUT", body });
@@ -328,20 +328,6 @@ describe("/api/budget-fallback", () => {
     expect(
       (await put("premium-1", { preset: "anthropic-opus-5-5", effort: "high" }))
         .status,
-    ).toBe(403);
-    // Moderators could until #95.
-    expect(
-      (await put("mod-1", { preset: "anthropic-opus-5-5", effort: "high" }))
-        .status,
-    ).toBe(403);
-    expect(
-      (
-        await put("mod-1", {
-          preset: "anthropic-haiku-5-5",
-          effort: "high",
-          threshold_usd: 50,
-        })
-      ).status,
     ).toBe(403);
     for (const body of [
       { preset: "anthropic-auto", effort: "high" },
@@ -375,6 +361,19 @@ describe("/api/budget-fallback", () => {
       preset: "ds-deepseek-flash",
       effort: "low",
     });
+    // Administrator only from #95; Moderators again since #161, which put it
+    // with the other app settings.
+    const moderator = await put("mod-1", {
+      preset: "anthropic-haiku-5-5",
+      effort: "medium",
+      threshold_usd: 50,
+    });
+    expect(moderator.status).toBe(200);
+    expect(JSON.parse((await store.getMeta("budget_fallback"))!)).toEqual({
+      preset: "anthropic-haiku-5-5",
+      effort: "medium",
+    });
+    expect(await store.getMeta("budget_fallback_threshold")).toBe("50");
   });
 });
 

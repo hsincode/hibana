@@ -6,7 +6,8 @@
  *
  * What the snapshot holds and is restored: server settings, DM user contexts,
  * personal settings, roles, the block list (ids only), the dashboard's preset
- * visibility and Premium floors, and the budget fallback model.
+ * visibility and Premium floors, the budget fallback model and the app
+ * settings (#161).
  *
  * What it does not hold, so is not restored: sessions (everyone logs in again),
  * usernames and avatars (filled in at the next login), block reasons, the
@@ -27,11 +28,17 @@ import {
 import { parseBudgetFallback } from "../packages/shared/src/budget";
 import { parseRole } from "../apps/api/src/roles";
 import {
+  APP_SETTINGS_META,
+  appDefaults,
   openStore,
   type Store,
   type UserContextEntry,
 } from "../apps/api/src/store";
-import type { GuildRow, UserOverrideRow } from "../apps/api/src/settings";
+import {
+  normalizeAppSettings,
+  type GuildRow,
+  type UserOverrideRow,
+} from "../apps/api/src/settings";
 
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -144,6 +151,15 @@ export async function importBotSnapshot(
     await store.setMeta(
       "budget_fallback",
       JSON.stringify(parseBudgetFallback(snapshot.budget_fallback)),
+    );
+  // The app settings (#161). The settings API made its own when it started
+  // on the empty database; the snapshot's take their place.
+  if (snapshot.app_settings)
+    await store.setMeta(
+      APP_SETTINGS_META,
+      JSON.stringify(
+        normalizeAppSettings(snapshot.app_settings, appDefaults(store)),
+      ),
     );
 
   // Above the bot's version, so its next poll cannot match a stale ETag.

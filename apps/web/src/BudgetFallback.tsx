@@ -12,7 +12,8 @@ import { Badge, Skeleton, ToastArea, useToasts } from "./ui";
    apps/api/src/analytics.ts の budget() が、保存された閾値でする。書き換えは
    bot が 2 分ごとに判定を読みに来たときなので、ここに出る状態とは最大 2 分ずれる。
    書き換えた後は送る直前の差し替えをしないので、選び直したモデルのまま動く。
-   モデル・effort・閾値を変えられるのは Administrator だけ（#95）。
+   モデル・effort・閾値を変えられるのは Administrator だけだった（#95）が、全体の設定に
+   集めたときに Moderator 以上に広げた（#161）。置き場所も利用料のページから全体の設定へ移した。
    ============================================================ */
 
 type Fallback = { preset: string; effort: string };
@@ -277,7 +278,9 @@ export function BudgetFallbackPanel({ reloadKey }: { reloadKey: string }) {
             </dl>
           )}
           {data.can_edit || (
-            <p className="stat-note">変更できるのは Administrator です。</p>
+            <p className="stat-note">
+              変更できるのは Moderator と Administrator です。
+            </p>
           )}
         </>
       )}

@@ -21,6 +21,8 @@ async function setup() {
   const env = loadTestEnv();
   const app = createApp(env, store, {
     guildAccess: async (_, id) => id === "123" || id === "456",
+    // Writes need the destination managed (#166); the source only opened.
+    guildManage: async (_, id) => id === "123" || id === "456",
   });
   const row = {
     guild_id: "123",

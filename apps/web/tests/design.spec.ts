@@ -47,7 +47,13 @@ const catalog = {
   triggers: ["hibana"],
 };
 
-async function mockApi(page: Page, retainSettings = false) {
+/**
+ * `canEdit` answers like the API since #166 (`can_edit` on a server's pages,
+ * `can_manage` on the server list); left out, the answers have neither, as
+ * the previous API's did.
+ */
+async function mockApi(page: Page, retainSettings = false, canEdit?: boolean) {
+  const edit = canEdit === undefined ? {} : { can_edit: canEdit };
   const settingsByPath = new Map<string, Record<string, unknown>>();
   let appSettings: Record<string, unknown> = emptyAppSettings();
   const writes: { path: string; body: Record<string, unknown> }[] = [];
@@ -68,7 +74,13 @@ async function mockApi(page: Page, retainSettings = false) {
         role: "admin",
         can_manage_users: true,
       };
-    else if (path === "/api/guilds") data = { guilds };
+    else if (path === "/api/guilds")
+      data = {
+        guilds:
+          canEdit === undefined
+            ? guilds
+            : guilds.map((g) => ({ ...g, can_manage: canEdit })),
+      };
     else if (path === "/api/catalog") data = catalog;
     // 全体の設定 (#161). A PATCH keeps what it wrote, like the API.
     else if (path === "/api/app-settings") {
@@ -104,7 +116,7 @@ async function mockApi(page: Page, retainSettings = false) {
         ...body,
       };
       settingsByPath.set(path, saved);
-      data = { settings: saved };
+      data = { settings: saved, ...edit };
     } else if (path.endsWith("/skills"))
       data = {
         skills: [
@@ -118,9 +130,11 @@ async function mockApi(page: Page, retainSettings = false) {
           },
         ],
         commands: [],
+        ...edit,
       };
     else if (path.endsWith("/artifacts"))
       data = {
+        ...edit,
         sites: [
           {
             token: "example",
@@ -2339,3 +2353,88 @@ for (const staff of [true, false])
       )
       .toBe(true);
   });
+
+// #166: members open a server's pages and only look. Every control that
+// changes something is disabled, reading stays possible, and nothing is sent.
+test("a member who does not manage the server sees its pages read-only", async ({
+  page,
+}) => {
+  const writes = await mockApi(page, false, false);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const note = page.getByText("変更できるのは、Discord の「サーバー管理」");
+
+  await page.goto("/g/100");
+  await expect(note).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "モデルを変更" }),
+  ).toBeDisabled();
+  // The effective values are still shown.
+  await expect(page.getByText("実際の動作")).toBeVisible();
+
+  await page.goto("/g/100/tools");
+  await expect(note).toBeVisible();
+  for (const button of await page
+    .getByRole("group", { name: "thread-only", exact: true })
+    .getByRole("button")
+    .all())
+    await expect(button).toBeDisabled();
+
+  await page.goto("/g/100/context");
+  await expect(page.getByRole("textbox").first()).toBeDisabled();
+
+  await page.goto("/g/100/skills");
+  await expect(note).toBeVisible();
+  for (const name of ["作成", "インポート"])
+    await expect(
+      page.getByRole("button", { name, exact: true }),
+    ).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "code-review を削除" }),
+  ).toBeDisabled();
+  // Looking and downloading change nothing.
+  await expect(
+    page.getByRole("button", { name: "code-review をダウンロード" }),
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "code-review", exact: true }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("button", { name: "閉じる", exact: true }).click();
+
+  await page.goto("/g/100/artifacts");
+  await expect(note).toBeVisible();
+  for (const name of ["1ヶ月", "永久化"])
+    await expect(
+      page.getByRole("button", { name, exact: true }),
+    ).toBeDisabled();
+  await expect(
+    page.getByRole("link", { name: /research-report/ }),
+  ).toBeVisible();
+
+  // The all-artifacts page goes by the server list.
+  await page.goto("/artifacts");
+  await expect(
+    page.getByRole("button", { name: "永久化", exact: true }),
+  ).toBeDisabled();
+  expect(writes).toEqual([]);
+});
+
+test("those who manage the server get the same pages enabled", async ({
+  page,
+}) => {
+  const writes = await mockApi(page, false, true);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/g/100/tools");
+  await expect(
+    page.getByText("変更できるのは、Discord の「サーバー管理」"),
+  ).toBeHidden();
+  await page
+    .getByRole("group", { name: "thread-only", exact: true })
+    .getByRole("button", { name: "ON", exact: true })
+    .click();
+  await expect
+    .poll(() => writes.map((w) => w.body))
+    .toContainEqual({ thread_only: true });
+  await page.goto("/artifacts");
+  await expect(
+    page.getByRole("button", { name: "永久化", exact: true }),
+  ).toBeEnabled();
+});

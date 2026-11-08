@@ -46,6 +46,9 @@ async function setup(envOverrides: Partial<WebEnv> = {}) {
   );
   const app = createApp(env, store, {
     guildAccess: async () => true,
+    // These tests write as a member who manages the server (#166);
+    // guild-manage.test.ts covers the members who may only look.
+    guildManage: async () => true,
     listGuilds: async () => [{ id: "g1", name: "One", icon: null }],
   });
   return { app, store, env };
@@ -628,6 +631,8 @@ describe("anthropic workspace", () => {
         provider: "codex_plus",
         bot_disabled: false,
         member: true,
+        // The hook's list carries no Discord permissions (#166).
+        can_manage: false,
       },
     ]);
 
@@ -668,6 +673,7 @@ describe("anthropic workspace", () => {
         provider: "anthropic_workspace",
         bot_disabled: false,
         member: true,
+        can_manage: false,
       },
     ]);
 

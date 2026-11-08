@@ -85,6 +85,8 @@ export type GuildSummary = {
    * モデル名からは決まらない。旧 API は返さないので、無ければカタログから逆引きする。
    */
   provider?: string | null;
+  /** このサーバーの設定を変えられるか（#166）。旧 API は返さない。 */
+  can_manage?: boolean;
 };
 
 export type Artifact = {

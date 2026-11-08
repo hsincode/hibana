@@ -98,7 +98,7 @@ CIが使うactionはcommit SHAで、Vercel CLIは `tools/vercel/bun.lock` で固
 
 Vercelの既定Bunはlockfile v2を読めなかったため、各 `vercel.json` でBun 1.4.4によるインストールを指定しています。共有パッケージはpostinstallでJavaScriptへビルドし、Vercel Functionsにも解決可能なexportsを使います。Vercelでは依存の配置をhoistedに固定しています。
 
-VPSでは新コードを `/opt/hibana` に配置した後、`bun install --frozen-lockfile`、`systemctl restart hibana` を実行します。定時アクションの音声（#163）には ffmpeg が要るので、VPSに `apt install ffmpeg` で入れておきます。素材は `/var/lib/hibana/scheduled-assets/<サーバーID>/` に置きます（[定時アクション](schedules.md)）。`journalctl -u hibana` の `Hibana ready`、`sandbox:true` と `systemctl show hibana -p NRestarts` を確認します。秘密情報やデータディレクトリはリポジトリから上書きしません。
+VPSでは新コードを `/opt/hibana` に配置した後、`bun install --frozen-lockfile`、`systemctl restart hibana` を実行します。定時アクションの音声（#163）には ffmpeg が要るので、VPSに入れておきます（今のVPSは Arch Linux なので `pacman -S ffmpeg`）。素材は `/var/lib/hibana/scheduled-assets/<サーバーID>/` に置きます（[定時アクション](schedules.md)）。`journalctl -u hibana` の `Hibana ready`、`sandbox:true` と `systemctl show hibana -p NRestarts` を確認します。秘密情報やデータディレクトリはリポジトリから上書きしません。
 
 ## ロールバック
 

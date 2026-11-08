@@ -79,7 +79,7 @@ flowchart LR
 
 ## 運用
 
-- VPS に ffmpeg が要る（`apt install ffmpeg`）。無いと、音声のアクションは失敗してログに出る。投稿は動く
+- VPS に ffmpeg が要る（今の VPS は Arch Linux なので `pacman -S ffmpeg`）。無いと、音声のアクションは失敗してログに出る。投稿は動く
 - Docker イメージには ffmpeg を入れてある（`Dockerfile`）
 
 ## 検証の範囲

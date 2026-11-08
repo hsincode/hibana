@@ -29,7 +29,11 @@
 
 - bot がそのサーバーで `/join` の通話か `/recording` の録音をしているときだけ鳴らす。音声のためにボイスチャンネルへは入らない
 - `/join` の通話では、答えの音声と同じ順番待ちに並ぶ。再生中の音声は止めず、その後に鳴らす
-- 録音中は、鳴らす間だけミュートを外し、終わったらミュートに戻す（#118 の「録音は話さない」を #163 で変えた）。bot 自身が鳴らした音は bot の受信に入らないので、文字起こしと残す音声には入らない想定だが、実機では確かめていない
+- 録音中は、鳴らす間だけミュートを外し、終わったらミュートに戻す（#118 の「録音は話さない」を #163 で変えた）
+- 録音中に鳴らした音声は、bot の発言として録音に入れる（#163、2026-11-08 の追記）。Discord は bot が送った音声をその bot に返さないので、プレイヤーが送る Opus のパケット（20 ms ごと）を、送るときに受け取る
+  - 残す音声: パケットを作り直さずに、bot の音声として残す。成果物のページでは、ほかの話者と同じく再生・ミックスされる
+  - 文字起こし: 同じパケットを xAI の 1 本のストリームで文字起こしし、bot の名前の発言として文字起こしと要約に入れる。音声は 5 分で打ち切るので、1 本で足りる。音楽や効果音は、何も文字にならないことがある
+  - xAI のストリームが 16 本開いているときは、音声だけ残し、文字起こしはしない（録音の上限、#118）。録音を終えるときは、この文字起こしも、話者の発言と同じく終わるのを待つ
 - 5 分で打ち切る
 - ファイルは ffmpeg で Discord の音声に変換する。形式は問わない
 
@@ -80,6 +84,6 @@ flowchart LR
 
 ## 検証の範囲
 
-- 自動テスト: スキーマと API（`apps/api/src/schedules.test.ts`、Postgres は `postgres-store.test.ts`）、時刻の判定と実行（`apps/bot/src/__tests__/schedules.test.ts`）、Discord への投稿と再生先（`schedule-discord.test.ts`）、録音中の再生（`recording-discord.test.ts`、`recording.test.ts`）、ダッシュボード（`apps/web/tests/design.spec.ts`、Chromium）
+- 自動テスト: スキーマと API（`apps/api/src/schedules.test.ts`、Postgres は `postgres-store.test.ts`）、時刻の判定と実行（`apps/bot/src/__tests__/schedules.test.ts`）、Discord への投稿と再生先（`schedule-discord.test.ts`）、録音中の再生と、その音声が録音に入ること（`recording-discord.test.ts`、`recording.test.ts`）、ダッシュボード（`apps/web/tests/design.spec.ts`、Chromium）
 - 手元で、48 kHz ステレオの WAV（4.07 秒）と MP4（VP9・FLAC、4.07 秒）が、bot と同じ `createAudioResource(path)` で ffmpeg を通り、Opus 204 パケット（4.08 秒）になることを確かめた
-- 本物の Discord では動かしていない。`/join` の通話での順番待ち（`apps/bot/src/voice.ts`）には自動テストがない。録音中にミュートを外したとき、bot の音が録音に入らないことも確かめていない
+- 本物の Discord では動かしていない。`/join` の通話での順番待ち（`apps/bot/src/voice.ts`）には自動テストがない。録音中に鳴らした音声が録音に入ることは、偽物のプレイヤーと xAI で確かめただけ

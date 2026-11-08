@@ -30,6 +30,8 @@ function setup(
     existing?: { state: { status: string } };
     /** Clips play until `finishClip()`; without, they end at once. */
     holdClips?: boolean;
+    /** The Opus packets each clip's resource gives the player. */
+    clipPackets?: string[];
   } = {},
 ) {
   const runtime = new Runtime(
@@ -95,6 +97,7 @@ function setup(
   const guild = {
     voiceAdapterCreator: () => ({}),
     members: {
+      me: { displayName: "hibana" },
       fetch: async (id: string) => {
         lookups.push(id);
         if (options.failLookup) throw new Error("Unknown Member");
@@ -105,7 +108,10 @@ function setup(
       },
     },
   };
-  const client = { guilds: { fetch: async () => guild } };
+  const client = {
+    user: { id: "bot1" },
+    guilds: { fetch: async () => guild },
+  };
   const streams: StreamCall[] = [];
   const fakeStream = ((o: Parameters<typeof streamSpeech>[0]) => {
     let resolve!: () => void;
@@ -171,8 +177,10 @@ function setup(
         const player = Object.assign(new EventEmitter(), {
           played: [] as string[],
           stopped: false,
-          play(resource: { path: string }) {
+          play(resource: { path: string; read(): Buffer | null }) {
             this.played.push(resource.path);
+            // As the player does every 20 ms, until the clip runs out.
+            while (resource.read());
           },
           stop() {
             this.stopped = true;
@@ -182,7 +190,10 @@ function setup(
         players.push(player);
         return player;
       }) as never,
-      createAudioResource: ((path: string) => ({ path })) as never,
+      createAudioResource: ((path: string) => {
+        const left = (options.clipPackets ?? []).map((p) => Buffer.from(p));
+        return { path, read: () => left.shift() ?? null };
+      }) as never,
     },
   );
   const heard: { userId: string; name: string; text: string }[] = [];
@@ -508,6 +519,60 @@ describe("scheduled clips during a recording", () => {
     s.finishClip();
     await second;
     expect(s.connection.mutes).toEqual([false, true, false, true]);
+  });
+
+  test("what a clip plays is kept as the bot's audio and transcribed as what it said", async () => {
+    const s = setup({ clipPackets: ["c1", "c2"] });
+    const handle = await s.join();
+    expect(await handle.play("/assets/ema.wav", 300_000)).toBe(true);
+    // Discord never sends a bot its own audio, so it is taken as it is sent.
+    expect(s.audio).toEqual([
+      { userId: "bot1", packets: ["c1", "c2"], ended: true },
+    ]);
+    expect(s.streams).toHaveLength(1);
+    const own = s.streams[0]!;
+    const fed: string[] = [];
+    for (let p; (p = own.opus.read()) !== null;) fed.push(String(p));
+    expect(fed).toEqual(["c1", "c2"]);
+    expect(own.opus.writableEnded).toBe(true);
+    own.onMessage({
+      type: "transcript.partial",
+      is_final: true,
+      speech_final: true,
+      text: "おはよう",
+      start: 0,
+    });
+    await tick();
+    expect(s.heard).toEqual([
+      { userId: "bot1", name: "hibana", text: "おはよう" },
+    ]);
+    // Leaving waits for the clip's transcript to be finished.
+    let left = false;
+    const leaving = handle.leave(true).then(() => (left = true));
+    await tick();
+    expect(left).toBe(false);
+    own.finish();
+    await leaving;
+    expect(s.errors).toEqual([]);
+  });
+
+  test("a clip is still played and kept when sixteen xAI streams are open, but not transcribed", async () => {
+    const s = setup({ clipPackets: ["c1"] });
+    const handle = await s.join();
+    for (let i = 0; i < 8; i++) {
+      s.speaking.emit("start", `u${i}`);
+      await tick();
+      s.pause(`u${i}`);
+      await tick();
+      s.speaking.emit("start", `u${i}`);
+      await tick();
+    }
+    expect(s.streams).toHaveLength(16);
+    expect(await handle.play("/assets/ema.wav", 300_000)).toBe(true);
+    expect(s.streams).toHaveLength(16);
+    expect(s.audio.filter((a) => a.userId === "bot1")).toEqual([
+      { userId: "bot1", packets: ["c1"], ended: true },
+    ]);
   });
 
   test("leaving stops the clip, and nothing plays after", async () => {

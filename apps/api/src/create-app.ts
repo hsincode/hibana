@@ -39,11 +39,13 @@ import {
 } from "./audit";
 import {
   authorizeUrl,
+  canManageGuild,
   exchangeCode,
   fetchBotGuilds,
   fetchMe,
   fetchUserGuilds,
   intersectGuilds,
+  type DiscordGuild,
 } from "./discord";
 import { cookieCrossOrigin, type WebEnv } from "./env";
 import { randomUrlSafe, s256Challenge } from "./pkce";
@@ -197,9 +199,10 @@ export type AppHooks = {
   /** Clock for the cost report: which UTC day is "today", and its cache age. */
   now?: () => number;
   guildAccess?: (accessToken: string, guildId: string) => Promise<boolean>;
-  listGuilds?: (
-    accessToken: string,
-  ) => Promise<{ id: string; name: string; icon: string | null }[]>;
+  /** With guildAccess: whether the user may also change the server's settings (#166). */
+  guildManage?: (accessToken: string, guildId: string) => Promise<boolean>;
+  /** The user's servers that the bot is in, with `owner` and `permissions` when known. */
+  listGuilds?: (accessToken: string) => Promise<DiscordGuild[]>;
   /** Every guild the **bot** is in — what admins/mods see instead of the intersection. */
   listBotGuilds?: () => Promise<
     { id: string; name: string; icon: string | null }[]
@@ -697,6 +700,12 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
         // extra rows read as moderation scope, not as "you joined 200 servers".
         const all = canViewAllGuilds(s.role) ? await botGuilds() : mine;
         const mineIds = new Set(mine.map((g) => g.id));
+        // Which of them the user may change (#166): every one for staff, else
+        // their Discord permissions there. The all-artifacts page reads it.
+        const manageIds = new Set(
+          mine.filter((g) => canManageGuild(g)).map((g) => g.id),
+        );
+        const staff = canViewAllGuilds(s.role);
         const guilds = await Promise.all(
           all.map(async (g) => {
             const row = await store.getGuild(g.id);
@@ -710,6 +719,7 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
               provider: row.selection?.provider ?? null,
               bot_disabled: row.bot_disabled,
               member: mineIds.has(g.id),
+              can_manage: staff || manageIds.has(g.id),
             };
           }),
         );
@@ -721,11 +731,20 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           set.status = 401;
           return { error: "unauthorized" };
         }
-        if (!(await guildOk(env, hooks, s.access_token, params.id, s.role))) {
+        const access = await guildAccess(
+          env,
+          hooks,
+          s.access_token,
+          params.id,
+          s.role,
+        );
+        if (!access.open) {
           set.status = 404;
           return { error: "guild not found" };
         }
         return {
+          // Members may look; only those who manage the server may change it (#166).
+          can_edit: access.manage,
           settings: withAppSettings(
             await store.getGuild(params.id),
             await loadAppSettings(store),
@@ -741,9 +760,20 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
             set.status = 401;
             return { error: "unauthorized" };
           }
-          if (!(await guildOk(env, hooks, s.access_token, params.id, s.role))) {
+          const access = await guildAccess(
+            env,
+            hooks,
+            s.access_token,
+            params.id,
+            s.role,
+          );
+          if (!access.open) {
             set.status = 404;
             return { error: "guild not found" };
+          }
+          if (!access.manage) {
+            set.status = 403;
+            return { error: MANAGE_REQUIRED };
           }
           const parsed = guildPatchSchema.safeParse(body);
           if (!parsed.success) {
@@ -751,6 +781,11 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
             return {
               error: parsed.error.issues.map((i) => i.message).join("; "),
             };
+          }
+          const killSwitch = refuseKillSwitchPatch(s.role, parsed.data);
+          if (killSwitch) {
+            set.status = 403;
+            return { error: killSwitch };
           }
           const gated = refuseRestrictedPatch(
             s.role,
@@ -1534,14 +1569,15 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           set.status = 401;
           return { error: "unauthorized" };
         }
-        if (
-          !guildId.safeParse(params.id).success ||
-          !(await guildOk(env, hooks, s.access_token, params.id, s.role))
-        ) {
+        const access = guildId.safeParse(params.id).success
+          ? await guildAccess(env, hooks, s.access_token, params.id, s.role)
+          : { open: false, manage: false };
+        if (!access.open) {
           set.status = 404;
           return { error: "guild not found" };
         }
         return {
+          can_edit: access.manage,
           skills: guildSkills(await store.listSkills(), params.id),
           commands: (await store.listSkillCommands()).filter(
             (c) => c.guild_id === params.id,
@@ -1554,12 +1590,17 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           set.status = 401;
           return { error: "unauthorized" };
         }
-        if (
-          !guildId.safeParse(params.id).success ||
-          !(await guildOk(env, hooks, s.access_token, params.id, s.role))
-        ) {
+        const access = guildId.safeParse(params.id).success
+          ? await guildAccess(env, hooks, s.access_token, params.id, s.role)
+          : { open: false, manage: false };
+        if (!access.open) {
           set.status = 404;
           return { error: "guild not found" };
+        }
+        // An import changes this server only: the source just has to open (#166).
+        if (!access.manage) {
+          set.status = 403;
+          return { error: MANAGE_REQUIRED };
         }
         const parsed = skillAction.safeParse(body);
         if (!parsed.success) {
@@ -1675,7 +1716,14 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           set.status = 401;
           return { error: "unauthorized" };
         }
-        if (!(await guildOk(env, hooks, s.access_token, params.id, s.role))) {
+        const access = await guildAccess(
+          env,
+          hooks,
+          s.access_token,
+          params.id,
+          s.role,
+        );
+        if (!access.open) {
           set.status = 404;
           return { error: "guild not found" };
         }
@@ -1683,7 +1731,10 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           store.listArtifacts(params.id),
           store.listArtifactCommands(),
         ]);
-        return { sites: decorateArtifacts(sites, commands) };
+        return {
+          can_edit: access.manage,
+          sites: decorateArtifacts(sites, commands),
+        };
       })
       .patch(
         "/api/guilds/:id/artifacts/:token",
@@ -1693,9 +1744,20 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
             set.status = 401;
             return { error: "unauthorized" };
           }
-          if (!(await guildOk(env, hooks, s.access_token, params.id, s.role))) {
+          const access = await guildAccess(
+            env,
+            hooks,
+            s.access_token,
+            params.id,
+            s.role,
+          );
+          if (!access.open) {
             set.status = 404;
             return { error: "guild not found" };
+          }
+          if (!access.manage) {
+            set.status = 403;
+            return { error: MANAGE_REQUIRED };
           }
           const action = parseArtifactAction(body);
           if (!action) {
@@ -1781,31 +1843,80 @@ async function guildOk(
   guildId: string,
   role: Role,
 ): Promise<boolean> {
+  return (await guildAccess(env, hooks, accessToken, guildId, role)).open;
+}
+
+/** Refusal of a server settings write by someone who may only look (#166). */
+const MANAGE_REQUIRED = "Manage Server permission required";
+
+/**
+ * Whether the user may open a server's settings (`open`: a member, or an
+ * Administrator / Moderator for any server the bot is in) and change them
+ * (`manage`, #166): Discord's Manage Server or Administrator there, its owner,
+ * or an Administrator / Moderator. One read of the user's guild list answers
+ * both, so a second call cannot be rate limited into a wrong "no".
+ */
+async function guildAccess(
+  env: WebEnv,
+  hooks: AppHooks,
+  accessToken: string,
+  guildId: string,
+  role: Role,
+): Promise<{ open: boolean; manage: boolean }> {
+  const staff = canViewAllGuilds(role);
   // Moderation scope: an admin/mod may open any server the bot is in, even one
   // they do not share. Everyone else still needs the OAuth intersection.
   // A failed bot-guild fetch falls through to the member check rather than
   // returning false, so a Discord hiccup cannot lock an admin out of a server
   // they are actually in.
-  if (canViewAllGuilds(role)) {
+  if (staff) {
     try {
       const bot = hooks.listBotGuilds
         ? await hooks.listBotGuilds()
         : await fetchBotGuilds(env);
-      if (bot.some((g) => g.id === guildId)) return true;
+      if (bot.some((g) => g.id === guildId))
+        return { open: true, manage: true };
     } catch {
       /* fall through to the member check */
     }
   }
-  if (hooks.guildAccess) return hooks.guildAccess(accessToken, guildId);
+  if (hooks.guildAccess) {
+    const open = await hooks.guildAccess(accessToken, guildId);
+    if (!open) return { open, manage: false };
+    const manage =
+      staff ||
+      (hooks.guildManage
+        ? await hooks.guildManage(accessToken, guildId)
+        : false);
+    return { open, manage };
+  }
   try {
     const [userG, botG] = await Promise.all([
       fetchUserGuilds(accessToken),
       fetchBotGuilds(env),
     ]);
-    return intersectGuilds(userG, botG).some((g) => g.id === guildId);
+    const guild = intersectGuilds(userG, botG).find((g) => g.id === guildId);
+    return {
+      open: Boolean(guild),
+      manage: Boolean(guild && (staff || canManageGuild(guild))),
+    };
   } catch {
-    return false;
+    return { open: false, manage: false };
   }
+}
+
+/**
+ * Stopping or resuming the bot for a whole server is a moderation power
+ * (`canModerate`, decision record #64). The refusal covers the whole request,
+ * so a mixed PATCH is never half-saved.
+ */
+function refuseKillSwitchPatch(
+  role: Role,
+  patch: { bot_disabled?: boolean },
+): string | null {
+  return patch.bot_disabled !== undefined && !canModerate(role)
+    ? "only a moderator or administrator can stop or resume the bot for a server"
+    : null;
 }
 
 function unavailable({ set }: { set: { status?: number | string } }) {

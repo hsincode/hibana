@@ -26,6 +26,7 @@ async function setup(store = new MemoryStore()) {
   }
   const app = createApp(env, store, {
     guildAccess: async () => true,
+    guildManage: async () => true,
     listGuilds: async () => [{ id: "g1", name: "One", icon: null }],
   });
   const call = (

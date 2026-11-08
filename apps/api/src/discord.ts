@@ -11,7 +11,25 @@ export type DiscordGuild = {
   id: string;
   name: string;
   icon: string | null;
+  /** Only on the user's own list: whether they own the server. */
+  owner?: boolean;
+  /** Only on the user's own list: their permissions there, as a decimal string. */
+  permissions?: string;
 };
+
+const ADMINISTRATOR = 0x8n;
+const MANAGE_GUILD = 0x20n;
+
+/** Whether an entry of the user's guild list lets them manage that server. */
+export function canManageGuild(guild: DiscordGuild): boolean {
+  if (guild.owner) return true;
+  try {
+    const bits = BigInt(guild.permissions ?? "0");
+    return (bits & (ADMINISTRATOR | MANAGE_GUILD)) !== 0n;
+  } catch {
+    return false;
+  }
+}
 
 type CacheEntry<T> = { at: number; value: T };
 const botGuildsCache: { current: CacheEntry<DiscordGuild[]> | null } = {

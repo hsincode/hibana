@@ -1,4 +1,5 @@
 import { SQL } from "bun";
+import { parseStoredSchedules, type Schedule } from "@hibana/shared/schedules";
 import type { SkillRow, SkillCommand } from "./skills";
 import type { BlockedRow, LogEntry, LogQuery, LogRow } from "./audit";
 import { DEFAULT_ROLE, parseRole, type Role } from "./roles";
@@ -105,6 +106,12 @@ export interface Store {
   getGuild(id: string): Promise<GuildRow>;
   putGuild(id: string, settings: GuildRow): Promise<void>;
   allGuilds(): Promise<Record<string, GuildRow>>;
+  /** A server's scheduled actions (定時アクション). Rows that no longer parse are left out. */
+  getSchedules(guildId: string): Promise<Schedule[]>;
+  /** Replaces a server's whole list. Bumps the snapshot so the bot picks it up. */
+  putSchedules(guildId: string, schedules: Schedule[]): Promise<void>;
+  /** Every server that has at least one scheduled action. */
+  allSchedules(): Promise<Record<string, Schedule[]>>;
   /** The server rows as stored, before `normalizeGuild` reads them: a row
    *  from before #161 still holds the app settings. */
   storedGuilds(): Promise<unknown[]>;
@@ -186,6 +193,7 @@ export class MemoryStore implements Store {
   ) {}
   private meta = new Map<string, string>();
   private guilds = new Map<string, GuildRow>();
+  private schedules = new Map<string, Schedule[]>();
   private userContexts = new Map<string, UserContextEntry>();
   private userOverrides = new Map<string, UserOverrideRow>();
   private users = new Map<string, UserRow>();
@@ -279,6 +287,24 @@ export class MemoryStore implements Store {
       ]),
     );
   }
+  async getSchedules(guildId: string) {
+    return parseStoredSchedules(structuredClone(this.schedules.get(guildId)));
+  }
+  async putSchedules(guildId: string, schedules: Schedule[]) {
+    if (schedules.length)
+      this.schedules.set(guildId, structuredClone(schedules));
+    else this.schedules.delete(guildId);
+    await this.bumpVersion();
+  }
+  async allSchedules() {
+    const out: Record<string, Schedule[]> = {};
+    for (const [id, list] of this.schedules) {
+      const parsed = parseStoredSchedules(structuredClone(list));
+      if (parsed.length) out[id] = parsed;
+    }
+    return out;
+  }
+
   async storedGuilds() {
     return structuredClone([...this.guilds.values()]) as unknown[];
   }
@@ -743,6 +769,13 @@ export class PostgresStore implements Store {
       token_hash TEXT PRIMARY KEY,
       created_at_unix BIGINT NOT NULL
     )`;
+    // A server's scheduled actions as one list: at most ten, always replaced
+    // whole by the dashboard. Kept out of `guilds` so PUT /internal/snapshot,
+    // which replaces guilds wholesale, never drops them.
+    await this.sql`CREATE TABLE IF NOT EXISTS guild_schedules (
+      guild_id TEXT PRIMARY KEY,
+      schedules JSONB NOT NULL
+    )`;
     if (this.logs) {
       await this.sql`CREATE TABLE IF NOT EXISTS logs (
         id BIGSERIAL PRIMARY KEY,
@@ -814,6 +847,7 @@ export class PostgresStore implements Store {
     await this.sql`ALTER TABLE artifact_commands ENABLE ROW LEVEL SECURITY`;
     await this.sql`ALTER TABLE usage_daily ENABLE ROW LEVEL SECURITY`;
     await this.sql`ALTER TABLE site_history ENABLE ROW LEVEL SECURITY`;
+    await this.sql`ALTER TABLE guild_schedules ENABLE ROW LEVEL SECURITY`;
     if (this.logs) await this.sql`ALTER TABLE logs ENABLE ROW LEVEL SECURITY`;
     if (!(await this.getMeta("snapshot_version"))) {
       await this.setMeta("snapshot_version", "0");
@@ -896,6 +930,40 @@ export class PostgresStore implements Store {
       const row = normalizeGuild(r.settings, this.defaults);
       out[r.guild_id] = row;
       if (!sameSettings(row, r.settings)) await this.putGuild(r.guild_id, row);
+    }
+    return out;
+  }
+  async getSchedules(guildId: string) {
+    const rows = (await this
+      .sql`SELECT schedules FROM guild_schedules WHERE guild_id = ${guildId}`) as {
+      schedules: unknown;
+    }[];
+    return parseStoredSchedules(rows[0]?.schedules);
+  }
+
+  async putSchedules(guildId: string, schedules: Schedule[]) {
+    if (schedules.length) {
+      const payload = JSON.stringify(schedules);
+      await this.sql`
+        INSERT INTO guild_schedules (guild_id, schedules) VALUES (${guildId}, ${payload}::jsonb)
+        ON CONFLICT (guild_id) DO UPDATE SET schedules = EXCLUDED.schedules
+      `;
+    } else {
+      await this.sql`DELETE FROM guild_schedules WHERE guild_id = ${guildId}`;
+    }
+    await this.bumpVersion();
+  }
+
+  async allSchedules() {
+    const rows = (await this
+      .sql`SELECT guild_id, schedules FROM guild_schedules`) as {
+      guild_id: string;
+      schedules: unknown;
+    }[];
+    const out: Record<string, Schedule[]> = {};
+    for (const r of rows) {
+      const parsed = parseStoredSchedules(r.schedules);
+      if (parsed.length) out[r.guild_id] = parsed;
     }
     return out;
   }

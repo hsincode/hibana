@@ -414,7 +414,7 @@ class Port implements RecordingPort {
   }
   async join(_g: string, _c: string, events: RecordingEvents) {
     this.events = events;
-    return { leave: async () => {} };
+    return { leave: async () => {}, play: async () => true };
   }
   /** The icons Discord has, by user ID; one missing throws (#155). */
   icons = new Map<string, Avatar | null>([

@@ -973,6 +973,110 @@
   }
 }
 
+/* ============ 定時アクション ============ */
+.sched-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.sched {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
+}
+.sched-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--sp-3);
+  align-items: end;
+}
+.sched-when {
+  display: grid;
+  grid-template-columns: auto minmax(0, 18rem);
+  gap: var(--sp-3);
+  align-items: end;
+}
+.sched-time {
+  width: 8rem;
+}
+.sched-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: 0;
+  list-style: none;
+}
+.sched-action {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--well);
+}
+.sched-action-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.sched-action-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--ink);
+}
+.sched-post {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2) var(--sp-3);
+}
+.sched-text {
+  grid-column: 1 / -1;
+}
+/* A post's text is a line or two, not a document. */
+.sched-text .textarea {
+  min-height: 4.5em;
+}
+.sched-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.sched-dirty {
+  font-size: var(--fs-sm);
+}
+.sched-assets {
+  padding-top: var(--sp-3);
+  max-width: 72ch;
+}
+@media (max-width: 760px) {
+  .sched {
+    padding: var(--sp-3);
+  }
+  .sched-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .sched-head .sched-name {
+    grid-column: 1 / -1;
+  }
+  .sched-when,
+  .sched-post {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sched-time {
+    width: 100%;
+  }
+}
+
 /* ---------- 全体の設定（#161） ---------- */
 /* 変えられない人には部品を無効にして見せる。fieldset の枠と余白は消す。 */
 .app-fields {

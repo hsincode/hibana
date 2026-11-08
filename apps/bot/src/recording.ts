@@ -87,6 +87,11 @@ export type VoiceHandle = {
   /** Leaves the voice channel. With `flush`, open speech is finished first
    *  (bounded); without it, at once (shutting down). */
   leave(flush: boolean): Promise<void>;
+  /** Plays a file (a scheduled clip) in the channel, after one already
+   *  playing, and resolves once it has played: false when it could not
+   *  (left, or not connected). The recording stays muted except while a
+   *  clip plays. */
+  play(path: string, maxMs: number): Promise<boolean>;
 };
 /** Discord and xAI, behind one seam so the recorder can be tested. */
 export type RecordingPort = {
@@ -258,6 +263,15 @@ export class Recorder {
   /** Whether the server is recording (or connecting to record). */
   active(guildId: string) {
     return this.sessions.has(guildId);
+  }
+
+  /** Plays a scheduled clip in the channel being recorded, and resolves
+   *  once it has played. False when the server is not recording, or the
+   *  recording is connecting or ending. */
+  async play(guildId: string, path: string, maxMs: number) {
+    const session = this.sessions.get(guildId);
+    if (!session?.handle || !session.open || session.ending) return false;
+    return session.handle.play(path, maxMs);
   }
 
   async start(guildId: string, textChannelId: string, userId: string) {

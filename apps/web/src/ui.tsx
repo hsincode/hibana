@@ -3,6 +3,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronsUpDown,
+  AlarmClock,
   Check,
   CircleAlert,
   Cpu,
@@ -30,6 +31,7 @@ import {
   Trash2,
   UserRound,
   Users,
+  Volume2,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -86,6 +88,8 @@ export const Icon = {
   doc: icon(FileText),
   skill: icon(Sparkles),
   box: icon(Package),
+  clock: icon(AlarmClock),
+  sound: icon(Volume2),
   grid: icon(LayoutGrid),
   user: icon(UserRound),
   users: icon(Users),
@@ -126,13 +130,14 @@ export const Icon = {
   ),
 };
 
-/** サーバー設定の 5 ページの印（nav.ts の `path` で引く）。 */
+/** サーバー設定の 6 ページの印（nav.ts の `path` で引く）。 */
 export const GUILD_PAGE_ICON: Record<string, ReactNode> = {
   "": <Icon.agent />,
   tools: <Icon.sliders />,
   context: <Icon.doc />,
   skills: <Icon.skill />,
   artifacts: <Icon.box />,
+  schedules: <Icon.clock />,
 };
 
 /* ---------- provider marks ---------- */

@@ -82,6 +82,9 @@ export type Snapshot = {
     action: string;
     args: Record<string, unknown>;
   }[];
+  /** Scheduled actions per server (定時アクション). The dashboard writes
+   *  them; absent before the API served any. Checked again where they run. */
+  schedules?: Record<string, unknown>;
 };
 /** What the settings API last said about this month's budget (#89). */
 export type BudgetState = {

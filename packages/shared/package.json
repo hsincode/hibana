@@ -22,6 +22,10 @@
     "./budget": {
       "types": "./src/budget.ts",
       "default": "./dist/budget.js"
+    },
+    "./schedules": {
+      "types": "./src/schedules.ts",
+      "default": "./dist/schedules.js"
     }
   },
   "dependencies": {
@@ -29,6 +33,6 @@
   },
   "scripts": {
     "typecheck": "bun check",
-    "build": "bun build src/audit.ts src/billing.ts src/budget.ts src/catalog.ts src/settings.ts --target=bun --outdir=dist --packages=external"
+    "build": "bun build src/audit.ts src/billing.ts src/budget.ts src/catalog.ts src/schedules.ts src/settings.ts --target=bun --outdir=dist --packages=external"
   }
 }

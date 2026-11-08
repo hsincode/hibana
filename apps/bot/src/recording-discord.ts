@@ -2,11 +2,15 @@
 // connection, one xAI stream per speaker, and the posts. The recorder itself
 // (`recording.ts`) only sees `RecordingPort`.
 import {
+  AudioPlayerStatus,
   EndBehaviorType,
   VoiceConnectionStatus,
+  createAudioPlayer,
+  createAudioResource,
   entersState,
   getVoiceConnection,
   joinVoiceChannel,
+  type AudioPlayer,
 } from "@discordjs/voice";
 import {
   AttachmentBuilder,
@@ -15,7 +19,7 @@ import {
   type GuildBasedChannel,
 } from "discord.js";
 import { PassThrough } from "node:stream";
-import { sleep } from "./io";
+import { Serial, sleep } from "./io";
 import type { RecordingEvents, RecordingPort, VoiceHandle } from "./recording";
 import type { Avatar } from "./recording-audio";
 import type { Runtime } from "./runtime";
@@ -58,6 +62,8 @@ export class DiscordRecordingPort implements RecordingPort {
       getVoiceConnection?: typeof getVoiceConnection;
       streamSpeech?: typeof streamSpeech;
       fetch?: (url: string, init: RequestInit) => Promise<Response>;
+      createAudioPlayer?: () => AudioPlayer;
+      createAudioResource?: typeof createAudioResource;
     } = {},
   ) {}
 
@@ -200,7 +206,8 @@ export class DiscordRecordingPort implements RecordingPort {
       guildId,
       adapterCreator: guild.voiceAdapterCreator,
       selfDeaf: false,
-      // A recording never speaks.
+      // A recording never answers. It unmutes only while a scheduled clip
+      // plays (play below).
       selfMute: true,
     });
     try {
@@ -354,10 +361,64 @@ export class DiscordRecordingPort implements RecordingPort {
         if (!abort.signal.aborted) events.disconnected();
       }
     });
+    // Scheduled clips, one at a time: a connection plays one player.
+    const playback = new Serial();
+    let playing: AudioPlayer | undefined;
+    const mute = (selfMute: boolean) => {
+      if (connection.state.status !== VoiceConnectionStatus.Destroyed)
+        connection.rejoin({ ...connection.joinConfig, selfMute });
+    };
     return {
+      play: (path, maxMs) =>
+        playback.run(async () => {
+          if (
+            abort.signal.aborted ||
+            connection.state.status !== VoiceConnectionStatus.Ready
+          )
+            return false;
+          const player = (this.deps.createAudioPlayer ?? createAudioPlayer)();
+          player.on("error", this.report);
+          // Through ffmpeg, whatever the file's format.
+          const resource = (
+            this.deps.createAudioResource ?? createAudioResource
+          )(path);
+          const own = this.ownSpeech(
+            guild.members.me?.displayName,
+            events,
+            stream,
+            sockets,
+            tasks,
+          );
+          // Discord never sends a bot its own audio, so what the clip plays
+          // is taken here as the player sends it (every 20 ms) and recorded
+          // as the bot's speech: kept as audio and transcribed (#163).
+          const read = resource.read.bind(resource);
+          resource.read = () => {
+            const packet = read();
+            if (packet) own.packet(packet);
+            return packet;
+          };
+          playing = player;
+          // Ready already, so this only sends the new voice state: no
+          // reconnect, and the receive streams go on.
+          mute(false);
+          const subscription = connection.subscribe(player);
+          try {
+            player.play(resource);
+            await waitFor(player, AudioPlayerStatus.Idle, maxMs);
+          } finally {
+            player.stop(true);
+            subscription?.unsubscribe();
+            own.end();
+            if (playing === player) playing = undefined;
+            if (!abort.signal.aborted) mute(true);
+          }
+          return true;
+        }),
       leave: async (flush) => {
         if (abort.signal.aborted) return;
         abort.abort();
+        playing?.stop(true);
         connection.receiver.speaking.off("start", listen);
         if (flush) {
           for (const s of speakers.values()) s.end?.();
@@ -366,6 +427,65 @@ export class DiscordRecordingPort implements RecordingPort {
         for (const ws of sockets) ws.close();
         if (connection.state.status !== VoiceConnectionStatus.Destroyed)
           connection.destroy();
+      },
+    };
+  }
+
+  /** The bot's side of one scheduled clip: its packets go to the
+   *  recording's audio and to one xAI stream, heard under the bot's name.
+   *  A clip is cut at five minutes, so one stream holds it. With sixteen
+   *  streams already open it is kept as audio only. */
+  private ownSpeech(
+    /** The bot's name in the server, as the transcript shows it. */
+    shown: string | undefined,
+    events: RecordingEvents,
+    stream: typeof streamSpeech,
+    sockets: Set<{ close(): void }>,
+    tasks: Set<Promise<void>>,
+  ) {
+    const botId = this.client.user?.id;
+    if (!botId) return { packet: () => {}, end: () => {} };
+    const name = shown ?? this.client.user?.username ?? "bot";
+    const sink = events.audio?.(botId, name);
+    let input: PassThrough | undefined;
+    if (tasks.size < MAX_STREAMS) {
+      const opus = new PassThrough({ objectMode: true });
+      input = opus;
+      const startedAt = Date.now();
+      const assembler = new UtteranceAssembler();
+      const emit = (u: { text: string; start: number } | undefined) => {
+        if (u)
+          events.utterance(
+            botId,
+            name,
+            startedAt + Math.round(u.start * 1000),
+            u.text,
+          );
+      };
+      const speech = stream({
+        opus,
+        query: recordingQuery(this.runtime.app().filler_removal),
+        key: this.runtime.config.xaiKey,
+        sockets,
+        maxMs: STREAM_MAX_MS,
+        report: this.report,
+        onMessage: (data) => emit(assembler.push(data)),
+      });
+      // Counted with the speakers' streams, and waited for when leaving.
+      const task = speech.done
+        .then(() => emit(assembler.flush()))
+        .catch(this.report)
+        .finally(() => tasks.delete(task));
+      tasks.add(task);
+    }
+    return {
+      packet: (packet: Buffer) => {
+        sink?.packet(packet, Date.now());
+        if (input && !input.destroyed) input.write(packet);
+      },
+      end: () => {
+        sink?.end();
+        if (input && !input.destroyed) input.end();
       },
     };
   }

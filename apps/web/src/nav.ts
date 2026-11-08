@@ -4,7 +4,7 @@
    画面テスト（tests/）からも読むので、ここには React を持ち込まない。
    ============================================================ */
 
-/** サーバー設定の 5 ページ。`path` は `/g/:id/` に続く部分で、空がエージェント。 */
+/** サーバー設定の 6 ページ。`path` は `/g/:id/` に続く部分で、空がエージェント。 */
 export const GUILD_PAGES: {
   path: string;
   label: string;
@@ -18,6 +18,7 @@ export const GUILD_PAGES: {
   { path: "context", label: "コンテキスト", autosave: true },
   { path: "skills", label: "スキル" },
   { path: "artifacts", label: "成果物", wide: true },
+  { path: "schedules", label: "定時アクション" },
 ];
 
 export const guildPath = (id: string, page = ""): string =>

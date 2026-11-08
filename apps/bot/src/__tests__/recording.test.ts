@@ -52,6 +52,8 @@ type Joined = {
   channelId: string;
   events: RecordingEvents;
   left: boolean[];
+  /** Scheduled clips played in the channel. */
+  played: string[];
 };
 
 class FakePort implements RecordingPort {
@@ -108,13 +110,17 @@ class FakePort implements RecordingPort {
   }
   async join(guildId: string, channelId: string, events: RecordingEvents) {
     if (this.joinError) throw this.joinError;
-    const entry: Joined = { guildId, channelId, events, left: [] };
+    const entry: Joined = { guildId, channelId, events, left: [], played: [] };
     this.joined.push(entry);
     return {
       leave: async (flush: boolean) => {
         entry.left.push(flush);
         if (flush) this.duringLeave?.(events);
         await this.leaveGate;
+      },
+      play: async (path: string) => {
+        entry.played.push(path);
+        return true;
       },
     };
   }
@@ -230,6 +236,15 @@ describe("starting", () => {
     expect(s.port.sent.find((m) => m.channelId === "vc1")!.content).toContain(
       "<#t1>",
     );
+  });
+
+  test("a scheduled clip plays in the channel being recorded, and nowhere else", async () => {
+    const s = setup();
+    expect(await s.recorder.play("g1", "/assets/ema.wav", 300_000)).toBe(false);
+    await s.recorder.start("g1", "t1", "u1");
+    expect(await s.recorder.play("g1", "/assets/ema.wav", 300_000)).toBe(true);
+    expect(await s.recorder.play("g2", "/assets/ema.wav", 300_000)).toBe(false);
+    expect(s.port.joined[0]!.played).toEqual(["/assets/ema.wav"]);
   });
 
   test("started from the voice channel's own chat, it is said there once", async () => {

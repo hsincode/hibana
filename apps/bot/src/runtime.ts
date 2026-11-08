@@ -10,14 +10,13 @@ import {
   WORKSPACE_PROVIDER,
 } from "@hibana/shared/catalog";
 import {
-  appSettingsFromGuild,
+  emptyAppSettings,
   appSettingsPatchSchema,
   applyAppSettingsPatch,
   applyPatch,
   applyUserOverridePatch,
   initialAppSettings,
   normalizeAppSettings,
-  withAppSettings,
   effectiveSubagentMode,
   normalizeGuild,
   normalizeUserOverride,
@@ -119,7 +118,15 @@ export class Runtime {
       // Restoring is not a change: stored conversations were written under
       // these settings, and reporting every guild here would clear them all
       // on each start (#59).
-      this.replace(await readJson(this.config.statePath, this.snapshot), false);
+      const state = await readJson(this.config.statePath, this.snapshot);
+      // A state file from before #161 has no app settings, and its server
+      // rows still hold them: start them from what most servers have, as the
+      // settings API does, before the rows are read without them.
+      state.app_settings ??= initialAppSettings(
+        Object.values(state.guilds ?? {}),
+        this.defaultAppSettings(),
+      );
+      this.replace(state, false);
       if (!this.config.webApiUrl) this.withholdWorkspacePresets();
       await this.persist();
     }
@@ -192,29 +199,31 @@ export class Runtime {
         this.onChange?.(id);
     }
   }
-  /** A server's settings, or a DM's without an id. The app settings (#161)
-   *  take the place of the server's frozen copies of them, so everything that
-   *  reads `temperature`, `exa_mode`, the thread history, the voice settings
-   *  or `mcp_url` from here reads the app's. */
+  /** A server's settings, or a DM's without an id. The settings that are
+   *  one for every server and DM (#161) are `app()`. */
   guild(id?: string) {
-    return withAppSettings(
-      normalizeGuild(
-        id ? this.snapshot.guilds[id] : null,
-        normalizeGuild(this.snapshot.defaults, this.defaultSettings()),
-      ),
-      this.app(),
+    return normalizeGuild(
+      id ? this.snapshot.guilds[id] : null,
+      normalizeGuild(this.snapshot.defaults, this.defaultSettings()),
     );
   }
-  /** The app settings (#161). Without them in the snapshot, what most servers
-   *  have, as the settings API starts them (`initialAppSettings`). */
+  /** The app settings (#161): temperature, exa, the thread history and its
+   *  summary, the voice settings and the MCP URL, for every server and DM. */
   app(): AppSettings {
-    const defaults = this.defaultAppSettings();
-    return this.snapshot.app_settings
-      ? normalizeAppSettings(this.snapshot.app_settings, defaults)
-      : initialAppSettings(Object.values(this.snapshot.guilds), defaults);
+    return normalizeAppSettings(
+      this.snapshot.app_settings,
+      this.defaultAppSettings(),
+    );
   }
+  /** The bot's own environment, for a field the settings API has not sent. */
   private defaultAppSettings(): AppSettings {
-    return appSettingsFromGuild(this.defaultSettings());
+    return {
+      ...emptyAppSettings(),
+      temperature: this.config.temperature,
+      exa_mode: this.config.exaMode as AppSettings["exa_mode"],
+      thread_history_max_age_secs: this.config.threadHistoryAge,
+      thread_compaction_tokens: this.config.compactionTokens,
+    };
   }
   async initializeGuild(id: string) {
     return this.serial.run(async () => {
@@ -242,11 +251,7 @@ export class Runtime {
       jev_enabled: this.config.jevEnabled,
       jev_task_enabled: this.config.jevTaskEnabled,
       suppress_embeds: this.config.suppressEmbeds,
-      temperature: this.config.temperature,
-      exa_mode: this.config.exaMode,
       extra_triggers: [...this.config.extraTriggers],
-      thread_history_max_age_secs: this.config.threadHistoryAge,
-      thread_compaction_tokens: this.config.compactionTokens,
     };
   }
   role(userId: string) {
@@ -448,6 +453,8 @@ export class Runtime {
       effectiveSubagentMode(stored, selection) === "ultra";
     return {
       ...guild,
+      // One value for every server and DM (#161).
+      ...this.app(),
       selection: selection as Selection,
       service_tier: pick(user.service_tier, guild.service_tier!),
       subagent_enabled: subagentEnabled,
@@ -467,8 +474,6 @@ export class Runtime {
       jev_task_enabled: pick(user.jev_task_enabled, guild.jev_task_enabled!),
       context,
       suppress_embeds: guild.suppress_embeds!,
-      temperature: guild.temperature!,
-      exa_mode: guild.exa_mode!,
       // Present for Workspace only, so what `/info` and `get_bot_settings`
       // print for every other provider is what it was.
       ...(workspace ? { workspace_ultra: workspaceUltra } : {}),

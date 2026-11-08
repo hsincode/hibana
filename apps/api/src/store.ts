@@ -17,8 +17,9 @@ import {
   emptyGuild,
   emptyUserOverride,
   settingsDefaults,
-  appSettingsFromGuild,
+  appSettingsDefaults,
   applyAppSettingsPatch,
+  emptyAppSettings,
   initialAppSettings,
   normalizeAppSettings,
   type AppSettings,
@@ -80,6 +81,8 @@ export function isArtifactAction(raw: string): raw is ArtifactAction {
 
 export interface Store {
   readonly defaults: GuildRow;
+  /** What an app setting returns to when it is reset (#161). */
+  readonly appDefaults: AppSettings;
   replaceSkills(rows: SkillRow[]): Promise<void>;
   listSkills(): Promise<SkillRow[]>;
   enqueueSkillCommand(
@@ -102,6 +105,9 @@ export interface Store {
   getGuild(id: string): Promise<GuildRow>;
   putGuild(id: string, settings: GuildRow): Promise<void>;
   allGuilds(): Promise<Record<string, GuildRow>>;
+  /** The server rows as stored, before `normalizeGuild` reads them: a row
+   *  from before #161 still holds the app settings. */
+  storedGuilds(): Promise<unknown[]>;
   allUserContexts(): Promise<Record<string, UserContextEntry>>;
   getUserOverride(id: string): Promise<UserOverrideRow>;
   putUserOverride(id: string, settings: UserOverrideRow): Promise<void>;
@@ -174,7 +180,10 @@ function matchesLogQuery(r: LogRow, q: LogQuery): boolean {
 }
 
 export class MemoryStore implements Store {
-  constructor(readonly defaults: GuildRow = emptyGuild()) {}
+  constructor(
+    readonly defaults: GuildRow = emptyGuild(),
+    readonly appDefaults: AppSettings = emptyAppSettings(),
+  ) {}
   private meta = new Map<string, string>();
   private guilds = new Map<string, GuildRow>();
   private userContexts = new Map<string, UserContextEntry>();
@@ -269,6 +278,9 @@ export class MemoryStore implements Store {
         normalizeGuild(row, this.defaults),
       ]),
     );
+  }
+  async storedGuilds() {
+    return structuredClone([...this.guilds.values()]) as unknown[];
   }
   async allUserContexts() {
     return Object.fromEntries(this.userContexts);
@@ -557,6 +569,7 @@ export function assertPostgresUrl(databaseUrl: string): string {
 
 export class PostgresStore implements Store {
   readonly defaults: GuildRow;
+  readonly appDefaults: AppSettings;
   private db: SqlClient;
   private readonly url: string;
   private readonly connect: (url: string) => SqlClient;
@@ -570,6 +583,7 @@ export class PostgresStore implements Store {
     opts: {
       logs?: boolean;
       defaults?: GuildRow;
+      appDefaults?: AppSettings;
       /** Opens a pool. Tests pass a stand-in; the default is Bun's `SQL`. */
       connect?: (url: string) => SqlClient;
     } = {},
@@ -580,6 +594,7 @@ export class PostgresStore implements Store {
     this.db = this.connect(this.url);
     this.logs = opts.logs ?? false;
     this.defaults = opts.defaults ?? emptyGuild();
+    this.appDefaults = opts.appDefaults ?? emptyAppSettings();
   }
 
   /** Closes the pool. For scripts and tests; the API keeps it for the instance's life. */
@@ -803,6 +818,9 @@ export class PostgresStore implements Store {
     if (!(await this.getMeta("snapshot_version"))) {
       await this.setMeta("snapshot_version", "0");
     }
+    // Before the shape rewrite below, which leaves the app settings out of
+    // the server rows: the first app settings are made from them (#161).
+    await installAppSettings(this);
     // Persist legacy nulls once, before serving snapshots. Later environment
     // edits must not change what a dashboard already displayed as selected.
     await this.allGuilds();
@@ -810,7 +828,6 @@ export class PostgresStore implements Store {
     // After the shape rewrite above, so the one-shot reset sees real rows and
     // does not leave a concrete personal copy that shadows the server.
     await installPersonalDefaults(this);
-    await installAppSettings(this);
   }
 
   async getMeta(key: string) {
@@ -881,6 +898,13 @@ export class PostgresStore implements Store {
       if (!sameSettings(row, r.settings)) await this.putGuild(r.guild_id, row);
     }
     return out;
+  }
+
+  async storedGuilds() {
+    const rows = (await this.sql`SELECT settings FROM guilds`) as {
+      settings: unknown;
+    }[];
+    return rows.map((r) => r.settings);
   }
 
   async allUserContexts() {
@@ -1350,9 +1374,8 @@ export async function installPersonalDefaults(store: Store) {
 export const APP_SETTINGS_META = "app_settings";
 
 /** The defaults of the app settings (#161): what a new server row was seeded
- *  with (`settingsDefaults(env)`) before they moved. */
-export const appDefaults = (store: Store): AppSettings =>
-  appSettingsFromGuild(store.defaults);
+ *  with (`appSettingsDefaults(env)`) before they moved. */
+export const appDefaults = (store: Store): AppSettings => store.appDefaults;
 
 function parseAppSettings(raw: string | null, defaults: AppSettings) {
   let parsed: unknown = null;
@@ -1399,19 +1422,19 @@ export async function patchAppSettings(
 }
 
 /**
- * One shot (#161): the app settings start from what most servers had. The
- * server rows keep their copies (see `GuildRow`), so this reads the same
- * values whenever it runs first. Written only when there is none yet, so two
+ * One shot (#161): the app settings start from what most servers had, read
+ * from the rows as stored. It runs before anything rewrites a row without
+ * them (`PostgresStore.migrate`). Written only when there is none yet, so two
  * instances starting at once agree, and a later change is never replaced.
  */
 export async function installAppSettings(store: Store) {
   if ((await store.getMeta(APP_SETTINGS_META)) !== null) return;
   const first = initialAppSettings(
-    Object.values(await store.allGuilds()),
+    await store.storedGuilds(),
     appDefaults(store),
   );
-  // No version bump: a bot answered 304 keeps a snapshot without
-  // `app_settings`, and works out these same values from the server rows.
+  // No version bump: until a change bumps it, a bot answered 304 keeps the
+  // values it had, which these were made from.
   await store.compareMeta(APP_SETTINGS_META, null, JSON.stringify(first));
 }
 
@@ -1420,13 +1443,17 @@ export async function openStore(
   opts: { logs?: boolean } = {},
 ): Promise<Store> {
   if (!databaseUrl) {
-    const mem = new MemoryStore(settingsDefaults(process.env));
+    const mem = new MemoryStore(
+      settingsDefaults(process.env),
+      appSettingsDefaults(process.env),
+    );
     await mem.migrate();
     return mem;
   }
   const store = new PostgresStore(databaseUrl, {
     logs: opts.logs ?? false,
     defaults: settingsDefaults(process.env),
+    appDefaults: appSettingsDefaults(process.env),
   });
   await store.migrate();
   return store;

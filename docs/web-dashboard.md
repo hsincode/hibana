@@ -70,8 +70,8 @@ flowchart LR
 `/settings` の値は、すべてのサーバーと DM に使われます（#161）。サーバーごとには変えられません。対象は temperature・exa・スレッド履歴の保持・スレッドの要約の方式と大きさ・MCP サーバー URL・voice-mode・filler removal で、本番でサーバーごとの分けが使われていなかったものです（判断は #161）。外部 MCP を使うかどうかは、サーバーごとの設定のまま残しています。
 
 - 保存先は設定 API の `meta` の `app_settings` です。bot へはスナップショットの `app_settings` で届きます。Discord の `/temperature`・`/exa`・`/thread-history`・`/voice-mode`・`/filler-words` と、bot の `set_thread_history` も同じ値を変えます。どれも Moderator と Administrator だけが変えられ、DM からも使えます。
-- 最初の値は、移した時点のサーバーの行で最も多かった値です（同数なら既定値）。API の起動時に一度だけ作ります（`apps/api/src/store.ts` の `installAppSettings`）。
-- 1 つ前の版の bot とダッシュボードのために（[ADR-0006](adr/0006-roll-back-the-bot-alone.md)）、サーバーの行にも同じ項目が残っています。行の値は移した時点のまま変わらず、API はサーバーの行を返すときに全体の値を重ねます。サーバーの設定の保存（PATCH）は、これらの項目を受け付けたうえで無視します。行とスキーマから消すのは、次の配信です。
+- 最初の値は、移した時点のサーバーの行で最も多かった値です（同数なら既定値。サーバーが無ければ API の環境変数から作った既定値）。API の起動時に一度だけ、保存されたままの行から作ります（`apps/api/src/store.ts` の `installAppSettings`）。
+- 配信は 2 回に分けました（[ADR-0006](adr/0006-roll-back-the-bot-alone.md)）。1 回目は、サーバーの行に同じ項目を残し、サーバーの設定の保存（PATCH）でも受け付けて無視し、API がサーバーの行を返すときに全体の値を重ねていました。2 回目で、サーバーの行・PATCH・契約の一覧（`apps/api/src/contract.json`）から消しました。サーバーの PATCH にこれらの項目を送ると 400 になります。保存されたままの行は、API の起動時の書き直しで、これらの項目が抜けます（全体の設定を作った後）。
 
 ## 保存の見せ方
 

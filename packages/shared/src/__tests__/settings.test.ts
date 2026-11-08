@@ -20,13 +20,12 @@ import {
   isTextModelPreset,
   textModelSelection,
   APP_SETTING_KEYS,
-  appSettingsFromGuild,
+  appSettingsDefaults,
   appSettingsPatchSchema,
   applyAppSettingsPatch,
   emptyAppSettings,
   initialAppSettings,
   normalizeAppSettings,
-  withAppSettings,
   type GuildRow,
   type UserOverrideRow,
   type UserOverridePatch,
@@ -85,10 +84,11 @@ test("new and legacy settings contain concrete values and preserve false, zero a
       selection: null,
       effort: null,
       ultra_mode: null,
+      // An app setting since #161: left out of the server's row.
       temperature: 0,
       jev_enabled: false,
       extra_triggers: [],
-    },
+    } as never,
     defaults,
   );
   expect(
@@ -100,7 +100,7 @@ test("new and legacy settings contain concrete values and preserve false, zero a
     effort: "low",
   });
   expect(migrated.ultra_mode).toBe(true);
-  expect(migrated.temperature).toBe(0);
+  expect("temperature" in migrated).toBe(false);
   expect(migrated.jev_enabled).toBe(false);
   expect(migrated.extra_triggers).toEqual([]);
   expect(normalizeGuild(migrated, emptyGuild())).toEqual(migrated);
@@ -766,7 +766,7 @@ test("Text Generation Model is a server setting: Haiku 5.5 medium by default, An
   expect(applyPatch(written, { text_model: null }).text_model).toEqual(
     DEFAULT_TEXT_MODEL,
   );
-  expect(applyPatch(written, { temperature: 1 }).text_model).toEqual(sonnet);
+  expect(applyPatch(written, { thread_only: true }).text_model).toEqual(sonnet);
 
   // A row stored before the setting existed, or holding a preset that no
   // longer qualifies, reads as the default.
@@ -841,18 +841,34 @@ test("the app settings pick how threads are summarized and at what size (#124, #
   expect(normalizeAppSettings(null, base)).toEqual(base);
 
   // THREAD_COMPACTION_TOKENS seeds the defaults, as THREAD_HISTORY_MAX_AGE_SECS does.
+  expect(appSettingsDefaults({})).toEqual(base);
   expect(
-    appSettingsFromGuild(settingsDefaults({})).thread_compaction_tokens,
-  ).toBe(30_000);
-  expect(
-    appSettingsFromGuild(
-      settingsDefaults({ THREAD_COMPACTION_TOKENS: "50000" }),
-    ).thread_compaction_tokens,
+    appSettingsDefaults({ THREAD_COMPACTION_TOKENS: "50000" })
+      .thread_compaction_tokens,
   ).toBe(50_000);
 });
 
-test("a server's PATCH no longer changes the app settings, and still accepts them (#161)", () => {
-  // The previous bot and dashboard still send these fields (docs/adr/0006).
+test("the API's environment seeds the app settings' defaults, as it seeded new server rows (#161)", () => {
+  expect(
+    appSettingsDefaults({
+      EXA_ENABLED: "true",
+      LLM_TEMPERATURE: "1.1",
+      THREAD_HISTORY_MAX_AGE_SECS: "600",
+    }),
+  ).toMatchObject({
+    exa_mode: "on",
+    temperature: 1.1,
+    thread_history_max_age_secs: 600,
+  });
+  expect(appSettingsDefaults({ EXA_ENABLED: "false" }).exa_mode).toBe("off");
+  expect(() => appSettingsDefaults({ EXA_ENABLED: "maybe" })).toThrow(
+    "EXA_ENABLED must be a boolean",
+  );
+  expect(() => appSettingsDefaults({ LLM_TEMPERATURE: "3" })).toThrow();
+});
+
+test("a server's settings no longer hold the app settings (#161)", () => {
+  // Accepted and ignored for one deployment (docs/adr/0006); refused since.
   const patch = {
     temperature: 1.5,
     exa_mode: "off",
@@ -863,20 +879,27 @@ test("a server's PATCH no longer changes the app settings, and still accepts the
     filler_removal: false,
     mcp_url: "https://mcp.example.com/mcp",
   } as const;
-  expect(guildPatchSchema.safeParse(patch).success).toBe(true);
-  const before = emptyGuild();
-  expect(applyPatch(before, patch)).toEqual(normalizeGuild(before));
-  // The other fields of the same PATCH still apply.
-  expect(applyPatch(before, { ...patch, thread_only: true }).thread_only).toBe(
-    true,
-  );
-  for (const key of APP_SETTING_KEYS) expect(key in patch).toBe(true);
+  for (const key of APP_SETTING_KEYS) {
+    expect(key in patch).toBe(true);
+    expect(guildPatchSchema.safeParse({ [key]: patch[key] }).success, key).toBe(
+      false,
+    );
+    expect(key in emptyGuild()).toBe(false);
+  }
+  // A row stored before they moved still holds them in JSONB; reading it
+  // leaves them out, and keeps the server's own settings.
+  const stored = { ...emptyGuild(), ...patch, thread_only: true };
+  const read = normalizeGuild(stored);
+  for (const key of APP_SETTING_KEYS) expect(key in read).toBe(false);
+  expect(read.thread_only).toBe(true);
+  expect(read.mcp_enabled).toBe(true);
 });
 
 test("the first app settings take what most servers had, and the default on a tie (#161)", () => {
   const defaults = emptyAppSettings();
   expect(initialAppSettings([], defaults)).toEqual(defaults);
-  const server = (fields: Partial<GuildRow>) => ({
+  // Rows as they were stored before #161.
+  const server = (fields: Record<string, unknown>) => ({
     ...emptyGuild(),
     ...fields,
   });
@@ -899,18 +922,4 @@ test("the first app settings take what most servers had, and the default on a ti
     initialAppSettings([{ thread_compaction: "fast" } as never], defaults)
       .thread_compaction,
   ).toBe("cache");
-});
-
-test("a server row is handed out with the app settings in place of its frozen copies (#161)", () => {
-  const app = {
-    ...emptyAppSettings(),
-    temperature: 1.2,
-    mcp_url: "https://mcp.example.com/mcp",
-  };
-  const row = { ...emptyGuild(), temperature: 0.1, thread_only: true };
-  const out = withAppSettings(row, app);
-  expect(out.temperature).toBe(1.2);
-  expect(out.mcp_url).toBe("https://mcp.example.com/mcp");
-  expect(out.thread_only).toBe(true);
-  expect(appSettingsFromGuild(out)).toEqual(app);
 });

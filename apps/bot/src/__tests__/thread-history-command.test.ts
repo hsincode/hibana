@@ -103,9 +103,9 @@ test("the values are the app's: every server and DM reads them, and a DM may cha
   const rt = runtime();
   const reply = await slash(rt, { ints: { seconds: 900 } }, null);
   expect(reply).toContain("全体の設定を変えました");
+  expect(rt.app().thread_history_max_age_secs).toBe(900);
   for (const id of ["g1", "g2", undefined])
-    expect(rt.guild(id).thread_history_max_age_secs).toBe(900);
-  expect(rt.resolve(undefined, "u1").thread_history_max_age_secs).toBe(900);
+    expect(rt.resolve(id, "u1").thread_history_max_age_secs).toBe(900);
 });
 
 test("a member below Moderator is refused and nothing changes (#161)", async () => {

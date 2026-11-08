@@ -7,9 +7,9 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
+import { Link } from "react-router-dom";
 import { billingBounds, billingMonth } from "@hibana/shared/billing";
 import { api } from "./api";
-import { BudgetFallbackPanel } from "./BudgetFallback";
 import {
   Alert,
   Badge,
@@ -312,11 +312,12 @@ export function AnalyticsPage({
           today={report.current ? today : undefined}
         />
       )}
-      {/* 判定は今月のものなので、過去の月を見ている間も同じ内容を出す。今日の推計が
-          読み直されるたびに、この枠の状態も読み直す。 */}
-      <BudgetFallbackPanel
-        reloadKey={`${reloads}:${today.data?.fetched_at ?? ""}`}
-      />
+      {/* 予算が少ないときのモデルと閾値は、全体の設定に移した（#161）。 */}
+      <p className="moved-note">
+        予算が少ないときのモデルと閾値は
+        <Link to="/settings">全体の設定</Link>
+        にあります。
+      </p>
       {canViewUsage && <UsagePanel month={shown} reloadKey={reloads} />}
     </div>
   );

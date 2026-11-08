@@ -422,29 +422,25 @@ test("Ultra (Ultracode) keeps the explicit agent policy; only Multi-Agent is pro
 test("server initialization and legacy normalization freeze defaults without changing other servers", async () => {
   const runtime = new Runtime(
     loadConfig({
-      LLM_TEMPERATURE: "1.2",
       JEV_ENABLED: "false",
       RUNTIME_STATE_PATH: "",
     }),
   );
   await runtime.initializeGuild("100");
-  expect(runtime.snapshot.guilds["100"]?.temperature).toBe(1.2);
-  runtime.config.temperature = 0.2;
+  expect(runtime.snapshot.guilds["100"]?.jev_enabled).toBe(false);
   runtime.config.jevEnabled = true;
   await runtime.initializeGuild("100");
   await runtime.initializeGuild("200");
-  expect(runtime.resolve("100").temperature).toBe(1.2);
   expect(runtime.resolve("100").jev_enabled).toBe(false);
-  expect(runtime.resolve("200").temperature).toBe(0.2);
+  expect(runtime.resolve("200").jev_enabled).toBe(true);
   runtime.replace({
-    guilds: { "300": { selection: null, temperature: null } as never },
+    guilds: { "300": { selection: null, jev_enabled: null } as never },
     user_overrides: { "400": { jev_enabled: null } as never },
   });
   const saved = structuredClone(runtime.snapshot);
-  runtime.config.temperature = 0.9;
   runtime.config.jevEnabled = false;
   runtime.replace(saved);
-  expect(runtime.resolve("300").temperature).toBe(0.2);
+  expect(runtime.resolve("300").jev_enabled).toBe(true);
   expect(runtime.resolve("300", "400").jev_enabled).toBe(true);
 });
 
@@ -466,8 +462,10 @@ test("legacy state preserves global defaults and strips retired settings", async
   const runtime = new Runtime(config());
   runtime.replace(snapshot);
   expect(runtime.resolve().selection.provider).toBe("deepseek");
+  // One value for every server and DM (#161): what most servers had.
   expect(runtime.resolve("100").temperature).toBe(1);
-  expect(runtime.resolve("101").temperature).toBe(0);
+  expect(runtime.resolve("101").temperature).toBe(1);
+  expect(runtime.resolve().temperature).toBe(1);
   expect("fast_enabled" in runtime.resolve()).toBe(false);
   expect("verify_enabled" in runtime.resolve()).toBe(false);
   expect(JSON.stringify(snapshot)).not.toMatch(

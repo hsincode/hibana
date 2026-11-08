@@ -17,6 +17,12 @@ import {
   emptyGuild,
   emptyUserOverride,
   settingsDefaults,
+  appSettingsFromGuild,
+  applyAppSettingsPatch,
+  initialAppSettings,
+  normalizeAppSettings,
+  type AppSettings,
+  type AppSettingsPatch,
   type GuildRow,
   type UserOverrideRow,
 } from "./settings";
@@ -226,6 +232,7 @@ export class MemoryStore implements Store {
     if (!this.meta.has("snapshot_version"))
       this.meta.set("snapshot_version", "0");
     await installPersonalDefaults(this);
+    await installAppSettings(this);
   }
   async getMeta(key: string) {
     return this.meta.get(key) ?? null;
@@ -803,6 +810,7 @@ export class PostgresStore implements Store {
     // After the shape rewrite above, so the one-shot reset sees real rows and
     // does not leave a concrete personal copy that shadows the server.
     await installPersonalDefaults(this);
+    await installAppSettings(this);
   }
 
   async getMeta(key: string) {
@@ -1337,6 +1345,74 @@ export async function installPersonalDefaults(store: Store) {
     if (!existing[user.discord_id])
       await store.putUserOverride(user.discord_id, emptyUserOverride());
   await store.setMeta(key, "1");
+}
+
+export const APP_SETTINGS_META = "app_settings";
+
+/** The defaults of the app settings (#161): what a new server row was seeded
+ *  with (`settingsDefaults(env)`) before they moved. */
+export const appDefaults = (store: Store): AppSettings =>
+  appSettingsFromGuild(store.defaults);
+
+function parseAppSettings(raw: string | null, defaults: AppSettings) {
+  let parsed: unknown = null;
+  try {
+    parsed = raw === null ? null : JSON.parse(raw);
+  } catch {
+    // A broken value reads as the defaults rather than taking the API down.
+  }
+  return normalizeAppSettings(parsed, defaults);
+}
+
+/** The app settings (#161). Each field missing or not valid takes the default. */
+export async function loadAppSettings(store: Store): Promise<AppSettings> {
+  return parseAppSettings(
+    await store.getMeta(APP_SETTINGS_META),
+    appDefaults(store),
+  );
+}
+
+/**
+ * Applies a PATCH to the app settings and bumps the snapshot version. The
+ * write only lands on the value it was read from, so two saves at once on
+ * two API instances do not drop each other's fields; a save that keeps losing
+ * that race returns null.
+ */
+export async function patchAppSettings(
+  store: Store,
+  patch: AppSettingsPatch,
+): Promise<AppSettings | null> {
+  const defaults = appDefaults(store);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const raw = await store.getMeta(APP_SETTINGS_META);
+    const next = applyAppSettingsPatch(
+      parseAppSettings(raw, defaults),
+      patch,
+      defaults,
+    );
+    if (await store.compareMeta(APP_SETTINGS_META, raw, JSON.stringify(next))) {
+      await store.bumpVersion();
+      return next;
+    }
+  }
+  return null;
+}
+
+/**
+ * One shot (#161): the app settings start from what most servers had. The
+ * server rows keep their copies (see `GuildRow`), so this reads the same
+ * values whenever it runs first. Written only when there is none yet, so two
+ * instances starting at once agree, and a later change is never replaced.
+ */
+export async function installAppSettings(store: Store) {
+  if ((await store.getMeta(APP_SETTINGS_META)) !== null) return;
+  const first = initialAppSettings(
+    Object.values(await store.allGuilds()),
+    appDefaults(store),
+  );
+  // No version bump: a bot answered 304 keeps a snapshot without
+  // `app_settings`, and works out these same values from the server rows.
+  await store.compareMeta(APP_SETTINGS_META, null, JSON.stringify(first));
 }
 
 export async function openStore(

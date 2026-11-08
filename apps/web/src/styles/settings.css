@@ -972,3 +972,19 @@
     min-height: 40px;
   }
 }
+
+/* ---------- 全体の設定（#161） ---------- */
+/* 変えられない人には部品を無効にして見せる。fieldset の枠と余白は消す。 */
+.app-fields {
+  display: contents;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.app-fields-note,
+.moved-note {
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+  line-height: 1.65;
+}

@@ -1135,9 +1135,35 @@ export class ToolRegistry {
           this.runtime.config.extraTriggers,
         ),
       };
-    if (
-      ["set_bot_model", "set_thread_history", "set_triggers"].includes(name)
-    ) {
+    // The thread history is an app setting (#161): one value for every
+    // server and DM, which only a Moderator or an Administrator may change.
+    if (name === "set_thread_history") {
+      // The summary fields change only themselves (#124); the retention is
+      // written when asked for, or when nothing else is.
+      const summary =
+        a.compaction !== undefined || a.compaction_tokens !== undefined;
+      const age =
+        a.reset || a.seconds !== undefined || a.hours !== undefined || !summary;
+      const patch: Json = {
+        ...(age
+          ? {
+              thread_history_max_age_secs: a.reset
+                ? null
+                : Number(a.seconds ?? Number(a.hours) * 3600),
+            }
+          : {}),
+        ...(a.compaction === undefined
+          ? {}
+          : {
+              thread_compaction: a.compaction === "reset" ? null : a.compaction,
+            }),
+        ...(a.compaction_tokens === undefined
+          ? {}
+          : { thread_compaction_tokens: Number(a.compaction_tokens) }),
+      };
+      return this.runtime.patchApp(patch, ctx.userId);
+    }
+    if (["set_bot_model", "set_triggers"].includes(name)) {
       if (!ctx.guildId) throw new Error("Settings changes require a guild");
       let patch: Json = {};
       if (name === "set_bot_model") {
@@ -1162,35 +1188,6 @@ export class ToolRegistry {
                 ? {}
                 : { effort: a.effort === "default" ? null : a.effort }),
             };
-      }
-      if (name === "set_thread_history") {
-        // The summary fields change only themselves (#124); the retention is
-        // written when asked for, or when nothing else is.
-        const summary =
-          a.compaction !== undefined || a.compaction_tokens !== undefined;
-        const age =
-          a.reset ||
-          a.seconds !== undefined ||
-          a.hours !== undefined ||
-          !summary;
-        patch = {
-          ...(age
-            ? {
-                thread_history_max_age_secs: a.reset
-                  ? null
-                  : Number(a.seconds ?? Number(a.hours) * 3600),
-              }
-            : {}),
-          ...(a.compaction === undefined
-            ? {}
-            : {
-                thread_compaction:
-                  a.compaction === "reset" ? null : a.compaction,
-              }),
-          ...(a.compaction_tokens === undefined
-            ? {}
-            : { thread_compaction_tokens: Number(a.compaction_tokens) }),
-        };
       }
       if (name === "set_triggers") {
         const guild = this.runtime.guild(ctx.guildId);

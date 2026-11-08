@@ -27,6 +27,9 @@ export type CachedSnapshot = {
    * Dashboard is the writer (`budget_fallback` meta); PUT must not replace this.
    */
   budget_fallback: import("@hibana/shared/budget").BudgetFallback;
+  /** The settings that are one for every server and DM (#161). Dashboard and
+   *  the bot's commands are the writers (`app_settings` meta). */
+  app_settings: import("@hibana/shared/settings").AppSettings;
   /** Dashboard pin/unpin/month-extend waiting for the bot. */
   artifact_commands: {
     id: number;

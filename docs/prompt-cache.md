@@ -33,7 +33,7 @@ Anthropic のプロバイダー（`anthropic`、Claude Max）へのリクエス�
 
 スレッドの履歴の推定が閾値を超えると、次のターンの前に、古いターンを要約に置き換える（`apps/bot/src/history.ts` の `compact`）。新しい方のターン（閾値の半分まで）はそのまま残す。
 
-方式と閾値はサーバー設定（ダッシュボードの「Temperature / Exa / スレッド履歴」、Discord の `/thread-history`、bot の `set_thread_history`）で決める（#124）。
+方式と閾値は全体の設定（ダッシュボードの「全体の設定」、Discord の `/thread-history`、bot の `set_thread_history`）で決める（#124 ではサーバーごとの設定だった。#161 で全サーバーと DM に共通の値にした）。
 
 | 設定                       | 値                           | 既定    |
 | -------------------------- | ---------------------------- | ------- |

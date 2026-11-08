@@ -10,8 +10,14 @@ import {
   WORKSPACE_PROVIDER,
 } from "@hibana/shared/catalog";
 import {
+  appSettingsFromGuild,
+  appSettingsPatchSchema,
+  applyAppSettingsPatch,
   applyPatch,
   applyUserOverridePatch,
+  initialAppSettings,
+  normalizeAppSettings,
+  withAppSettings,
   effectiveSubagentMode,
   normalizeGuild,
   normalizeUserOverride,
@@ -22,6 +28,7 @@ import {
   DEFAULT_TEXT_MODEL,
   textModelSelection,
   userOverridePatchSchema,
+  type AppSettings,
   type GuildRow,
   type GuildPatch,
   type UserOverrideRow,
@@ -52,6 +59,10 @@ export type Snapshot = {
   /** The model the settings are switched to once the budget is low (#89,
    *  #121). The dashboard writes it; absent before the API served one. */
   budget_fallback?: BudgetFallback;
+  /** The settings that are one for every server and DM (#161). Absent from
+   *  an API that predates them, and in a state file without the API until
+   *  one is changed: `app()` then takes what most servers have. */
+  app_settings?: AppSettings;
   /** Written by the bot, not the API: the last answer of `/internal/budget`.
    *  A snapshot from the API never carries it, so `replace` keeps it, and it
    *  is in the state file, so a restart keeps the last decision (#89). */
@@ -181,11 +192,29 @@ export class Runtime {
         this.onChange?.(id);
     }
   }
+  /** A server's settings, or a DM's without an id. The app settings (#161)
+   *  take the place of the server's frozen copies of them, so everything that
+   *  reads `temperature`, `exa_mode`, the thread history, the voice settings
+   *  or `mcp_url` from here reads the app's. */
   guild(id?: string) {
-    return normalizeGuild(
-      id ? this.snapshot.guilds[id] : null,
-      normalizeGuild(this.snapshot.defaults, this.defaultSettings()),
+    return withAppSettings(
+      normalizeGuild(
+        id ? this.snapshot.guilds[id] : null,
+        normalizeGuild(this.snapshot.defaults, this.defaultSettings()),
+      ),
+      this.app(),
     );
+  }
+  /** The app settings (#161). Without them in the snapshot, what most servers
+   *  have, as the settings API starts them (`initialAppSettings`). */
+  app(): AppSettings {
+    const defaults = this.defaultAppSettings();
+    return this.snapshot.app_settings
+      ? normalizeAppSettings(this.snapshot.app_settings, defaults)
+      : initialAppSettings(Object.values(this.snapshot.guilds), defaults);
+  }
+  private defaultAppSettings(): AppSettings {
+    return appSettingsFromGuild(this.defaultSettings());
   }
   async initializeGuild(id: string) {
     return this.serial.run(async () => {
@@ -485,6 +514,31 @@ export class Runtime {
         await this.persist();
       }
       return this.guild(guildId);
+    });
+  }
+  /** Changes the app settings (#161). Moderators and Administrators only, as
+   *  on the dashboard; the settings API trusts the bot to have checked. */
+  async patchApp(raw: unknown, userId: string) {
+    const patch = appSettingsPatchSchema.parse(raw);
+    if (!["administrator", "moderator"].includes(this.role(userId)))
+      throw new Error(
+        "全体の設定を変えられるのは Moderator と Administrator だけです。",
+      );
+    return this.serial.run(async () => {
+      if (this.config.webApiUrl) {
+        await this.remote("/internal/app-settings", "PATCH", patch);
+        this.replace(
+          (await this.remote("/internal/snapshot", "GET")) as Snapshot,
+        );
+      } else {
+        this.snapshot.app_settings = applyAppSettingsPatch(
+          this.app(),
+          patch,
+          this.defaultAppSettings(),
+        );
+        await this.persist();
+      }
+      return this.app();
     });
   }
   async setContext(

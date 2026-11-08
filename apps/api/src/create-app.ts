@@ -17,6 +17,7 @@ import {
 } from "./catalog";
 import {
   canAssignRole,
+  canManageAppSettings,
   canManageBudget,
   canManageUsers,
   canModerate,
@@ -57,14 +58,19 @@ import {
 import {
   applyPatch,
   applyUserOverridePatch,
+  appSettingsPatchSchema,
   emptyGuild,
   normalizeGuild,
   guildPatchSchema,
   patchPresetIds,
   userOverridePatchSchema,
+  withAppSettings,
 } from "./settings";
 import {
+  appDefaults,
   isArtifactAction,
+  loadAppSettings,
+  patchAppSettings,
   type ArtifactAction,
   type ArtifactRow,
   type Store,
@@ -122,7 +128,15 @@ async function loadSnapshot(
 ): Promise<CachedSnapshot> {
   const cached = hub.get();
   if (cached && cached.version === knownVersion) return cached;
-  const guilds = await store.allGuilds();
+  const app_settings = await loadAppSettings(store);
+  // The rows carry the app settings too (#161): the previous bot reads them
+  // there (docs/adr/0006). This bot reads `app_settings`.
+  const guilds = Object.fromEntries(
+    Object.entries(await store.allGuilds()).map(([id, row]) => [
+      id,
+      withAppSettings(row, app_settings),
+    ]),
+  );
   const user_contexts = await store.allUserContexts();
   const user_overrides = await store.allUserOverrides();
   // Read-only for the bot. Deliberately **not** part of PUT /internal/snapshot:
@@ -165,6 +179,7 @@ async function loadSnapshot(
     unpublished_presets,
     premium_presets,
     budget_fallback,
+    app_settings,
     artifact_commands,
     skill_commands,
     chatgpt_available: (await chatgpt?.available()) ?? false,
@@ -436,6 +451,7 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           can_view_all_guilds: canViewAllGuilds(s.role),
           can_view_analytics: canViewAnalytics(s.role),
           can_view_usage: canViewUsage(s.role),
+          can_manage_app_settings: canManageAppSettings(s.role),
         };
       })
       .get("/api/me/settings", async ({ cookie, set }) => {
@@ -710,7 +726,10 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           return { error: "guild not found" };
         }
         return {
-          settings: await store.getGuild(params.id),
+          settings: withAppSettings(
+            await store.getGuild(params.id),
+            await loadAppSettings(store),
+          ),
           version: await store.version(),
         };
       })
@@ -757,7 +776,10 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           );
           await store.putGuild(params.id, next);
           await publish();
-          return { settings: next, version: await store.version() };
+          return {
+            settings: withAppSettings(next, await loadAppSettings(store)),
+            version: await store.version(),
+          };
         },
       )
       .get("/internal/snapshot", async ({ request, set }) => {
@@ -939,7 +961,10 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
         );
         await store.putGuild(params.id, next);
         await publish();
-        return { settings: next, version: await store.version() };
+        return {
+          settings: withAppSettings(next, await loadAppSettings(store)),
+          version: await store.version(),
+        };
       })
       .patch(
         "/internal/users/:id/settings",
@@ -973,6 +998,72 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           return { settings: next, version: await store.version() };
         },
       )
+      // The app settings (#161): one value for every server and DM. Everyone
+      // signed in may read them; Moderators and Administrators change them.
+      .get("/api/app-settings", async ({ cookie, set }) => {
+        set.headers["cache-control"] = "no-store";
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        return {
+          settings: await loadAppSettings(store),
+          // What a field returns to when it is reset (null in a PATCH).
+          defaults: appDefaults(store),
+          can_edit: canManageAppSettings(s.role),
+        };
+      })
+      .patch("/api/app-settings", async ({ cookie, set, body }) => {
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        if (!canManageAppSettings(s.role)) {
+          set.status = 403;
+          return { error: "forbidden" };
+        }
+        const parsed = appSettingsPatchSchema.safeParse(body);
+        if (!parsed.success) {
+          set.status = 400;
+          return {
+            error: parsed.error.issues.map((i) => i.message).join("; "),
+          };
+        }
+        const next = await patchAppSettings(store, parsed.data);
+        if (!next) {
+          set.status = 409;
+          return { error: "the app settings changed meanwhile; try again" };
+        }
+        await publish();
+        return { settings: next, version: await store.version() };
+      })
+      // The bot's Discord commands of the same settings. The bot checks that
+      // the member is a Moderator or an Administrator first, as it checks a
+      // preset's plan before a server PATCH.
+      .patch("/internal/app-settings", async ({ request, set, body }) => {
+        if (
+          !requireInternal(request.headers.get("authorization") ?? undefined)
+        ) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const parsed = appSettingsPatchSchema.safeParse(body);
+        if (!parsed.success) {
+          set.status = 400;
+          return {
+            error: parsed.error.issues.map((i) => i.message).join("; "),
+          };
+        }
+        const next = await patchAppSettings(store, parsed.data);
+        if (!next) {
+          set.status = 409;
+          return { error: "the app settings changed meanwhile; try again" };
+        }
+        await publish();
+        return { settings: next, version: await store.version() };
+      })
       .get("/api/blocked", async ({ cookie, set }) => {
         const s = await requireSession(cookieSid(cookie as never));
         if (!s) {
@@ -1141,8 +1232,8 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
       })
       // The model Anthropic API turns switch to while the month's budget is
       // nearly spent, the threshold that switches them, and whether they do now
-      // (#89, #95). Everyone who may read the cost may read this; only an
-      // Administrator changes it.
+      // (#89, #95). Everyone who may read the cost may read this; Moderators
+      // and Administrators change it, as the other app settings (#161).
       .get("/api/budget-fallback", async ({ cookie, set }) => {
         set.headers["cache-control"] = "no-store";
         const s = await requireSession(cookieSid(cookie as never));

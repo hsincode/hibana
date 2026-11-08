@@ -83,13 +83,21 @@ export function canModerate(role: Role): boolean {
 }
 
 /**
+ * Actor may change the app settings (#161): the settings that are one for
+ * every server and DM, on the dashboard's 全体の設定 page.
+ */
+export function canManageAppSettings(role: Role): boolean {
+  return role === "administrator" || role === "moderator";
+}
+
+/**
  * Actor may change the budget fallback: the model Anthropic API turns switch
- * to and the threshold that switches them (#95). Administrator only (the
- * `WEB_ADMIN_IDS`): it decides what the owner's budget is spent on. Until #95
- * Moderators could change the model too (#89).
+ * to and the threshold that switches them. Moderators could change the model
+ * at first (#89); #95 made it Administrator only; #161 moved it to the app
+ * settings and gave it the same bar as they have.
  */
 export function canManageBudget(role: Role): boolean {
-  return role === "administrator";
+  return canManageAppSettings(role);
 }
 
 /**

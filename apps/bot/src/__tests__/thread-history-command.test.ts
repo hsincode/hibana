@@ -1,22 +1,29 @@
 // `/thread-history` sets the thread retention and, since #124, how a long
-// thread is summarized. Each option changes only itself.
+// thread is summarized. Each option changes only itself. Since #161 these are
+// app settings: one value for every server and DM, changed by Moderators and
+// Administrators only.
 import { expect, test } from "bun:test";
 import { commands, handleCommand } from "../commands";
 import { loadConfig } from "../config";
 import { Runtime } from "../runtime";
 
-const runtime = () => new Runtime(loadConfig({ ANTHROPIC_API_KEY: "fixture" }));
+const runtime = (role = "moderator") => {
+  const rt = new Runtime(loadConfig({ ANTHROPIC_API_KEY: "fixture" }));
+  rt.snapshot.user_roles = { u1: role };
+  return rt;
+};
 
 /** Runs `/thread-history`; only what `handleCommand` reads is faked. */
 async function slash(
   rt: Runtime,
   options: { strings?: Record<string, string>; ints?: Record<string, number> },
+  guildId: string | null = "g1",
 ) {
   let reply = "";
   const i = {
     commandName: "thread-history",
     user: { id: "u1" },
-    guildId: "g1",
+    guildId,
     channelId: "t1",
     client: { user: { id: "bot" } },
     channel: { isThread: () => false },
@@ -71,23 +78,44 @@ test("/thread-history offers the summary's mode and size", () => {
 test("the summary options leave the retention alone, and no option resets the retention as before", async () => {
   const rt = runtime();
   await slash(rt, { ints: { seconds: 600 } });
-  expect(rt.guild("g1").thread_history_max_age_secs).toBe(600);
+  expect(rt.app().thread_history_max_age_secs).toBe(600);
 
   await slash(rt, { strings: { compaction: "off" } });
-  expect(rt.guild("g1").thread_compaction).toBe("off");
-  expect(rt.guild("g1").thread_history_max_age_secs).toBe(600);
+  expect(rt.app().thread_compaction).toBe("off");
+  expect(rt.app().thread_history_max_age_secs).toBe(600);
 
   await slash(rt, { ints: { compaction_tokens: 40_000 } });
-  expect(rt.guild("g1").thread_compaction_tokens).toBe(40_000);
-  expect(rt.guild("g1").thread_compaction).toBe("off");
-  expect(rt.guild("g1").thread_history_max_age_secs).toBe(600);
+  expect(rt.app().thread_compaction_tokens).toBe(40_000);
+  expect(rt.app().thread_compaction).toBe("off");
+  expect(rt.app().thread_history_max_age_secs).toBe(600);
 
   await slash(rt, { strings: { compaction: "reset" } });
-  expect(rt.guild("g1").thread_compaction).toBe("cache");
-  expect(rt.guild("g1").thread_compaction_tokens).toBe(40_000);
+  expect(rt.app().thread_compaction).toBe("cache");
+  expect(rt.app().thread_compaction_tokens).toBe(40_000);
 
   await slash(rt, {});
   // Reset to the default retention.
-  expect(rt.guild("g1").thread_history_max_age_secs).toBe(3600);
-  expect(rt.guild("g1").thread_compaction_tokens).toBe(40_000);
+  expect(rt.app().thread_history_max_age_secs).toBe(3600);
+  expect(rt.app().thread_compaction_tokens).toBe(40_000);
+});
+
+test("the values are the app's: every server and DM reads them, and a DM may change them (#161)", async () => {
+  const rt = runtime();
+  const reply = await slash(rt, { ints: { seconds: 900 } }, null);
+  expect(reply).toContain("全体の設定を変えました");
+  for (const id of ["g1", "g2", undefined])
+    expect(rt.guild(id).thread_history_max_age_secs).toBe(900);
+  expect(rt.resolve(undefined, "u1").thread_history_max_age_secs).toBe(900);
+});
+
+test("a member below Moderator is refused and nothing changes (#161)", async () => {
+  for (const role of ["free", "standard", "premium"]) {
+    const rt = runtime(role);
+    const reply = await slash(rt, { ints: { seconds: 900 } });
+    expect(reply).toContain("Moderator と Administrator だけ");
+    expect(rt.app().thread_history_max_age_secs).toBe(3600);
+  }
+  const admin = runtime("administrator");
+  await slash(admin, { ints: { seconds: 900 } });
+  expect(admin.app().thread_history_max_age_secs).toBe(900);
 });

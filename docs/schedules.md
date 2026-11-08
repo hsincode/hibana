@@ -39,7 +39,7 @@
 
 ## 素材の置き場所
 
-画像・動画・音声はリポジトリにも DB にも入れない。bot を動かすマシンの次の場所に置く。
+画像・動画・音声はリポジトリにも DB にも入れない。bot を動かすマシンの次の場所に置く。Discord の `/schedule-asset` で上げるか（#168）、手で置く。
 
 ```
 HIBANA_DATA_DIR/scheduled-assets/<サーバー ID>/<ファイル名>
@@ -60,12 +60,28 @@ HIBANA_DATA_DIR/scheduled-assets/<サーバー ID>/<ファイル名>
 - 一覧にない名前を保存した件は、実行時に「見つからない」とログに出し、そのアクションを飛ばす
 - 素材の出所とライセンスは、置く人が記録する（AGENTS.md「持ち込まないもの」）
 
+### Discord から上げる（`/schedule-asset`、判断記録 #168）
+
+| サブコマンド             | すること                                                                                         | 使える人                           |
+| ------------------------ | ------------------------------------------------------------------------------------------------ | ---------------------------------- |
+| `add file:<添付> [name]` | 添付したファイルを、`name`（省略するとファイルの名前）で置き場所に保存する。同じ名前は置き換える | そのサーバーを管理できる人（#166） |
+| `list`                   | このサーバーの素材の一覧と、使っている容量                                                       | サーバーの全員                     |
+| `remove name`            | 素材を消す                                                                                       | そのサーバーを管理できる人         |
+
+- 名前・種類・1 件の上限は、手で置く素材と同じ。添付の名前が規則に合わない（日本語の名前など）ときは、`name` を指定するよう断る。`name` で種類を変える（画像を `.mp3` にする）ことはできない
+- 容量は 1 つのサーバーで合計 200 MB・200 件、すべてのサーバーで合計 1 GB まで（`SCHEDULE_ASSETS_GUILD_MAX_BYTES`・`SCHEDULE_ASSETS_TOTAL_MAX_BYTES`）。手で置いた素材も数え、置き換える素材は差し引く。上限を超える追加は断る。VPS のディスクの空き（2026-11-08 に 4.2 GB）と、会議の録音の音声（最大 1 GB）から決めた
+- 大きさは、Discord が伝える大きさで取りに行く前に確かめ、取りながらもう一度確かめる。取ったファイルは、名前が `.` で始まる一時ファイルに書いてから置き場所に移すので、bot が書きかけを読むことはない
+- 追加と削除は 1 つずつ行う。保存すると、bot は次の確認（15 秒以内）で一覧を設定 API に送る
+- 消した素材を使う定時アクションは、実行時に「見つからない」とログに出し、そのアクションを飛ばす
+- Discord の添付の上限（Nitro の無い人は 10 MB）を超える音声は、手で置く
+
 ## データの流れ
 
 ```mermaid
 flowchart LR
   web["ダッシュボード<br>/g/:id/schedules"] -- "PUT /api/guilds/:id/schedules<br>（一覧ごと）" --> api["設定 API<br>guild_schedules"]
   api -- "GET /internal/snapshot の schedules<br>（30 秒ごと）" --> bot["bot<br>Scheduler"]
+  discord["Discord<br>/schedule-asset"] -- "添付" --> bot
   bot -- "PUT /internal/schedule-assets<br>（変わったときだけ）" --> api
   api -- "GET /api/guilds/:id/schedules<br>assets" --> web
   disk[("HIBANA_DATA_DIR/<br>scheduled-assets/")] --> bot
@@ -84,6 +100,6 @@ flowchart LR
 
 ## 検証の範囲
 
-- 自動テスト: スキーマと API（`apps/api/src/schedules.test.ts`、Postgres は `postgres-store.test.ts`）、時刻の判定と実行（`apps/bot/src/__tests__/schedules.test.ts`）、Discord への投稿と再生先（`schedule-discord.test.ts`）、録音中の再生と、その音声が録音に入ること（`recording-discord.test.ts`、`recording.test.ts`）、ダッシュボード（`apps/web/tests/design.spec.ts`、Chromium）
+- 自動テスト: スキーマと API（`apps/api/src/schedules.test.ts`、Postgres は `postgres-store.test.ts`）、時刻の判定と実行（`apps/bot/src/__tests__/schedules.test.ts`）、Discord への投稿と再生先（`schedule-discord.test.ts`）、録音中の再生と、その音声が録音に入ること（`recording-discord.test.ts`、`recording.test.ts`）、ダッシュボード（`apps/web/tests/design.spec.ts`、Chromium）、`/schedule-asset`（`schedule-assets.test.ts`。Discord の CDN は偽物、ファイルは一時ディレクトリに本当に書く）
 - 手元で、48 kHz ステレオの WAV（4.07 秒）と MP4（VP9・FLAC、4.07 秒）が、bot と同じ `createAudioResource(path)` で ffmpeg を通り、Opus 204 パケット（4.08 秒）になることを確かめた
-- 本物の Discord では動かしていない。`/join` の通話での順番待ち（`apps/bot/src/voice.ts`）には自動テストがない。録音中に鳴らした音声が録音に入ることは、偽物のプレイヤーと xAI で確かめただけ
+- 本物の Discord では動かしていない。`/join` の通話での順番待ち（`apps/bot/src/voice.ts`）には自動テストがない。録音中に鳴らした音声が録音に入ることは、偽物のプレイヤーと xAI で確かめただけ。`/schedule-asset` は、本物の Discord の添付では試していない

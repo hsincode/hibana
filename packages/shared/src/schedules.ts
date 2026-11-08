@@ -17,6 +17,10 @@ export const SCHEDULE_AUDIO_MAX_BYTES = 20 * 1024 * 1024;
 export const SCHEDULE_CLIP_MAX_MS = 5 * 60_000;
 /** Files the bot reports per server, after the size and name checks. */
 export const SCHEDULE_ASSETS_MAX = 200;
+/** What `/schedule-asset add` may store, so the bot's disk is not filled
+ *  (#168): per server, and over every server. Files placed by hand count too. */
+export const SCHEDULE_ASSETS_GUILD_MAX_BYTES = 200 * 1024 * 1024;
+export const SCHEDULE_ASSETS_TOTAL_MAX_BYTES = 1024 * 1024 * 1024;
 /** Assets live in HIBANA_DATA_DIR/<this>/<guild id>/ on the bot's host. */
 export const SCHEDULE_ASSET_DIR = "scheduled-assets";
 

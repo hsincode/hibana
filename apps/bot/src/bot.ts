@@ -32,6 +32,7 @@ import { Voice } from "./voice";
 import { Recorder } from "./recording";
 import { AudioQuota } from "./recording-audio";
 import { DiscordRecordingPort } from "./recording-discord";
+import { ScheduleAssets } from "./schedule-assets";
 import { Scheduler } from "./schedules";
 import { DiscordScheduleTarget } from "./schedule-discord";
 import { recordingPlayer } from "./recording-player/build";
@@ -137,6 +138,7 @@ export class Hibana {
   readonly recorder: Recorder;
   /** Scheduled actions (定時アクション), started once Discord is ready. */
   readonly scheduler: Scheduler;
+  readonly assets: ScheduleAssets;
   private active = new Map<string, Active>();
   /** Steering prompts that carried the "ultracode" keyword. */
   private keywordPrompts = new WeakSet<Message>();
@@ -248,6 +250,10 @@ export class Hibana {
               )
           : undefined,
     });
+    this.assets = new ScheduleAssets({
+      dataDir: config.dataDir,
+      changed: () => this.scheduler.assetsChanged(),
+    });
     // A server has one voice connection: a recording keeps `/join` out.
     this.voice.busy = (id) =>
       this.recorder.active(id)
@@ -350,6 +356,7 @@ export class Hibana {
             this.usage,
             this.workspace,
             this.recorder,
+            this.assets,
           ),
         );
     });

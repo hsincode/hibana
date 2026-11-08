@@ -34,6 +34,7 @@ import {
   BoolSeg,
   Effective,
   Empty,
+  ManageNote,
   Section,
   Skeleton,
   ToastArea,
@@ -53,6 +54,8 @@ export function GuildPage() {
   const location = useLocation();
   const [cat, setCat] = useState<Catalog | null>(null);
   const [settings, setSettings] = useState<GuildSettings | null>(null);
+  // 設定を変えられるか（#166）。メンバーは開けて、見るだけ。旧 API は返さない。
+  const [canEdit, setCanEdit] = useState(false);
   const [me, setMe] = useState<Me | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [guild, setGuild] = useState<GuildSummary | null>(null);
@@ -104,6 +107,7 @@ export function GuildPage() {
     let active = true;
     setErr(null);
     setSettings(null);
+    setCanEdit(false);
     setDraft(null);
     apiCached<Catalog>("/api/catalog")
       .then((c) => {
@@ -119,9 +123,13 @@ export function GuildPage() {
       .catch(() => {
         if (active) setMe(null);
       });
-    api<{ settings: GuildSettings }>(`/api/guilds/${id}/settings`)
+    api<{ settings: GuildSettings; can_edit?: boolean }>(
+      `/api/guilds/${id}/settings`,
+    )
       .then((r) => {
-        if (active) setSettings(r.settings);
+        if (!active) return;
+        setSettings(r.settings);
+        setCanEdit(r.can_edit !== false);
       })
       .catch((e) => {
         if (active) setErr(String(e.message ?? e));
@@ -199,38 +207,44 @@ export function GuildPage() {
         )}
 
         {ready && page.path === "" && (
-          <>
-            <Effective
-              title="実際の動作"
-              caption="保存した設定の組み合わせから決まる値です。bot の環境変数や接続の状態は反映していません。"
-              items={guildEffective(settings)}
-            />
-            <AgentSections
-              scope="guild"
-              catalog={cat}
-              settings={settings}
-              role={me?.role}
-              patch={patch}
-            />
-          </>
-        )}
-        {ready && page.path === "tools" && (
-          <ToolsSections
-            catalog={cat}
-            settings={settings}
-            role={me?.role}
-            patch={patch}
+          <Effective
+            title="実際の動作"
+            caption="保存した設定の組み合わせから決まる値です。bot の環境変数や接続の状態は反映していません。"
+            items={guildEffective(settings)}
           />
         )}
-        {ready && page.path === "context" && (
-          <ContextSection
-            scope="guild"
-            value={settings.context?.text ?? ""}
-            personaOverride={settings.context?.persona_override ?? false}
-            draft={draft}
-            onDraft={setDraft}
-            patch={patch}
-          />
+        {ready && needsSettings && (
+          // 見るだけの人には、同じ部品を無効にして見せる（fieldset の disabled、#166）。
+          <fieldset className="app-fields" disabled={!canEdit}>
+            {!canEdit && <ManageNote />}
+            {page.path === "" && (
+              <AgentSections
+                scope="guild"
+                catalog={cat}
+                settings={settings}
+                role={me?.role}
+                patch={patch}
+              />
+            )}
+            {page.path === "tools" && (
+              <ToolsSections
+                catalog={cat}
+                settings={settings}
+                role={me?.role}
+                patch={patch}
+              />
+            )}
+            {page.path === "context" && (
+              <ContextSection
+                scope="guild"
+                value={settings.context?.text ?? ""}
+                personaOverride={settings.context?.persona_override ?? false}
+                draft={draft}
+                onDraft={setDraft}
+                patch={patch}
+              />
+            )}
+          </fieldset>
         )}
         {page.path === "skills" && (
           <Section

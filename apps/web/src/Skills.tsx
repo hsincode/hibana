@@ -2,7 +2,7 @@ import { Select } from "./controls";
 import { useCallback, useEffect, useState } from "react";
 import { zipSync } from "fflate";
 import { api, type GuildSummary } from "./api";
-import { Alert, Badge, Icon, Loading, Modal, Seg } from "./ui";
+import { Alert, Badge, Icon, Loading, ManageNote, Modal, Seg } from "./ui";
 
 type Skill = {
   guild_id: string;
@@ -18,7 +18,12 @@ type Command = {
   args: { name: string };
   result: { ok: boolean; error?: string } | null;
 };
-type Catalog = { skills: Skill[]; commands: Command[] };
+type Catalog = {
+  skills: Skill[];
+  commands: Command[];
+  /** 変えられるか（#166）。旧 API は返さず、誰でも変えられた。 */
+  can_edit?: boolean;
+};
 
 function download(skill: Skill) {
   const files: Record<string, Uint8Array> = {};
@@ -110,12 +115,16 @@ export function SkillManager({
     }
   }
   const pending = data?.commands.filter((c) => c.result === null) ?? [];
+  // 見るだけの人には、変える操作を無効にして見せる。読み込むまでは押せない。
+  const canEdit = data ? data.can_edit !== false : false;
   return (
     <>
+      {data && !canEdit && <ManageNote />}
       <div className="toolbar">
         <button
           type="button"
           className="btn btn-primary"
+          disabled={!canEdit}
           onClick={() => {
             setName("");
             setDescription("");
@@ -129,6 +138,7 @@ export function SkillManager({
         <button
           type="button"
           className="btn"
+          disabled={!canEdit}
           onClick={() => setModal("import")}
         >
           インポート
@@ -165,7 +175,8 @@ export function SkillManager({
       ) : (
         <ul className="skill-list">
           {data.skills.map((s) => {
-            const locked = busy || pending.some((c) => c.args.name === s.name);
+            const locked =
+              busy || !canEdit || pending.some((c) => c.args.name === s.name);
             return (
               <li key={s.name} className="skill">
                 <div className="skill-main">

@@ -4,6 +4,7 @@ import {
   Alert,
   Badge,
   Empty,
+  ManageNote,
   Section,
   Seg,
   Skeleton,
@@ -43,6 +44,12 @@ export function ArtifactsPage() {
     () => Object.fromEntries(guilds.map((g) => [g.id, g.name])),
     [guilds],
   );
+  // 操作できるのは、設定を変えられるサーバーの成果物だけ（#166）。旧 API は返さない。
+  const managed = useMemo(
+    () =>
+      new Set(guilds.filter((g) => g.can_manage !== false).map((g) => g.id)),
+    [guilds],
+  );
 
   return (
     <div className="page is-wide">
@@ -62,6 +69,7 @@ export function ArtifactsPage() {
             sites={sites}
             guildNames={names}
             showGuild
+            canEdit={(site) => !!site.guild_id && managed.has(site.guild_id)}
             onAct={async (site, action, ok) => {
               if (!site.guild_id)
                 throw new Error(
@@ -95,10 +103,16 @@ export function GuildArtifacts({
   push: (kind: Toast["kind"], text: string) => void;
 }) {
   const [sites, setSites] = useState<Artifact[] | null>(null);
+  const [canEdit, setCanEdit] = useState(false);
 
   const load = useCallback(() => {
-    api<{ sites: Artifact[] }>(`/api/guilds/${guildId}/artifacts`)
-      .then((r) => setSites(r.sites))
+    api<{ sites: Artifact[]; can_edit?: boolean }>(
+      `/api/guilds/${guildId}/artifacts`,
+    )
+      .then((r) => {
+        setSites(r.sites);
+        setCanEdit(r.can_edit !== false);
+      })
       .catch(() => setSites([]));
   }, [guildId]);
 
@@ -113,9 +127,11 @@ export function GuildArtifacts({
       title="成果物"
       desc="このサーバーで公開中のサイトと会議の録音。1 ヶ月延命・永久化・永久化解除はボットが次に同期したときに反映されます。録音は延命できません。"
     >
+      {sites && !canEdit && <ManageNote />}
       <ArtifactTable
         sites={sites}
         showGuild={false}
+        canEdit={() => canEdit}
         onAct={async (site, action, ok) => {
           await api(`/api/guilds/${guildId}/artifacts/${site.token}`, {
             method: "PATCH",
@@ -139,12 +155,15 @@ function ArtifactTable({
   sites,
   guildNames,
   showGuild,
+  canEdit,
   onAct,
   onError,
 }: {
   sites: Artifact[] | null;
   guildNames?: Record<string, string>;
   showGuild: boolean;
+  /** 延命・永久化を押せるか。見るだけの人には無効にして見せる（#166）。 */
+  canEdit: (site: Artifact) => boolean;
   onAct: (site: Artifact, action: Action, ok: string) => Promise<void>;
   onError: (msg: string) => void;
 }) {
@@ -253,7 +272,9 @@ function ArtifactTable({
                         <button
                           type="button"
                           className="btn btn-sm"
-                          disabled={!!busy || s.retention === "permanent"}
+                          disabled={
+                            !!busy || !canEdit(s) || s.retention === "permanent"
+                          }
                           onClick={() =>
                             void act(s, "month", "1ヶ月延命を依頼した")
                           }
@@ -264,7 +285,7 @@ function ArtifactTable({
                           <button
                             type="button"
                             className="btn btn-sm"
-                            disabled={!!busy}
+                            disabled={!!busy || !canEdit(s)}
                             onClick={() =>
                               void act(
                                 s,
@@ -279,7 +300,7 @@ function ArtifactTable({
                           <button
                             type="button"
                             className="btn btn-sm"
-                            disabled={!!busy}
+                            disabled={!!busy || !canEdit(s)}
                             onClick={() =>
                               void act(s, "permanent", "永久化を依頼した")
                             }

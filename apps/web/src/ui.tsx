@@ -668,6 +668,17 @@ export function Alert({ children }: { children: ReactNode }) {
   );
 }
 
+/** サーバーの設定を見るだけの人に、変えられる人を伝える（#166）。 */
+export function ManageNote() {
+  return (
+    <p className="app-fields-note">
+      変更できるのは、Discord
+      の「サーバー管理」か「管理者」の権限を持つ人、サーバーのオーナー、Moderator
+      と Administrator です。
+    </p>
+  );
+}
+
 export function Skeleton({
   height,
   width,

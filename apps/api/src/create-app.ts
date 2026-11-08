@@ -66,7 +66,6 @@ import {
   guildPatchSchema,
   patchPresetIds,
   userOverridePatchSchema,
-  withAppSettings,
 } from "./settings";
 import {
   appDefaults,
@@ -131,14 +130,7 @@ async function loadSnapshot(
   const cached = hub.get();
   if (cached && cached.version === knownVersion) return cached;
   const app_settings = await loadAppSettings(store);
-  // The rows carry the app settings too (#161): the previous bot reads them
-  // there (docs/adr/0006). This bot reads `app_settings`.
-  const guilds = Object.fromEntries(
-    Object.entries(await store.allGuilds()).map(([id, row]) => [
-      id,
-      withAppSettings(row, app_settings),
-    ]),
-  );
+  const guilds = await store.allGuilds();
   const user_contexts = await store.allUserContexts();
   const user_overrides = await store.allUserOverrides();
   // Read-only for the bot. Deliberately **not** part of PUT /internal/snapshot:
@@ -745,10 +737,7 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
         return {
           // Members may look; only those who manage the server may change it (#166).
           can_edit: access.manage,
-          settings: withAppSettings(
-            await store.getGuild(params.id),
-            await loadAppSettings(store),
-          ),
+          settings: await store.getGuild(params.id),
           version: await store.version(),
         };
       })
@@ -812,7 +801,7 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           await store.putGuild(params.id, next);
           await publish();
           return {
-            settings: withAppSettings(next, await loadAppSettings(store)),
+            settings: next,
             version: await store.version(),
           };
         },
@@ -997,7 +986,7 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
         await store.putGuild(params.id, next);
         await publish();
         return {
-          settings: withAppSettings(next, await loadAppSettings(store)),
+          settings: next,
           version: await store.version(),
         };
       })

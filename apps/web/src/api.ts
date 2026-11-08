@@ -129,10 +129,7 @@ export type Catalog = {
   triggers?: string[];
 };
 
-/**
- * サーバーの設定。全体の設定に移した項目（#161）も API は返すが、全体の値なので
- * ここでは扱わない（AppSettings を使う）。
- */
+/** サーバーの設定。全サーバーと DM で 1 つの設定（#161）は AppSettings。 */
 export type GuildSettings = Record<string, unknown> & {
   mcp_enabled?: boolean | null;
   selection?: {

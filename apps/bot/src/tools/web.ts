@@ -35,29 +35,26 @@ export class WebTools {
     }
   }
   async remote(name: string, a: Json, ctx: Context) {
-    const settings = this.runtime.guild(ctx.guildId);
-    if (settings.mcp_enabled === false)
+    // Whether to use it is the server's; the URL is the app's (#161).
+    if (this.runtime.guild(ctx.guildId).mcp_enabled === false)
       throw new Error("Remote MCP is disabled");
-    return this.mcp(
-      settings.mcp_url ?? "https://ww.hsincode.com/api/mcp",
-      async (client) => {
-        if (name === "mcp_call_tool")
-          return client.callTool(
-            { name: String(a.name), arguments: (a.arguments as Json) ?? {} },
-            undefined,
-            { timeout: 60000 },
-          );
-        const tools: unknown[] = [];
-        let cursor: string | undefined;
-        for (let i = 0; i < 20; i++) {
-          const page = await client.listTools({ cursor });
-          tools.push(...page.tools);
-          cursor = page.nextCursor;
-          if (!cursor) break;
-        }
-        return { tools };
-      },
-    );
+    return this.mcp(this.runtime.app().mcp_url, async (client) => {
+      if (name === "mcp_call_tool")
+        return client.callTool(
+          { name: String(a.name), arguments: (a.arguments as Json) ?? {} },
+          undefined,
+          { timeout: 60000 },
+        );
+      const tools: unknown[] = [];
+      let cursor: string | undefined;
+      for (let i = 0; i < 20; i++) {
+        const page = await client.listTools({ cursor });
+        tools.push(...page.tools);
+        cursor = page.nextCursor;
+        if (!cursor) break;
+      }
+      return { tools };
+    });
   }
   async search(name: string, a: Json, ctx: Context) {
     ctx.signal?.throwIfAborted();

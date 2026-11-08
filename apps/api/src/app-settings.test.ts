@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createApp } from "./create-app";
 import { loadTestEnv } from "./env";
-import { emptyGuild } from "./settings";
+import { APP_SETTING_KEYS, emptyAppSettings, emptyGuild } from "./settings";
 import {
   APP_SETTINGS_META,
   loadAppSettings,
@@ -88,7 +88,7 @@ describe("app settings (#161)", () => {
     ).toBe(401);
   });
 
-  test("a change reaches every server row and the bot's snapshot, and null returns a field to its default", async () => {
+  test("a change reaches the bot's snapshot, and null returns a field to its default", async () => {
     const { call, store } = await setup();
     await store.putGuild("g1", { ...emptyGuild(), thread_only: true });
     const before = await store.version();
@@ -119,15 +119,15 @@ describe("app settings (#161)", () => {
       await call("/internal/snapshot", { headers: INTERNAL })
     ).json();
     expect(snapshot.app_settings).toEqual(settings);
-    // The previous bot reads them from the server rows (docs/adr/0006).
-    expect(snapshot.guilds.g1).toMatchObject({
-      ...settings,
-      thread_only: true,
-    });
+    // A server row holds none of them (the second deployment of #161).
+    expect(snapshot.guilds.g1.thread_only).toBe(true);
     const page = await (
       await call("/api/guilds/g1/settings", { user: "mod-1" })
     ).json();
-    expect(page.settings).toMatchObject(settings);
+    for (const key of APP_SETTING_KEYS) {
+      expect(key in snapshot.guilds.g1, key).toBe(false);
+      expect(key in page.settings, key).toBe(false);
+    }
 
     const reset = await call("/api/app-settings", {
       user: "admin-1",
@@ -140,26 +140,22 @@ describe("app settings (#161)", () => {
     expect(after.exa_mode).toBe("off");
   });
 
-  test("a server's PATCH of an app setting is accepted and changes nothing", async () => {
+  test("a server's PATCH of an app setting is refused and changes nothing", async () => {
     const { call, store } = await setup();
     const res = await call("/api/guilds/g1/settings", {
       user: "free-1",
       method: "PATCH",
-      body: { temperature: 0.2, voice_mode: "s2s", thread_only: true },
+      body: { temperature: 0.2, thread_only: true },
     });
-    expect(res.status).toBe(200);
-    const { settings } = await res.json();
-    expect(settings.temperature).toBe(0.7);
-    expect(settings.voice_mode).toBe("stt");
-    expect(settings.thread_only).toBe(true);
-    expect((await loadAppSettings(store)).temperature).toBe(0.7);
+    expect(res.status).toBe(400);
+    expect((await store.getGuild("g1")).thread_only).toBe(false);
     const internal = await call("/internal/guilds/g1", {
       method: "PATCH",
       headers: INTERNAL,
-      body: { temperature: 0.2 },
+      body: { voice_mode: "s2s" },
     });
-    expect(internal.status).toBe(200);
-    expect((await loadAppSettings(store)).temperature).toBe(0.7);
+    expect(internal.status).toBe(400);
+    expect(await loadAppSettings(store)).toEqual(emptyAppSettings());
   });
 
   test("bad values and unknown fields are refused", async () => {
@@ -219,13 +215,17 @@ describe("app settings (#161)", () => {
   });
 
   test("they start once from what most servers had, and a later start keeps a change", async () => {
-    const store = new MemoryStore();
-    for (const [id, temperature, exa_mode] of [
-      ["a", 1, "on"],
-      ["b", 0.7, "on"],
-      ["c", 0.7, "auto"],
-    ] as const)
-      await store.putGuild(id, { ...emptyGuild(), temperature, exa_mode });
+    // Rows as they were stored before #161, which still hold the settings.
+    class Legacy extends MemoryStore {
+      override async storedGuilds() {
+        return [
+          { ...emptyGuild(), temperature: 1, exa_mode: "on" },
+          { ...emptyGuild(), temperature: 0.7, exa_mode: "on" },
+          { ...emptyGuild(), temperature: 0.7, exa_mode: "auto" },
+        ];
+      }
+    }
+    const store = new Legacy();
     await store.migrate();
     const first = await loadAppSettings(store);
     expect(first.temperature).toBe(0.7);
@@ -233,5 +233,18 @@ describe("app settings (#161)", () => {
     await patchAppSettings(store, { temperature: 1.9 });
     await store.migrate();
     expect((await loadAppSettings(store)).temperature).toBe(1.9);
+  });
+
+  test("with no servers they start from the API's environment", async () => {
+    const store = new MemoryStore(undefined, {
+      ...emptyAppSettings(),
+      exa_mode: "on",
+      temperature: 1.1,
+    });
+    await store.migrate();
+    expect(await loadAppSettings(store)).toMatchObject({
+      exa_mode: "on",
+      temperature: 1.1,
+    });
   });
 });

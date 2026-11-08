@@ -238,13 +238,17 @@ export function GuildSchedules({
             </ul>
           )}
           <p className="field-hint sched-assets">
-            画像・動画・音声は、bot を動かすマシンの{" "}
+            画像・動画・音声は、Discord で{" "}
+            <span className="mono">/schedule-asset add</span>{" "}
+            にファイルを添付して上げると、ここで選べるようになります（サーバーを管理できる人だけ。一覧は{" "}
+            <span className="mono">/schedule-asset list</span>
+            、削除は <span className="mono">/schedule-asset remove</span>
+            ）。bot を動かすマシンの{" "}
             <span className="mono">
               HIBANA_DATA_DIR/{SCHEDULE_ASSET_DIR}/{guildId}/
             </span>{" "}
-            に置くと、ここで選べるようになります（bot が 1
-            分ごとに確かめます）。投稿に添付できるのは 10 MB まで、音声は 20
-            MB・5 分までです。
+            に置いても使えます。投稿に添付できるのは 10 MB まで、音声は 20 MB・5
+            分まで、1 つのサーバーで合計 200 MB までです。
             {loaded.assets_reported_at
               ? ` 最後に確かめた時刻: ${new Date(loaded.assets_reported_at).toLocaleString("ja-JP")}`
               : " bot からの一覧はまだ届いていません。"}

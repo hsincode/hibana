@@ -20,6 +20,7 @@ import type { ToolRegistry } from "./tools";
 import type { History } from "./history";
 import type { Voice } from "./voice";
 import type { Recorder } from "./recording";
+import type { ScheduleAssets } from "./schedule-assets";
 import type { UsageLedger } from "./usage-ledger";
 import type { Workspace } from "./workspace";
 import type { Context, Json } from "./types";
@@ -166,6 +167,31 @@ export function commands(runtime: Runtime) {
           ),
         ]
       : []),
+    // Assets of scheduled actions (#168): saved on the bot's host, listed on
+    // the dashboard's 定時アクション page.
+    command("schedule-asset", "定時アクションの素材（画像・動画・音声）", [
+      {
+        type: 1,
+        name: "add",
+        description: "添付したファイルを素材にする（同じ名前は置き換える）",
+        options: [
+          {
+            type: 11,
+            name: "file",
+            description: "画像・動画は 10 MB、音声は 20 MB まで",
+            required: true,
+          },
+          string("name", "素材の名前（例: morning.mp3）。省略するとファイル名"),
+        ],
+      },
+      { type: 1, name: "list", description: "このサーバーの素材の一覧" },
+      {
+        type: 1,
+        name: "remove",
+        description: "素材を消す",
+        options: [string("name", "消す素材の名前", undefined, true)],
+      },
+    ]),
     ...["login", "status", "logout"].map((action) =>
       command(`${action}-github`, "GitHub認証を管理"),
     ),
@@ -207,6 +233,8 @@ export async function handleCommand(
   workspace?: Workspace,
   /** Meeting recordings (#118). */
   recorder?: Recorder,
+  /** Assets of scheduled actions (#168). */
+  assets?: ScheduleAssets,
 ) {
   if (runtime.snapshot.blocked_users.includes(i.user.id)) {
     await i.reply({
@@ -384,6 +412,29 @@ export async function handleCommand(
         } else {
           result = await recorder.start(guild(), i.channelId, i.user.id);
           note = "録音を始めました。";
+        }
+        break;
+      }
+      case "schedule-asset": {
+        if (!assets) throw new Error("素材は使えません。");
+        const id = guild();
+        const sub = i.options.getSubcommand();
+        // Looking is open to every member, as on the dashboard (#166).
+        if (sub === "list") result = await assets.list(id);
+        else {
+          manager();
+          if (sub === "remove")
+            result = await assets.remove(id, i.options.getString("name", true));
+          else {
+            const file = i.options.getAttachment("file", true);
+            result = await assets.add(
+              id,
+              { name: file.name, url: file.url, size: file.size },
+              s("name"),
+            );
+            note =
+              "素材を保存しました。15 秒ほどで、ダッシュボードの定時アクションで選べるようになります。";
+          }
         }
         break;
       }

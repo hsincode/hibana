@@ -296,6 +296,12 @@ export class Scheduler {
     }
   }
 
+  /** An asset was added or removed from Discord (#168): the next tick
+   *  scans, so the dashboard has it within one tick (15 seconds). */
+  assetsChanged() {
+    this.assetsAt = -Infinity;
+  }
+
   /** Sends the asset list when it differs from the one last sent. */
   async syncAssets() {
     if (!this.o.reportAssets) return;

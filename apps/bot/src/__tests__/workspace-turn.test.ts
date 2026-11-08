@@ -2,7 +2,11 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Message as DiscordMessage } from "discord.js";
+import {
+  type Message as DiscordMessage,
+  PermissionFlagsBits,
+  PermissionsBitField,
+} from "discord.js";
 import pino from "pino";
 import { Hibana } from "../bot";
 import { resumesAtStart, type Checkpoint } from "../checkpoint";
@@ -558,6 +562,8 @@ async function slash(
     commandName,
     user: { id: ctx.userId },
     guildId: ctx.guildId ?? null,
+    // The person manages the server (#166).
+    memberPermissions: new PermissionsBitField(PermissionFlagsBits.ManageGuild),
     channelId: ctx.channelId,
     client: { user: { id: "30" } },
     channel: { isThread: () => false },

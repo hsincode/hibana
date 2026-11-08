@@ -12,6 +12,10 @@ import {
   type ThreadCompactionMode,
 } from "@hibana/shared/settings";
 import type { Runtime } from "./runtime";
+import {
+  MANAGE_SERVER_REQUIRED,
+  canManageServerSettings,
+} from "./guild-permission";
 import type { ToolRegistry } from "./tools";
 import type { History } from "./history";
 import type { Voice } from "./voice";
@@ -236,6 +240,18 @@ export async function handleCommand(
       if (!i.guildId) throw new Error("サーバー内で使用してください。");
       return i.guildId;
     };
+    // A server's settings change only for those who manage it (#166). The
+    // interaction carries the member's permissions, so Discord is not asked.
+    const manager = () => {
+      if (
+        !canManageServerSettings({
+          role: runtime.role(i.user.id),
+          owner: !!i.guild && i.guild.ownerId === i.user.id,
+          permissions: i.memberPermissions,
+        })
+      )
+        throw new Error(MANAGE_SERVER_REQUIRED);
+    };
     switch (i.commandName) {
       case "info": {
         const settings = runtime.resolve(ctx.guildId, ctx.userId);
@@ -336,6 +352,8 @@ export async function handleCommand(
         )
           result = runtime.resolve(ctx.guildId, ctx.userId).context;
         else {
+          // In a server both commands write the server's context.
+          if (ctx.guildId) manager();
           await runtime.setContext(ctx.guildId, ctx.userId, {
             text: s("text") ?? undefined,
             persona_override: b("persona_override") ?? undefined,
@@ -447,7 +465,9 @@ export async function handleCommand(
       note = "全体の設定を変えました。すべてのサーバーと DM に使われます。";
     }
     if (Object.keys(patch).length) {
-      result = await runtime.patch(guild(), patch, i.user.id);
+      const id = guild();
+      manager();
+      result = await runtime.patch(id, patch, i.user.id);
       if (i.commandName === "text-model")
         result = runtime.guild(guild()).text_model;
       // The switch is stored either way; on Anthropic Workspace it only

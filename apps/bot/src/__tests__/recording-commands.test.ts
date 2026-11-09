@@ -83,6 +83,7 @@ describe("registration", () => {
       "anthropic-haiku-5-5",
       "anthropic-sonnet-5-5",
       "anthropic-opus-5-5",
+      "anthropic-fable-5-2",
     ]);
     expect(preset!.choices[0]!.name).toBe("Anthropic / Claude Haiku 5.5");
     expect(effort!.choices.map((c) => c.value)).toEqual([

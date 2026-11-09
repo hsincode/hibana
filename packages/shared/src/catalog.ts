@@ -85,14 +85,14 @@ export const MODEL_PRESETS = [
   },
   // Claude Max: own account/key (`CLAUDE_MAX_API_KEY`). Premium / Moderator /
   // Administrator only — PATCH and the dashboard picker both check `min_role`.
-  // Catalog id stays `fable-5` after the wire id moved to `claude-fable-5-1`,
-  // so saved role presets and the Premium overlay key still match. Reads
-  // rewrite the old wire id.
+  // Catalog id stays `fable-5` after the wire id moved to `claude-fable-5-1`
+  // and then `claude-fable-5-2`, so saved role presets and the Premium overlay
+  // key still match. Reads rewrite the old wire ids.
   {
     id: "fable-5",
     provider: "claude_max",
-    model: "claude-fable-5-1",
-    label: "Claude Max / Claude Fable 5.1",
+    model: "claude-fable-5-2",
+    label: "Claude Max / Claude Fable 5.2",
     min_role: "premium",
   },
   {
@@ -142,6 +142,14 @@ export const MODEL_PRESETS = [
   // wired. Unpublished, so flipping `published` on the admin screen is enough
   // at launch if the ids hold. `ANTHROPIC_PRICES` has no row for them, so
   // their requests are counted as unpriced until a price is added by hand.
+  {
+    id: "anthropic-fable-5-2",
+    provider: "anthropic",
+    model: "claude-fable-5-2",
+    label: "Anthropic / Claude Fable 5.2",
+    min_role: "premium",
+    server_shared: true,
+  },
   {
     id: "anthropic-opus-5-6",
     provider: "anthropic",
@@ -398,7 +406,8 @@ const MODEL_WIRE_ALIASES: Record<
     model: "gpt-6-luna",
     providers: ["codex_plus", "codex_pro", "chatgpt"],
   },
-  "claude-fable-5": { model: "claude-fable-5-1", providers: ["claude_max"] },
+  "claude-fable-5": { model: "claude-fable-5-2", providers: ["claude_max"] },
+  "claude-fable-5-1": { model: "claude-fable-5-2", providers: ["claude_max"] },
 };
 
 export function canonicalModel(provider: string, model: string): string {
@@ -652,6 +661,13 @@ export const ANTHROPIC_PRICES: Record<
   string,
   AnthropicPrice & { long?: { above: number } & AnthropicPrice }
 > = {
+  // Fable 5.2 row read 2026-11-10 from the same page.
+  "claude-fable-5-2": {
+    input: 8,
+    cache_write_1h: 16,
+    cache_read: 0.2,
+    output: 40,
+  },
   "claude-opus-5-5": {
     input: 4,
     cache_write_1h: 8,

@@ -102,6 +102,7 @@ test("the routing table is the five levels of #35, without Sonnet, and never use
     "claude-haiku-5-5",
     "claude-sonnet-5-5",
     "claude-opus-5-5",
+    "claude-fable-5-2",
     // Unreleased and unpublished (#79); the routing above never picks them.
     "claude-opus-5-6",
     "claude-fable-5-5",

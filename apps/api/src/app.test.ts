@@ -222,7 +222,7 @@ describe("authz", () => {
         (p) => [p.id, p],
       ),
     );
-    expect(catalogById["fable-5"]?.model).toBe("claude-fable-5-1");
+    expect(catalogById["fable-5"]?.model).toBe("claude-fable-5-2");
     expect(catalogById["max-opus-5-5"]?.model).toBe("claude-opus-5-5");
     expect(catalogById["max-opus-5-5"]?.min_role).toBe("premium");
     expect(catalogById["sol"]?.model).toBe("gpt-6.1-sol");
@@ -408,6 +408,7 @@ describe("authz", () => {
       "anthropic-haiku-5-5",
       "anthropic-sonnet-5-5",
       "anthropic-opus-5-5",
+      "anthropic-fable-5-2",
       "anthropic-opus-5-6",
       "anthropic-fable-5-5",
       "anthropic-workspace-haiku-5-5",

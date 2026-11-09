@@ -262,13 +262,13 @@ type Rewrite = {
 const REWRITES: Record<string, Rewrite> = {
   set_bot_model: {
     description:
-      "Changes the model this server uses, from the next message on. Give a preset id. The Anthropic Workspace presets are anthropic-workspace-haiku-5-5, anthropic-workspace-sonnet-5-5 and anthropic-workspace-opus-5-5: turns run as cloud sessions like this one. The Anthropic presets are anthropic-auto (the bot picks the model and effort for each conversation), anthropic-haiku-5-5, anthropic-sonnet-5-5 and anthropic-opus-5-5: the same models, working on the bot's host instead of in a cloud container. The presets of other providers work on the bot's host as well. Changing the model, the effort or Ultra starts a new conversation, and a new cloud session has a new container: files in this one are not carried over, so deliver what must be kept first. Not available in DMs. Selecting these presets requires the Premium role or higher.",
+      "Changes the model this server uses, from the next message on. Give a preset id. The Anthropic Workspace presets are anthropic-workspace-haiku-5-5, anthropic-workspace-sonnet-5-5 and anthropic-workspace-opus-5-5: turns run as cloud sessions like this one. The Anthropic presets are anthropic-auto (the bot picks the model and effort for each conversation), anthropic-haiku-5-5, anthropic-sonnet-5-5, anthropic-opus-5-5 and anthropic-fable-5-2: the same models (Fable 5.2 on Anthropic only), working on the bot's host instead of in a cloud container. The presets of other providers work on the bot's host as well. Changing the model, the effort or Ultra starts a new conversation, and a new cloud session has a new container: files in this one are not carried over, so deliver what must be kept first. Not available in DMs. Selecting these presets requires the Premium role or higher.",
     properties: {
       preset: "Preset id, for example anthropic-workspace-sonnet-5-5.",
       provider:
         "Provider id, for example anthropic_workspace or anthropic, given with model instead of preset.",
       model:
-        "Model id, given with provider instead of preset. On anthropic_workspace and anthropic: claude-haiku-5-5, claude-sonnet-5-5 or claude-opus-5-5, and auto on anthropic only.",
+        "Model id, given with provider instead of preset. On anthropic_workspace and anthropic: claude-haiku-5-5, claude-sonnet-5-5 or claude-opus-5-5, and claude-fable-5-2 and auto on anthropic only.",
       effort:
         "none, low, medium, high, xhigh or max, or default for the model's recommended effort.",
       ultra_mode:

@@ -176,7 +176,7 @@ describe("runtime isolation", () => {
         PROVIDER: "claude_max",
         LLM_MODEL: "claude-fable-5",
       }).selection.model,
-    ).toBe("claude-fable-5-1");
+    ).toBe("claude-fable-5-2");
     expect(() => loadConfig({ PROVIDER: "CODEX_EVERYWHERE" })).toThrow();
     expect(() => loadConfig({ PROVIDER: "OPENCODE_GO" })).toThrow();
     expect(() => loadConfig({ LLM_TEMPERATURE: "NaN" })).toThrow();

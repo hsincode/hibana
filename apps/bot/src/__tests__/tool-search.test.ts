@@ -4,7 +4,7 @@ import { Agent } from "../agent";
 import { loadConfig } from "../config";
 import { awaitsServerTool, LlmClient } from "../llm";
 import { Runtime } from "../runtime";
-import { LOADED_TOOLS, TOOL_SEARCH } from "../tool-search";
+import { LOADED_TOOLS, TOOL_SEARCH, toolSearchFor } from "../tool-search";
 import { ToolRegistry } from "../tools";
 import codex from "../tools/codex-definitions.json";
 import definitions from "../tools/definitions.json";
@@ -254,4 +254,13 @@ test("the bot's own surface on Anthropic defers most integration tools", () => {
       !LOADED_TOOLS.has(t.function.name.replace(/^mcp__[^_]+__/, "")),
   );
   expect(deferrable.length).toBeGreaterThan(tools.length / 2);
+});
+
+test("Fable 5.2 is in the tool search table on Anthropic only", () => {
+  expect(
+    toolSearchFor({ provider: "anthropic", model: "claude-fable-5-2" }),
+  ).toBe(true);
+  expect(
+    toolSearchFor({ provider: "claude_max", model: "claude-fable-5-2" }),
+  ).toBe(false);
 });

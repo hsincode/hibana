@@ -51,6 +51,15 @@ test("prices each token kind at its own rate", () => {
       output: 1_000_000,
     }),
   ).toBeCloseTo(24, 10);
+  // Fable 5.2: 300k uncached × $8 + 100k 1h writes × $16 + 600k reads × $0.20 + 100k output × $40.
+  expect(
+    anthropicCost("claude-fable-5-2", {
+      prompt: 1_000_000,
+      cache_read: 600_000,
+      cache_write: 100_000,
+      output: 100_000,
+    }),
+  ).toBeCloseTo(2.4 + 1.6 + 0.12 + 4.0, 10);
   expect(
     anthropicCost("claude-unknown", {
       prompt: 1,

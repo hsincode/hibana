@@ -16,11 +16,11 @@ export const TOOL_SEARCH = {
   name: "tool_search_tool_bm25",
 };
 
-// The models in the documentation's compatibility table (checked 2026-10-28).
+// The models in the documentation's compatibility table (checked 2026-10-28; Fable / Mythos 5.2 added 2026-11-10).
 // Unreleased ids such as claude-opus-5-6 are not in it and keep every tool
 // loaded; a model without the tool would reject the whole request.
 const SUPPORTED =
-  /^claude-(fable-5-1|fable-5|mythos-5-1|mythos-5|opus-5-5|opus-5|sonnet-5-5|sonnet-5|haiku-5-5|opus-4-[5-8]|sonnet-4-[56]|haiku-4-5)(-\d{8})?$/;
+  /^claude-(fable-5-2|fable-5-1|fable-5|mythos-5-2|mythos-5-1|mythos-5|opus-5-5|opus-5|sonnet-5-5|sonnet-5|haiku-5-5|opus-4-[5-8]|sonnet-4-[56]|haiku-4-5)(-\d{8})?$/;
 
 export function toolSearchFor(selection: Selection): boolean {
   return selection.provider === "anthropic" && SUPPORTED.test(selection.model);

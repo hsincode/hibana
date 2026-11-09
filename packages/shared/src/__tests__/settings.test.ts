@@ -404,9 +404,32 @@ test("retired account selections become concrete defaults without affecting othe
     }).selection,
   ).toEqual({
     provider: "claude_max",
-    model: "claude-fable-5-1",
+    model: "claude-fable-5-2",
     effort: "medium",
   });
+  // The 5.1 wire id saved before Fable 5.2 reads as 5.2 on Claude Max only.
+  expect(
+    normalizeGuild({
+      selection: {
+        provider: "claude_max",
+        model: "claude-fable-5-1",
+        effort: "high",
+      },
+    }).selection,
+  ).toEqual({
+    provider: "claude_max",
+    model: "claude-fable-5-2",
+    effort: "high",
+  });
+  expect(
+    normalizeGuild({
+      selection: {
+        provider: "anthropic",
+        model: "claude-fable-5-1",
+        effort: "high",
+      },
+    }).selection?.model,
+  ).toBe("claude-fable-5-1");
   expect(settingsDefaults({ LLM_MODEL: "gpt-5.6-luna" }).selection?.model).toBe(
     "gpt-6-luna",
   );

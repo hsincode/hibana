@@ -51,7 +51,6 @@ hibana のスキルは `SKILL.md`（YAML frontmatter + エージェント向け�
 ---
 name: <name>
 description: <Step 3 の description>
-context_budget: lean   # optional. コーパス検索や長い参照を繰り返すスキル向け
 ---
 
 <手順。エージェントへの指示でありドキュメントではない>
@@ -60,6 +59,3 @@ context_budget: lean   # optional. コーパス検索や長い参照を繰り返
 - `description` が自動起動の鍵。トリガー語を具体的に。
 - 本文は実行手順。不要な注意書き・重複・「何もしない文」は書かない。
 - 事実・数値・一覧は一箇所だけ。同じ内容をファイル間で繰り返さない。
-- コーパス検索・長い参照を何度も読むスキルは `context_budget: lean`。そのターンの
-  新規 tool result は 4k 文字、`search.py` は 3 回まで。SKILL.md 本文はライブでは残るが
-  次ターンの履歴には載らない。

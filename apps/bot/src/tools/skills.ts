@@ -9,6 +9,8 @@ type Skill = {
   name: string;
   description: string;
   body: string;
+  /** The parsed frontmatter, so that an edit keeps the keys it does not set. */
+  front: Json;
   root: string;
   builtin: boolean;
   enabled: boolean;
@@ -70,6 +72,7 @@ export class Skills {
           name: dir.name,
           description: front.description,
           body: source,
+          front,
           root: join(root, dir.name),
           builtin,
           enabled: !(this.disabled[this.scope(ctx)] ?? []).includes(dir.name),
@@ -86,7 +89,7 @@ export class Skills {
   }
   async execute(name: string, a: Json, ctx: Context): Promise<unknown> {
     if (name === "list_skills")
-      return (await this.list(ctx)).map(({ root, body, ...s }) => s);
+      return (await this.list(ctx)).map(({ root, body, front, ...s }) => s);
     const skillName = this.name(a.name);
     const existing = (await this.list(ctx)).find((s) => s.name === skillName);
     if (name === "use_skill" || name === "read_skill_file") {
@@ -185,9 +188,16 @@ export class Skills {
           "Description and body are required and must fit skill limits",
         );
       await mkdir(root, { recursive: true });
+      // An edit rewrites only name and description; other frontmatter keys
+      // (license, metadata and the like) stay as they were.
+      const front = {
+        ...(existing?.front ?? {}),
+        name: skillName,
+        description,
+      };
       await writeFile(
         join(root, "SKILL.md"),
-        `---\n${stringify({ name: skillName, description })}---\n\n${body}\n`,
+        `---\n${stringify(front)}---\n\n${body}\n`,
         { mode: 0o600 },
       );
       return { ok: true, name: skillName };

@@ -625,6 +625,49 @@ test("bot patches the actual API contract and retired database fields never leak
   }
 });
 
+test("edit_skill keeps the other frontmatter keys of a custom skill (#173)", async () => {
+  const { Skills } = await import("../tools/skills");
+  const { mkdir, readFile } = await import("node:fs/promises");
+  const { parse } = await import("yaml");
+  const dir = await mkdtemp(join(tmpdir(), "hibana-skill-edit-"));
+  try {
+    const ctx = { ...context, guildId: "10000" };
+    const root = join(dir, "skills", "guilds", "10000", "keep-keys");
+    await mkdir(root, { recursive: true });
+    await Bun.write(
+      join(root, "SKILL.md"),
+      "---\nname: keep-keys\ndescription: old\nlicense: MIT\nmetadata:\n  owner: ops\n---\n\nOld body.\n",
+    );
+    const skills = new Skills(
+      loadConfig({ HIBANA_DATA_DIR: dir, SKILLS_DIR: join(dir, "builtin") }),
+    );
+    await skills.load();
+    await skills.execute(
+      "edit_skill",
+      { name: "keep-keys", description: "new" },
+      ctx,
+    );
+    const source = await readFile(join(root, "SKILL.md"), "utf8");
+    const front = parse(/^---\n([\s\S]*?)\n---/.exec(source)![1]!);
+    expect(front).toEqual({
+      name: "keep-keys",
+      description: "new",
+      license: "MIT",
+      metadata: { owner: "ops" },
+    });
+    expect(source).toEndWith("\n\nOld body.\n");
+    const listed = (await skills.execute("list_skills", {}, ctx)) as Json[];
+    expect(Object.keys(listed[0]!).sort()).toEqual([
+      "builtin",
+      "description",
+      "enabled",
+      "name",
+    ]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("skill publication matches the API schema and inherits builtins without leaking host configuration", async () => {
   const { Skills } = await import("../tools/skills");
   const { skillRow, guildSkills } = await import("../../../api/src/skills");

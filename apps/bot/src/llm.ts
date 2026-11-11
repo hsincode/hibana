@@ -321,6 +321,9 @@ export type Completion = {
   incomplete: boolean;
   /** Anthropic `pause_turn`: the server tool loop stopped and can be resumed. */
   paused?: boolean;
+  /** Ids of tool calls whose arguments the output limit cut off (#144). They
+   *  carry `{}` and must be answered with an error, never run. */
+  truncatedToolCalls?: string[];
 };
 export function normalizeUsage(raw: Json = {}): Usage {
   const cacheRead = Number(
@@ -433,6 +436,9 @@ export function parseCompletion(
       usage: normalizeUsage(data.usage as Json),
       incomplete: data.stop_reason === "max_tokens",
       paused: data.stop_reason === "pause_turn",
+      ...(Array.isArray(data.truncated_tool_use_ids) && {
+        truncatedToolCalls: data.truncated_tool_use_ids.map(String),
+      }),
     };
   }
   const choice = (data.choices as Json[])?.[0];

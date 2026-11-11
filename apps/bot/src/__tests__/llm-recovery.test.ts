@@ -7,6 +7,7 @@ import {
   failureDetail,
   providerFailureNotice,
 } from "../llm-errors";
+import { classifyFailure } from "../failure";
 import type { RetryNotice } from "../llm-request";
 import type { Json, Message } from "../types";
 
@@ -147,6 +148,72 @@ describe("provider recovery", () => {
       expect(requests).toBe(1);
     });
   }
+  // Cloudflare in front of a provider answers 403 itself when its WAF blocks
+  // the body (Refuseless with `/etc/passwd` in the conversation, #105) or a
+  // bot check stops the request. Neither is about the API key.
+  const cloudflare403 = (body: string, headers: Record<string, string> = {}) =>
+    new Response(body, {
+      status: 403,
+      headers: {
+        "content-type": "text/html; charset=UTF-8",
+        server: "cloudflare",
+        "cf-ray": "a4f805952f4ad5ce-NRT",
+        ...headers,
+      },
+    });
+  const blockPage =
+    '<!DOCTYPE html><html><head><title>Attention Required! | Cloudflare</title></head><body><div id="cf-wrapper"><div id="cf-error-details" class="cf-error-details-wrapper"><h1>Sorry, you have been blocked</h1><p>secret prompt</p></div></div></body></html>';
+  const edgeFailure = async (response: () => Response) => {
+    let requests = 0;
+    const llm = new LlmClient(
+      config(),
+      async () => {
+        requests++;
+        return response();
+      },
+      { sleep: noWait },
+    );
+    const error = await llm.complete(selection, [], []).then(
+      () => {
+        throw new Error("expected failure");
+      },
+      (e) => e,
+    );
+    expect(requests).toBe(1);
+    expect(error).toBeInstanceOf(ProviderError);
+    return error as ProviderError;
+  };
+  test("a Cloudflare WAF block page is not reported as an authentication error", async () => {
+    const error = await edgeFailure(() => cloudflare403(blockPage));
+    expect(error.kind).toBe("edge_blocked");
+    expect(error.status).toBe(403);
+    expect(error.diagnostics.code).toBe("cloudflare_block");
+    expect(classifyFailure(error, "agent")).toBe("provider_http");
+    const notice = providerFailureNotice(error)!;
+    expect(notice).toContain("Cloudflare");
+    expect(notice).toContain("API キーの問題ではありません");
+    expect(notice).not.toContain("APIキーと利用権限を確認");
+    expect(notice).toContain("（送信時・HTTP 403）");
+    expect(notice + JSON.stringify(error)).not.toContain("secret");
+  });
+  test("a Cloudflare challenge (cf-mitigated) is not reported as an authentication error", async () => {
+    const error = await edgeFailure(() =>
+      cloudflare403("<title>Just a moment...</title>", {
+        "cf-mitigated": "challenge",
+      }),
+    );
+    expect(error.kind).toBe("edge_blocked");
+    expect(error.diagnostics.code).toBe("cloudflare_challenge");
+    expect(classifyFailure(error, "agent")).toBe("provider_http");
+    expect(providerFailureNotice(error)).toContain("ボットの判定");
+  });
+  test("an origin's own 403 page behind Cloudflare stays an authentication error", async () => {
+    const error = await edgeFailure(() =>
+      cloudflare403("<html><title>403 Forbidden</title>nginx</html>"),
+    );
+    expect(error.kind).toBe("authentication");
+    expect(classifyFailure(error, "agent")).toBe("provider_auth");
+  });
   test("HTTP retry budget is four retries after the initial request", async () => {
     let requests = 0;
     const llm = new LlmClient(

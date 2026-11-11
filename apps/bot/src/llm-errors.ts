@@ -50,7 +50,9 @@ export type FailureKind =
   | "context_length"
   | "duplicate_tools"
   | "tool_history"
-  | "refusal";
+  | "refusal"
+  /** Cloudflare in front of the provider answered 403 itself (#105). */
+  | "edge_blocked";
 
 // Only fixed classifications reach logs/Discord. Provider messages can echo
 // prompts, credentials, or an entire proxy HTML page and must stay private.
@@ -212,24 +214,80 @@ function providerFailureText(error: ProviderError): string {
       return "プロバイダがリクエストを受け付けませんでした。モデル設定や会話の長さを確認してください。";
     case "refusal":
       return "モデルの安全判定によりこの依頼への応答が停止されました。別のモデルを選ぶか、依頼内容を見直してください。";
+    case "edge_blocked":
+      return error.diagnostics.code === "cloudflare_challenge"
+        ? "プロバイダの手前の Cloudflare が、ボットの判定で要求を止めました。API キーの問題ではありません。時間を置いて再開するか、別のプロバイダのモデルに切り替えてください。"
+        : "プロバイダの手前の Cloudflare（WAF）が、要求の中身に反応して遮断しました。API キーの問題ではありません。会話の中の文字列（`/etc/passwd` のようなパスなど）が原因のときは、この会話のまま同じプロバイダで続けても遮断されます。別のプロバイダのモデルに切り替えてください。";
     default:
       return "プロバイダとの通信を再試行しましたが、応答を完了できませんでした。";
   }
 }
 
-// Read only bounded JSON error envelopes. HTML proxy errors are unhelpful, and
-// a stalled error body must not delay recovery for the full generation timeout.
+// Cloudflare answers 403 for the provider, before the request reaches it, when
+// a bot check stops the request or the site's WAF blocks the body (#105). A
+// challenge carries `cf-mitigated: challenge` ("the only valid value",
+// developers.cloudflare.com/cloudflare-challenges/challenge-types/challenge-pages/detect-response/);
+// a WAF block is its "Sorry, you have been blocked" page. Neither says anything
+// about the API key. An origin's own 403 page behind Cloudflare has neither
+// mark and stays an authentication failure.
+const CLOUDFLARE_BLOCK_PAGE = /cf-error-details|Sorry, you have been blocked/;
+
+function edgeBlocked(code: "cloudflare_block" | "cloudflare_challenge") {
+  const failure = new ProviderError("edge_blocked", false, 403);
+  failure.diagnostics = { code };
+  return failure;
+}
+
+// Read only bounded JSON error envelopes, and a 403 page only to look for
+// Cloudflare's marks. Other HTML proxy errors are unhelpful, and a stalled
+// error body must not delay recovery for the full generation timeout.
 export async function readHttpFailure(
   response: Response,
   signal: AbortSignal,
 ): Promise<ProviderError> {
   const fallback = httpFailure(response.status);
   if (
-    !response.body ||
-    !response.headers.get("content-type")?.includes("application/json")
+    response.status === 403 &&
+    response.headers.get("cf-mitigated") === "challenge"
   )
+    return edgeBlocked("cloudflare_challenge");
+  const type = response.headers.get("content-type") ?? "";
+  const json = type.includes("application/json");
+  const page = response.status === 403 && type.includes("text/html");
+  if (!response.body || (!json && !page)) return fallback;
+  const text = await readBounded(response.body, signal);
+  if (text === undefined) return fallback;
+  // The page is only matched, never kept: it can echo the request.
+  if (!json)
+    return CLOUDFLARE_BLOCK_PAGE.test(text)
+      ? edgeBlocked("cloudflare_block")
+      : fallback;
+  try {
+    const data = JSON.parse(text);
+    const classified = apiFailure(data.error);
+    const failure =
+      classified.kind === "protocol" ||
+      (!fallback.retryable && classified.retryable)
+        ? fallback
+        : new ProviderError(
+            classified.kind,
+            classified.retryable,
+            response.status,
+          );
+    failure.diagnostics = classified.diagnostics;
+    return failure;
+  } catch {
     return fallback;
-  const reader = response.body.getReader();
+  }
+}
+
+/** At most 16 KiB of an error body, read within a second; undefined when it
+ *  is larger, slower or unreadable. */
+async function readBounded(
+  body: ReadableStream<Uint8Array>,
+  signal: AbortSignal,
+): Promise<string | undefined> {
+  const reader = body.getReader();
   const timeout = new AbortController();
   const timer = setTimeout(() => timeout.abort(), 1000);
   const stop = AbortSignal.any([signal, timeout.signal]);
@@ -247,24 +305,12 @@ export async function readHttpFailure(
       stop.throwIfAborted();
       if (next.done) break;
       size += next.value.length;
-      if (size > 16384) return fallback;
+      if (size > 16384) return undefined;
       text += decoder.decode(next.value, { stream: true });
     }
-    const data = JSON.parse(text + decoder.decode());
-    const classified = apiFailure(data.error);
-    const failure =
-      classified.kind === "protocol" ||
-      (!fallback.retryable && classified.retryable)
-        ? fallback
-        : new ProviderError(
-            classified.kind,
-            classified.retryable,
-            response.status,
-          );
-    failure.diagnostics = classified.diagnostics;
-    return failure;
+    return text + decoder.decode();
   } catch {
-    return fallback;
+    return undefined;
   } finally {
     clearTimeout(timer);
     stop.removeEventListener("abort", cancel);

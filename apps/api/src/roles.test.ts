@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   canAssignRole,
+  canEditUserSettings,
   canManageUsers,
   canSelectPreset,
   DEFAULT_ROLE,
@@ -55,5 +56,18 @@ describe("role hierarchy", () => {
     expect(canSelectPreset("standard", "premium")).toBe(false);
     expect(canSelectPreset("free", "premium")).toBe(false);
     expect(canSelectPreset("free", null)).toBe(true);
+  });
+
+  // Decision record #175.
+  test("personal settings open only to an admin or mod above the user", () => {
+    expect(canEditUserSettings("administrator", "moderator")).toBe(true);
+    expect(canEditUserSettings("administrator", "free")).toBe(true);
+    expect(canEditUserSettings("administrator", "administrator")).toBe(false);
+    expect(canEditUserSettings("moderator", "premium")).toBe(true);
+    expect(canEditUserSettings("moderator", "moderator")).toBe(false);
+    expect(canEditUserSettings("moderator", "administrator")).toBe(false);
+    // A rank above the target is not enough without managing users.
+    expect(canEditUserSettings("premium", "free")).toBe(false);
+    expect(canEditUserSettings("standard", "free")).toBe(false);
   });
 });

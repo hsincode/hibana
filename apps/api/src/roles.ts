@@ -119,3 +119,14 @@ export function canViewAnalytics(_role: Role): boolean {
 export function canViewUsage(role: Role): boolean {
   return role === "administrator";
 }
+
+/**
+ * Actor may read and change another user's personal settings (#175): an
+ * Administrator or Moderator, and only for a user of a strictly weaker role.
+ * The ranking is `canAssignRole`'s, so a Moderator reaches neither an
+ * Administrator's nor another Moderator's row, and nobody reaches their own
+ * row this way (that is `/api/me/settings`).
+ */
+export function canEditUserSettings(actor: Role, target: Role): boolean {
+  return canManageUsers(actor) && rank(actor) < rank(target);
+}

@@ -851,6 +851,11 @@ th.num {
   gap: 6px;
   justify-content: flex-end;
 }
+/* 行の操作にボタンと選択欄が並ぶとき（ユーザー一覧）、選択欄は残りの幅だけを使う。 */
+.cell-actions > .select-trigger {
+  flex: 1 1 160px;
+  width: auto;
+}
 td .seg button {
   min-height: 28px;
   min-width: 0;

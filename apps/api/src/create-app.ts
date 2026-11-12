@@ -17,6 +17,7 @@ import {
 } from "./catalog";
 import {
   canAssignRole,
+  canEditUserSettings,
   canManageAppSettings,
   canManageBudget,
   canManageUsers,
@@ -298,6 +299,62 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
     hub.notify(await store.version());
   };
 
+  /**
+   * One PATCH of a personal row: by its owner (`/api/me/settings`) or by an
+   * Administrator / Moderator above them (`/api/users/:id/settings`, #175).
+   * `role` is the row owner's either way. The bot drops a Premium preset from
+   * the row of a user without the plan, whoever stored it, so the actor's
+   * role must not let one in.
+   */
+  const patchUserOverride = async (id: string, role: Role, body: unknown) => {
+    const parsed = userOverridePatchSchema.safeParse(body);
+    if (!parsed.success) {
+      return {
+        status: 400,
+        error: parsed.error.issues.map((i) => i.message).join("; "),
+      } as const;
+    }
+    const gated = refuseRestrictedPatch(
+      role,
+      parsed.data,
+      await loadPremium(store),
+    );
+    if (gated) return { status: 403, error: gated } as const;
+    const hidden = refuseUnpublishedPatch(
+      await loadUnpublished(store),
+      parsed.data,
+    );
+    if (hidden) return { status: 403, error: hidden } as const;
+    const next = applyUserOverridePatch(
+      await store.getUserOverride(id),
+      parsed.data,
+      store.defaults,
+    );
+    await store.putUserOverride(id, next);
+    await publish();
+    return { status: 200, settings: next } as const;
+  };
+
+  /**
+   * The user whose personal settings this session may open (#175). Reading
+   * follows the rule for changing: the row holds the user's context text.
+   * Only users in `users` (people who have signed in to the dashboard) can be
+   * opened, so an ID that was never seen does not get a row made for it.
+   */
+  const settingsTarget = async (actor: Role, id: string) => {
+    if (!canManageUsers(actor))
+      return { status: 403, error: "forbidden" } as const;
+    const user = await store.getUser(id);
+    if (!user) return { status: 404, error: "user not found" } as const;
+    const role = effectiveRole(user.discord_id, user.role);
+    if (!canEditUserSettings(actor, role))
+      return {
+        status: 403,
+        error: "cannot open this user's settings",
+      } as const;
+    return { status: 200, user, role } as const;
+  };
+
   // Pruning on every ingest would add a DELETE to each bot flush; once an hour
   // is enough for a 30-day window and keeps the hot path a single INSERT batch.
   let lastPrune = 0;
@@ -497,38 +554,12 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           set.status = 401;
           return { error: "unauthorized" };
         }
-        const parsed = userOverridePatchSchema.safeParse(body);
-        if (!parsed.success) {
-          set.status = 400;
-          return {
-            error: parsed.error.issues.map((i) => i.message).join("; "),
-          };
+        const done = await patchUserOverride(s.discord_id, s.role, body);
+        if (done.status !== 200) {
+          set.status = done.status;
+          return { error: done.error };
         }
-        const gated = refuseRestrictedPatch(
-          s.role,
-          parsed.data,
-          await loadPremium(store),
-        );
-        if (gated) {
-          set.status = 403;
-          return { error: gated };
-        }
-        const hidden = refuseUnpublishedPatch(
-          await loadUnpublished(store),
-          parsed.data,
-        );
-        if (hidden) {
-          set.status = 403;
-          return { error: hidden };
-        }
-        const next = applyUserOverridePatch(
-          await store.getUserOverride(s.discord_id),
-          parsed.data,
-          store.defaults,
-        );
-        await store.putUserOverride(s.discord_id, next);
-        await publish();
-        return { settings: next, version: await store.version() };
+        return { settings: done.settings, version: await store.version() };
       })
       .get("/api/catalog", async ({ cookie }) => {
         const raw = await store.getMeta("available_presets");
@@ -665,6 +696,11 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
             ...u,
             role: effectiveRole(u.discord_id, u.role),
             blocked: blocked.has(u.discord_id),
+            // Whether this session may open the row's personal settings (#175).
+            can_edit_settings: canEditUserSettings(
+              s.role,
+              effectiveRole(u.discord_id, u.role),
+            ),
           })),
           assignable: rolesAssignableBy(s.role),
         };
@@ -706,6 +742,55 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
         await publish();
         return { ok: true, discord_id: params.id, role: next };
       })
+      // Another user's personal settings (#175): the rows `/api/me/settings`
+      // reads and writes, opened by an Administrator or Moderator for a user
+      // of a weaker role. The PATCH body is the one `/api/me/settings` takes.
+      .get("/api/users/:id/settings", async ({ cookie, set, params }) => {
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const target = await settingsTarget(s.role, params.id);
+        if (target.status !== 200) {
+          set.status = target.status;
+          return { error: target.error };
+        }
+        return {
+          user: {
+            discord_id: target.user.discord_id,
+            username: target.user.username,
+            role: target.role,
+          },
+          settings: await store.getUserOverride(target.user.discord_id),
+          version: await store.version(),
+        };
+      })
+      .patch(
+        "/api/users/:id/settings",
+        async ({ cookie, set, params, body }) => {
+          const s = await requireSession(cookieSid(cookie as never));
+          if (!s) {
+            set.status = 401;
+            return { error: "unauthorized" };
+          }
+          const target = await settingsTarget(s.role, params.id);
+          if (target.status !== 200) {
+            set.status = target.status;
+            return { error: target.error };
+          }
+          const done = await patchUserOverride(
+            target.user.discord_id,
+            target.role,
+            body,
+          );
+          if (done.status !== 200) {
+            set.status = done.status;
+            return { error: done.error };
+          }
+          return { settings: done.settings, version: await store.version() };
+        },
+      )
       .get("/api/guilds", async ({ cookie, set }) => {
         const s = await requireSession(cookieSid(cookie as never));
         if (!s) {

@@ -6,7 +6,7 @@ import { ArtifactsPage } from "./Artifacts";
 import { GlobalSettingsPage } from "./Global";
 import { GuildPage } from "./Guild";
 import { Login } from "./Login";
-import { MePage } from "./Me";
+import { MePage, UserSettingsPage } from "./Me";
 import { ModelsPage } from "./Models";
 import { guildPath } from "./nav";
 import { GuildList } from "./Servers";
@@ -54,6 +54,17 @@ export function App() {
                   element={
                     me.can_manage_users ? (
                       <UsersPage me={me} />
+                    ) : (
+                      <Navigate to="/" />
+                    )
+                  }
+                />
+                {/* ほかのユーザーの個人設定（#175）。開けるかは API が決める。 */}
+                <Route
+                  path="/users/:id"
+                  element={
+                    me.can_manage_users ? (
+                      <UserSettingsPage />
                     ) : (
                       <Navigate to="/" />
                     )

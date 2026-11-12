@@ -4,7 +4,7 @@ import type {
   ServiceTier,
 } from "@hibana/shared/settings";
 import { modelEffort, type MultiAgentRoles } from "@hibana/shared/settings";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { Preset } from "./api";
 import {
   Row,
@@ -13,7 +13,7 @@ import {
   type SaveMarks,
   type SaveState,
 } from "./save";
-import { BoolSeg, Icon, Section } from "./ui";
+import { BoolSeg, Icon, Section, SubjectContext } from "./ui";
 
 /* ============================================================
    サーバー設定とマイ設定で共用するもの
@@ -311,6 +311,7 @@ export function ContextSection({
 }) {
   const inherit = scope === "me";
   const px = inherit ? "me" : "g";
+  const subject = useContext(SubjectContext);
   const text = draft ?? value;
   const dirty = text !== value;
   // 保存や巻き戻しで保存値が書きかけと同じになったら、書きかけを手放す。
@@ -324,7 +325,7 @@ export function ContextSection({
       title={inherit ? "ユーザーコンテキスト" : "サーバーコンテキスト"}
       desc={
         inherit
-          ? "空のままならサーバーのコンテキストに従います。文章を保存したときだけ、あなたへの応答に追加します。"
+          ? `空のままならサーバーのコンテキストに従います。文章を保存したときだけ、${subject}への応答に追加します。`
           : "このサーバーでの応答に常に添える前提テキスト。"
       }
     >

@@ -256,7 +256,7 @@ bot は、会話履歴と Auto Routing の経路を `/var/lib/hibana/conversatio
 - 保存した会話が消えるのは、`/clear`、チャンネルやスレッドの削除、モデルの変更、guild の設定変更、スレッドの期限切れです。通常のチャンネルに期限はありません
 - 会話の本文（ツールの結果を含む）がこのファイルに残ります。モードは 0600 です。バックアップは取っていません
 - すべて消すには、bot を止めて `conversations.db`・`conversations.db-wal`・`conversations.db-shm` を削除します。保存をやめるには、`/etc/hibana/bot.env` に `CONVERSATION_DB_PATH=`（空）を書いて再起動します
-- 中身は `sqlite3 /var/lib/hibana/conversations.db` で見られます（表は `history_channels`・`history_turns`・`routes`。Anthropic Workspace を入れた版からは `workspace_sessions`・`workspace_disposals` も。この 2 つの表に後から足した列 `lease_settled`・`allowed_cents` は、列の無いファイルを開いたときに bot が `ALTER TABLE … ADD COLUMN` で足します）
+- 中身は `sqlite3 /var/lib/hibana/conversations.db` で見られます（表は `history_channels`・`history_turns`・`routes`。Anthropic Workspace を入れた版からは `workspace_sessions`・`workspace_disposals` も。この 2 つの表に後から足した列 `lease_settled`・`allowed_cents` と、`history_channels` に後から足した列 `opening`（会話の冒頭の設定。[#177](https://github.com/hsincode/hibana/issues/177)、`docs/prompt-cache.md`）は、列の無いファイルを開いたときに bot が `ALTER TABLE … ADD COLUMN` で足します）
 - bot を前の版に切り戻している間、前の版はこのファイルを使いません。その間の会話は保存されず、新しい版に戻ると、切り戻す前の履歴の続きになります
 
 検証は手元のテスト（`apps/bot/src/__tests__/conversation-store.test.ts`、`sync.test.ts`）までです。本番での動作、実際の会話でのファイルの大きさ、キャッシュのヒット率の変化は、配信後に確かめる必要があります。

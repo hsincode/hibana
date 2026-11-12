@@ -95,6 +95,8 @@ export async function readCompletion(
   let usage: Json = {},
     finish: unknown,
     started = false;
+  // Anthropic (#177): which thinking blocks of the request the API left out.
+  let transformations: unknown;
   for await (const frame of events(response, signal, activity)) {
     if (frame.data === "[DONE]") {
       if (protocol !== "chat" || !started || !finish) throw interrupted();
@@ -134,6 +136,7 @@ export async function readCompletion(
       if (type === "message_start") {
         started = true;
         usage = { ...((data.message as Json)?.usage as Json) };
+        transformations = (data.message as Json)?.input_transformations;
       } else if (type === "content_block_start") {
         blocks.set(Number(data.index), { ...(data.content_block as Json) });
       } else if (type === "content_block_delta") {
@@ -160,6 +163,7 @@ export async function readCompletion(
       } else if (type === "message_delta") {
         finish = (data.delta as Json)?.stop_reason;
         usage = { ...usage, ...(data.usage as Json) };
+        transformations = data.input_transformations ?? transformations;
       } else if (type === "message_stop") {
         if (!started || !finish) throw interrupted();
         // A call without arguments streams one empty partial_json (#42); its
@@ -173,6 +177,7 @@ export async function readCompletion(
             .map(([, block]) => block),
           usage,
           stop_reason: finish,
+          input_transformations: transformations,
         };
       }
     } else {

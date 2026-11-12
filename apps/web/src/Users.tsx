@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, type Me } from "./api";
 import { Select } from "./controls";
 import {
@@ -15,7 +16,13 @@ import {
 /* ============================================================
    ユーザー管理
    ============================================================ */
-type UserRow = { discord_id: string; username: string; role: string };
+type UserRow = {
+  discord_id: string;
+  username: string;
+  role: string;
+  /** この行の個人設定を開けるか（#175。自分より下のロールだけ）。旧 API は返さない。 */
+  can_edit_settings?: boolean;
+};
 
 export function UsersPage({ me }: { me: Me }) {
   const [rows, setRows] = useState<UserRow[] | null>(null);
@@ -53,7 +60,7 @@ export function UsersPage({ me }: { me: Me }) {
         <h1>ユーザー</h1>
         <p className="lead">
           ログインしたユーザーは既定で Free。Administrator は WEB_ADMIN_IDS
-          のみ。自分より下のユーザーに、自分より下のロールだけ付けられます。
+          のみ。自分より下のユーザーに、自分より下のロールだけ付けられます。自分より下のユーザーの個人設定も、ここから開いて変えられます。
         </p>
       </header>
 
@@ -98,23 +105,34 @@ export function UsersPage({ me }: { me: Me }) {
                   <td data-label="ロール">
                     <Badge>{u.role}</Badge>
                   </td>
-                  <td className="full" style={{ width: 184 }}>
-                    {u.discord_id !== me.id && assignable.length > 0 && (
-                      <Select
-                        value=""
-                        aria-label={`${u.username} のロールを変更`}
-                        onValueChange={(e) => {
-                          if (e) void setRole(u, e);
-                        }}
-                      >
-                        <option value="">ロールを変更…</option>
-                        {assignable.map((r) => (
-                          <option key={r} value={r}>
-                            {r}
-                          </option>
-                        ))}
-                      </Select>
-                    )}
+                  <td className="full" style={{ width: 300 }}>
+                    <div className="cell-actions">
+                      {u.can_edit_settings && (
+                        <Link
+                          className="btn btn-sm"
+                          to={`/users/${u.discord_id}`}
+                          aria-label={`${u.username} の個人設定`}
+                        >
+                          個人設定
+                        </Link>
+                      )}
+                      {u.discord_id !== me.id && assignable.length > 0 && (
+                        <Select
+                          value=""
+                          aria-label={`${u.username} のロールを変更`}
+                          onValueChange={(e) => {
+                            if (e) void setRole(u, e);
+                          }}
+                        >
+                          <option value="">ロールを変更…</option>
+                          {assignable.map((r) => (
+                            <option key={r} value={r}>
+                              {r}
+                            </option>
+                          ))}
+                        </Select>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

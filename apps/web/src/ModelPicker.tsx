@@ -1,6 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
 import type { Preset } from "./api";
-import { Badge, Icon, Modal, ProviderTile, providerMeta } from "./ui";
+import {
+  Badge,
+  Icon,
+  Modal,
+  ProviderTile,
+  providerMeta,
+  SubjectContext,
+} from "./ui";
 
 /** catalog.roles は強い順。未指定 minRole = 誰でも。未知の role は free 扱い。 */
 export function roleAllows(
@@ -69,6 +76,7 @@ export function ModelDialog({
   roles?: string[];
   onPick: (presetId: string) => void;
 }) {
+  const subject = useContext(SubjectContext);
   const [filter, setFilter] = useState("all");
   const [query, setQuery] = useState("");
   // 開くたびに、絞り込みの無い一覧から始める。
@@ -206,7 +214,8 @@ export function ModelDialog({
         )}
       </div>
       <p className="note">
-        「Premium」は、あなたのプランでは選べないプリセットです。「未接続」は、ボット側で未接続と報告されているプロバイダです。
+        「Premium」は、{subject}
+        のプランでは選べないプリセットです。「未接続」は、ボット側で未接続と報告されているプロバイダです。
       </p>
     </Modal>
   );

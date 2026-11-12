@@ -36,6 +36,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
+  createContext,
   useCallback,
   useEffect,
   useId,
@@ -50,6 +51,12 @@ import * as Dialog from "@radix-ui/react-dialog";
    画面側にマークアップ詳細を散らさないよう、
    面・印・トースト等はここに集約する。
    ============================================================ */
+
+/**
+ * 個人設定の文が指す相手。マイ設定では「あなた」。Administrator・Moderator が開いた
+ * ほかのユーザーの個人設定（#175）では「このユーザー」にして、設定の持ち主を取り違えない。
+ */
+export const SubjectContext = createContext("あなた");
 
 /* ---------- icons ---------- */
 type IconProps = { size?: number; className?: string };

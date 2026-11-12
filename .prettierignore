@@ -3,3 +3,4 @@
 # model reads (it turned a "+ line" of a patch example into "* line").
 apps/bot/prompts/
 apps/bot/skills/
+apps/bot/persona.md

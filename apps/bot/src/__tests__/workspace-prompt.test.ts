@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { BetaManagedAgentsUserMessageEventParams } from "@anthropic-ai/sdk/resources/beta/sessions/events";
 import { emptyGuild, emptyUserOverride } from "@hibana/shared/settings";
 import { loadConfig } from "../config";
+import { assemblePrompt } from "../harness";
 import { Runtime } from "../runtime";
 import definitions from "../tools/definitions.json";
 import type { Context } from "../types";
@@ -239,6 +240,39 @@ describe("the context block", () => {
     );
     expect(block).toContain("<persona>\nYou are Kagari.\n</persona>");
     expect(block).not.toContain("Hibana (火花)");
+  });
+
+  // Decision record: #179. A deployment without PERSONA_FILE gets Hibana's
+  // standard persona, wherever the bot is started from; turning persona
+  // override on still leaves it out. Both prompt paths read the same file.
+  test("without PERSONA_FILE, carries the standard persona wherever the bot is started", async () => {
+    const { PERSONA_FILE: _, ...rest } = env();
+    const cwd = process.cwd();
+    process.chdir(dir);
+    let runtime: Runtime;
+    try {
+      runtime = new Runtime(loadConfig(rest));
+    } finally {
+      process.chdir(cwd);
+    }
+    const standard = "# ROLE: 火花 (Hibana/Sparxie)";
+    const block = await workspaceContextBlock(runtime, context());
+    expect(block).toContain(`<persona>\n${standard}`);
+    expect(block).not.toContain("a helpful Discord assistant");
+    const prompt = await assemblePrompt(runtime, context(), "");
+    expect(JSON.stringify(prompt)).toContain(standard);
+
+    runtime.snapshot.guilds["1"] = {
+      ...emptyGuild(),
+      context: { text: "You are Aki.", persona_override: true },
+    };
+    const server = context({ guildId: "1" });
+    expect(await workspaceContextBlock(runtime, server)).not.toContain(
+      standard,
+    );
+    expect(
+      JSON.stringify(await assemblePrompt(runtime, server, "")),
+    ).not.toContain(standard);
   });
 
   test("the digest changes exactly when the block does", async () => {

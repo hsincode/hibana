@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import {
   AUTO_ROUTE_MODEL,
   MODEL_PRESETS,
@@ -303,7 +303,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
         ? ""
         : resolve(env.CONVERSATION_DB_PATH || `${dataDir}/conversations.db`),
     promptFile: resolve(env.PROMPT_FILE || "prompt.md"),
-    personaFile: resolve(env.PERSONA_FILE || "persona.md"),
+    // Hibana's standard persona (decision record: #179) ships beside this
+    // package and is found from here, not from the working directory, so a
+    // bot started anywhere carries it. PERSONA_FILE replaces it; persona
+    // override on a server or a person's context leaves it out.
+    personaFile: env.PERSONA_FILE
+      ? resolve(env.PERSONA_FILE)
+      : join(import.meta.dir, "..", "persona.md"),
     // Anthropic Workspace (#76): limits of the Managed Agents path. The key
     // and base URL are `endpoints.anthropic_workspace`. The defaults are
     // those of #76.

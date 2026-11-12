@@ -9,7 +9,7 @@ import {
   type ToolDef,
   type Usage,
 } from "./types";
-import { apiFailure, ProviderError } from "./llm-errors";
+import { apiFailure, ProviderError, thinkingMismatch } from "./llm-errors";
 import { concreteSelection, routedEffort } from "./auto-route";
 import { deferTools, toolSearchFor } from "./tool-search";
 import { readCompletion } from "./llm-stream";
@@ -147,7 +147,15 @@ export function outputBudget(
   );
 }
 export function toChat(m: Message, supportsDeveloper = false): Json {
-  const { images, providerBlocks, turnStart, internal, sticky, ...rest } = m;
+  const {
+    images,
+    providerBlocks,
+    turnStart,
+    internal,
+    sticky,
+    promptUpdate,
+    ...rest
+  } = m;
   const out: Json = {
     ...rest,
     // OpenAI's newer GPT chat models accept `developer`; older compatible APIs
@@ -474,7 +482,44 @@ export type RequestRecord = {
   /** Whole call, including reconnect backoff and credential lookup. */
   latency_ms: number;
   prefix?: PrefixReport;
+  /** Anthropic API (#177): how many thinking blocks of the history the API
+   *  left out of this request because what preceded them had changed
+   *  (`input_transformations`), and the reasons it gave. Zero says the check
+   *  ran and kept every block; absent, that the response did not say. */
+  thinking_dropped?: number;
+  thinking_drop_reasons?: string;
+  /** The API's diagnosis of the first change, when it sent one. */
+  thinking_mismatch?: string;
 };
+/** Claude Fable 5.2 binds a thinking block to the `system`, `tools` and
+ *  `messages` that preceded it, and answers HTTP 400 when the block comes back
+ *  after anything else; the same request fails again however often it is
+ *  retried. With this beta the API leaves such a block out and answers (#177).
+ *  The conversation keeps its settings in place (harness.ts `promptUpdates`),
+ *  and this covers what still changes: the tool list, a deploy, a summary, a
+ *  trim, a resumed checkpoint and conversations stored before. */
+const THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01";
+/** `input_transformations`: one entry per block. Types and reasons the API
+ *  adds later are not counted. */
+function thinkingDrops(
+  raw: unknown,
+): { thinking_dropped: number; thinking_drop_reasons?: string } | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const dropped = (raw as Json[]).filter((e) => e?.type === "thinking_dropped");
+  const reasons = [
+    ...new Set(
+      dropped
+        .map((e) => e.reason)
+        .filter(
+          (r): r is string => typeof r === "string" && /^[a-z_]{1,64}$/.test(r),
+        ),
+    ),
+  ].sort();
+  return {
+    thinking_dropped: dropped.length,
+    ...(reasons.length && { thinking_drop_reasons: reasons.join(",") }),
+  };
+}
 export type LlmHooks = RequestHooks & {
   onCompletion?: (record: RequestRecord) => void;
 };
@@ -628,6 +673,14 @@ export class LlmClient {
       else {
         body.thinking = { type: "adaptive" };
         if (effort) body.output_config = { effort };
+        // Anthropic's own API only: the gateway behind Claude Max has not
+        // been checked for the header or the field. `disabled` rejects it.
+        if (selection.provider === "anthropic") {
+          headers["anthropic-beta"] = THINKING_BINDING_BETA;
+          (body.thinking as Json).block_binding = {
+            prefix_mismatch_behavior: "drop_block",
+          };
+        }
       }
       // Top-level automatic caching moves a second breakpoint to the last
       // cacheable block each request, so tool loops reuse the previous prefix.
@@ -697,6 +750,8 @@ export class LlmClient {
         ? this.audit.observe(options.trace, body)
         : undefined;
     let usageReported = false;
+    let drops: ReturnType<typeof thinkingDrops>;
+    let mismatch: string | undefined;
     let completion: Completion;
     try {
       completion = await requestCompletion({
@@ -738,6 +793,8 @@ export class LlmClient {
             redirect: "error",
           });
           if (response.ok) audit?.commit();
+          if (protocol === "anthropic")
+            mismatch = thinkingMismatch(response.headers);
           // The subscription endpoint may omit Content-Type despite returning
           // SSE. We explicitly requested streaming; preserve error envelopes.
           if (
@@ -762,6 +819,8 @@ export class LlmClient {
             activity,
           );
           usageReported = Object.keys((data.usage ?? {}) as Json).length > 0;
+          if (protocol === "anthropic")
+            drops = thinkingDrops(data.input_transformations);
           return parseCompletion(data, protocol);
         },
         signal: options.signal,
@@ -791,6 +850,8 @@ export class LlmClient {
           usage_reported: usageReported,
           latency_ms: Date.now() - started,
           prefix: audit?.report,
+          ...drops,
+          ...(mismatch && { thinking_mismatch: mismatch }),
         });
       } catch {
         // Measurement must never discard a completion the provider already billed.

@@ -21,7 +21,14 @@ export type Message = {
   /** A state note that stays in the conversation and is added again only when
    *  its state changes, so later turns keep extending the same prefix. */
   sticky?: boolean;
+  /** Sections of the conversation's opening settings whose text this message
+   *  replaces from here on, as it sent them (#177). */
+  promptUpdate?: PromptSections;
 };
+/** The settings a conversation opens with, by section: the parts of the
+ *  AGENTS.md message and the mode notes ahead of it (harness.ts). A section
+ *  that is absent is the empty string. */
+export type PromptSections = Record<string, string>;
 export type ToolDef = {
   type: "function";
   function: { name: string; description: string; parameters: Json };

@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Selection } from "./config";
-import type { Message, Usage } from "./types";
+import type { Message, PromptSections, Usage } from "./types";
 import type { Disposal, SessionRow } from "./workspace/sessions";
 import type { WorkspaceState, WorkspaceTotals } from "./workspace/types";
 
@@ -17,6 +17,8 @@ export type SavedChannel = {
   guildId?: string;
   key: string;
   usage?: Usage;
+  /** The settings the conversation opened with (#177). */
+  opening?: PromptSections;
   turns: SavedTurn[];
 };
 export type SavedRoute = { selection: Selection; at: number };
@@ -67,7 +69,11 @@ export const SCHEMA = [
 // they may be empty, and the version before names the columns it writes.
 // `lease_settled` says why a lease stays on its row, and `allowed_cents`
 // what a retired session's lease still owed (workspace/sessions.ts).
+// `opening` holds the settings a conversation's first request opened with
+// (#177). A version before this one neither reads nor writes it, and builds
+// the opening from the current settings each turn, as it did.
 const ADDED_COLUMNS: [table: string, column: string, type: string][] = [
+  ["history_channels", "opening", "TEXT"],
   ["workspace_sessions", "lease_settled", "TEXT"],
   ["workspace_disposals", "allowed_cents", "INTEGER"],
 ];
@@ -76,6 +82,7 @@ type ChannelRow = {
   guild_id: string | null;
   key: string;
   usage: string | null;
+  opening: string | null;
 };
 type TurnRow = {
   seq: number;
@@ -204,7 +211,7 @@ export class ConversationStore {
     return this.guard((db) => {
       const row = db
         .query(
-          "SELECT guild_id, key, usage FROM history_channels WHERE channel_id = ?",
+          "SELECT guild_id, key, usage, opening FROM history_channels WHERE channel_id = ?",
         )
         .get(channelId) as ChannelRow | null;
       if (!row) return undefined;
@@ -217,6 +224,7 @@ export class ConversationStore {
         guildId: row.guild_id ?? undefined,
         key: row.key,
         usage: row.usage ? (JSON.parse(row.usage) as Usage) : undefined,
+        opening: this.sections(row.opening),
         turns: turns.map((t) => ({
           seq: t.seq,
           at: t.at,
@@ -226,6 +234,18 @@ export class ConversationStore {
         })),
       };
     });
+  }
+  /** Text sections only. A value that cannot be read counts as absent: the
+   *  conversation then opens with the current settings, as one stored before
+   *  the column existed does. */
+  private sections(text: string | null): PromptSections | undefined {
+    const value = this.column<Record<string, unknown>>(text);
+    if (!value) return undefined;
+    return Object.fromEntries(
+      Object.entries(value).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    );
   }
   private insertTurn(db: Database, channelId: string, turn: NewTurn) {
     db.query(
@@ -241,19 +261,26 @@ export class ConversationStore {
   }
   appendTurn(
     channelId: string,
-    channel: { guildId?: string; key: string; usage?: Usage },
+    channel: {
+      guildId?: string;
+      key: string;
+      usage?: Usage;
+      opening?: PromptSections;
+    },
     turn: NewTurn,
   ) {
     this.guard((db) =>
       db.transaction(() => {
         db.query(
-          `INSERT INTO history_channels (channel_id, guild_id, key, usage) VALUES (?, ?, ?, ?)
-        ON CONFLICT (channel_id) DO UPDATE SET guild_id = excluded.guild_id, key = excluded.key, usage = excluded.usage`,
+          `INSERT INTO history_channels (channel_id, guild_id, key, usage, opening) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT (channel_id) DO UPDATE SET guild_id = excluded.guild_id, key = excluded.key, usage = excluded.usage,
+          opening = excluded.opening`,
         ).run(
           channelId,
           channel.guildId ?? null,
           channel.key,
           channel.usage ? JSON.stringify(channel.usage) : null,
+          channel.opening ? JSON.stringify(channel.opening) : null,
         );
         this.insertTurn(db, channelId, turn);
       })(),

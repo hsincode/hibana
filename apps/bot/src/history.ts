@@ -4,7 +4,7 @@ import type {
 } from "@hibana/shared/settings";
 import type { Config, Selection } from "./config";
 import type { ConversationStore } from "./conversation-store";
-import type { Message, ToolDef, Usage } from "./types";
+import type { Message, PromptSections, ToolDef, Usage } from "./types";
 import type { LlmClient } from "./llm";
 
 /**
@@ -63,7 +63,14 @@ type Turn = {
   tokens: number;
   summary?: boolean;
 };
-type Entry = { guildId?: string; key: string; turns: Turn[]; usage?: Usage };
+type Entry = {
+  guildId?: string;
+  key: string;
+  turns: Turn[];
+  usage?: Usage;
+  /** The settings the conversation's first request opened with (#177). */
+  opening?: PromptSections;
+};
 /** Rough size without a tokenizer: ASCII averages three characters a token,
  *  while Japanese text is closer to one, so it must not be divided as well. */
 export function estimateTokens(value: unknown): number {
@@ -105,6 +112,7 @@ export class History {
       guildId: saved.guildId,
       key: saved.key,
       usage: saved.usage,
+      opening: saved.opening,
       turns: saved.turns.map(({ summary, ...turn }) =>
         summary ? { ...turn, summary } : turn,
       ),
@@ -189,6 +197,19 @@ export class History {
     while (count < entry.turns.length && size > target)
       size -= entry.turns[count++]!.tokens;
     this.drop(channelId, entry, count);
+  }
+  /** The settings sections the conversation opened with, which its later
+   *  turns send again unchanged (#177). Undefined before the first turn is
+   *  stored, and for a conversation stored before they were kept. It ends
+   *  with the conversation: `get` starting over, `/clear`, a settings clear. */
+  opening(channelId: string): PromptSections | undefined {
+    const entry = this.entry(channelId);
+    return entry?.turns.length ? entry.opening : undefined;
+  }
+  /** Kept with the conversation; written to the store with its next turn. */
+  keepOpening(channelId: string, sections: PromptSections) {
+    const entry = this.entry(channelId);
+    if (entry) entry.opening = sections;
   }
   put(channelId: string, messages: Message[], usage: Usage) {
     const entry = this.entry(channelId);

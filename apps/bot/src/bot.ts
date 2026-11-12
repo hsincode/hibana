@@ -38,7 +38,7 @@ import { DiscordScheduleTarget } from "./schedule-discord";
 import { recordingPlayer } from "./recording-player/build";
 import { commands, handleCommand } from "./commands";
 import { imagePrompt, shouldRespond, splitMessage } from "./triggers";
-import { assemblePrompt } from "./harness";
+import { promptMessages, promptSections, promptUpdates } from "./harness";
 import {
   conversationKey,
   harnessFor,
@@ -861,13 +861,22 @@ export class Hibana {
       // history like the turn will, so the summary reads the conversation
       // from the cache instead of writing it again (#109).
       failurePhase = "prompt_assembly";
-      const prefix = workspace
-        ? []
-        : await assemblePrompt(
+      const prompt = workspace
+        ? undefined
+        : await promptSections(
             this.runtime,
             ctx,
             this.config.skillsEnabled ? await this.tools.skillCatalog(ctx) : "",
           );
+      // A conversation's later turns open with the settings its first request
+      // sent, whoever speaks and whatever was stored since; what differs for
+      // this turn is added after the history, below (#177). The system text
+      // is the deployed one.
+      const opening =
+        prompt && (this.history.opening(ctx.channelId) ?? prompt.sections);
+      if (opening) this.history.keepOpening(ctx.channelId, opening);
+      const prefix =
+        prompt && opening ? promptMessages(prompt.system, opening) : [];
       if (ctx.thread && !pending && !workspace) {
         failurePhase = "history_compaction";
         // An auto preset has no model until it is routed below, so its
@@ -974,6 +983,10 @@ export class Hibana {
         const note = resumeNote(messages);
         if (note) messages.push(note);
       }
+      // After the person's message, where the turn's other notes go: the
+      // history before it stays as it was sent.
+      if (prompt && opening)
+        messages.push(...promptUpdates(opening, prompt.sections, messages));
       failurePhase = "checkpoint_save";
       await this.saveCheckpoint(ctx, messages, seed, key);
       checkpointPersisted = true;

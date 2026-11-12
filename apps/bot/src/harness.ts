@@ -1,6 +1,6 @@
 import { readFile, rm, mkdir, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { Message, ToolDef, Json, Context } from "./types";
+import type { Message, ToolDef, Json, Context, PromptSections } from "./types";
 import type { Runtime } from "./runtime";
 import type { Sandbox } from "./tools/sandbox";
 import codex from "./tools/codex-definitions.json";
@@ -259,11 +259,43 @@ export function normalizeTool(
       return { name, args: a };
   }
 }
-export async function assemblePrompt(
+// The settings at the head of a conversation, by section (#177). The policy
+// sections make up the AGENTS.md user message, in this order; the notes are
+// the developer messages ahead of it.
+const POLICY_SECTIONS = [
+  "persona",
+  "operational",
+  "context",
+  "workspace",
+  "skills",
+] as const;
+const NOTE_SECTIONS = ["multi_agent_mode", "multi_agent_team", "jev"] as const;
+// How an update names a policy section: the opening message carries the
+// sections as plain text, one after another, without labels.
+const POLICY_NAMES: Record<(typeof POLICY_SECTIONS)[number], string> = {
+  persona: "the assistant's persona",
+  operational: "the operating instructions",
+  context:
+    "the custom instructions of the server or of the person who is speaking now",
+  workspace: "the Workspace line",
+  skills: "the Skills list",
+};
+// What takes a note's place once its setting is off. The mode note always has
+// a text of its own.
+const NOTE_ENDED: Record<string, string> = {
+  multi_agent_team:
+    "<multi_agent_team>Multi-Agent team mode is no longer active. The team protocol given earlier no longer applies; the current multi_agent_mode governs delegation.</multi_agent_team>",
+  jev: "Jev evaluation is no longer enabled. mcp__agent__run_jev is unavailable, and the earlier instructions about it no longer apply.",
+};
+
+/** What a turn's settings make of the conversation's opening: the system
+ *  text, which follows the deployed prompt, and the sections that depend on
+ *  who is speaking and on what is stored. */
+export async function promptSections(
   runtime: Runtime,
   ctx: Context,
   skills: string,
-): Promise<Message[]> {
+): Promise<{ system: string; sections: PromptSections }> {
   const settings = runtime.resolve(ctx.guildId, ctx.userId);
   const read = async (path: string) =>
     readFile(path, "utf8").catch((e) => {
@@ -275,15 +307,6 @@ export async function assemblePrompt(
     ? ""
     : (await read(runtime.config.personaFile)) ||
       "You are Hibana (火花), a helpful Discord assistant. Respond naturally in Japanese unless asked otherwise.";
-  const stable = [
-    persona,
-    operational,
-    settings.context?.text || "",
-    `Workspace: /workspace. This workspace is isolated to ${ctx.thread ? "this thread" : ctx.guildId ? "this guild" : "this DM"}. Host secrets are unavailable.`,
-    skills ? `## Skills\n${skills}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
   const system = await read(
     join(import.meta.dir, "../prompts/harness/codex.md"),
   );
@@ -292,44 +315,123 @@ export async function assemblePrompt(
     runtime.config.subagentEnabled &&
     settings.subagent_enabled;
   const multiAgentMode = delegation
-    ? multiAgentModeMessage(subagentMode(settings) === "multi")
-    : {
-        role: "developer" as const,
-        // Supersede any Ultra instructions retained in conversation history.
-        content:
-          "<multi_agent_mode>Subagents are disabled for this turn. Complete the task yourself without spawning or contacting agents.</multi_agent_mode>",
-      };
-  return [
-    {
-      role: "system",
-      content: `${system}\n\n# Environment\nCWD: /workspace\nRuntime: Hibana Discord bot; use available function tools. Integration tools are preloaded with mcp__ names.\nBatch independent web searches, fetches, file reads and Jev evaluations in the same tool-call turn to overlap waiting time. The runtime executes approved read tools concurrently, up to six at once. Keep dependent calls in later turns; mutations, shell commands, browser actions and unknown tools are executed sequentially. When Jev action-selection mode is on, prepare independent search/read candidates with parallel=true and explicit depends_on prerequisites. Use asynchronous subagents for independent work under the active delegation policy, and continue useful work before waiting.\n${FINAL_MESSAGE_CONTRACT}\n`,
-    },
-    ...(multiAgentMode ? [multiAgentMode] : []),
-    // Root only: children receive their role through <multi_agent_role>, and
-    // forkMessages strips this block so a worker never believes it orchestrates.
-    ...(delegation && ctx.depth === 0 && subagentMode(settings) === "multi"
-      ? [multiAgentTeamMessage(runtime.config.subagentConcurrency)]
-      : []),
-    ...(ctx.depth === 0 &&
-    runtime.config.toolsEnabled &&
-    runtime.config.subagentEnabled &&
-    runtime.config.jevApiKey &&
-    settings.jev_enabled
-      ? [
-          {
-            role: "developer" as const,
-            // The normal delegation mode forbids proactive agent spawning.
+    ? multiAgentModeMessage(subagentMode(settings) === "multi").content!
+    : // Supersede any Ultra instructions retained in conversation history.
+      "<multi_agent_mode>Subagents are disabled for this turn. Complete the task yourself without spawning or contacting agents.</multi_agent_mode>";
+  return {
+    system: `${system}\n\n# Environment\nCWD: /workspace\nRuntime: Hibana Discord bot; use available function tools. Integration tools are preloaded with mcp__ names.\nBatch independent web searches, fetches, file reads and Jev evaluations in the same tool-call turn to overlap waiting time. The runtime executes approved read tools concurrently, up to six at once. Keep dependent calls in later turns; mutations, shell commands, browser actions and unknown tools are executed sequentially. When Jev action-selection mode is on, prepare independent search/read candidates with parallel=true and explicit depends_on prerequisites. Use asynchronous subagents for independent work under the active delegation policy, and continue useful work before waiting.\n${FINAL_MESSAGE_CONTRACT}\n`,
+    sections: {
+      persona,
+      operational,
+      context: settings.context?.text || "",
+      workspace: `Workspace: /workspace. This workspace is isolated to ${ctx.thread ? "this thread" : ctx.guildId ? "this guild" : "this DM"}. Host secrets are unavailable.`,
+      skills,
+      multi_agent_mode: multiAgentMode,
+      // Root only: children receive their role through <multi_agent_role>, and
+      // forkMessages strips this block so a worker never believes it orchestrates.
+      multi_agent_team:
+        delegation && ctx.depth === 0 && subagentMode(settings) === "multi"
+          ? multiAgentTeamMessage(runtime.config.subagentConcurrency).content!
+          : "",
+      jev:
+        ctx.depth === 0 &&
+        runtime.config.toolsEnabled &&
+        runtime.config.subagentEnabled &&
+        runtime.config.jevApiKey &&
+        settings.jev_enabled
+          ? // The normal delegation mode forbids proactive agent spawning.
             // Allow this bounded evaluator without changing that policy.
-            content:
-              "Jev evaluation is enabled. You may proactively call mcp__agent__run_jev for bounded classification, evidence checks, or candidate ranking; batch independent questions about concise supplied evidence, including evidence returned by workers. This evaluator supplements the active multi-agent policy: it does not perform the research, implementation or independent review assigned to chat subagents. Jev does not change whether or when to delegate; only the active multi_agent_mode and user instructions govern that choice. It cannot execute tools or spawn agents. Skip trivial conversation, arithmetic, tasks needing new facts or open-ended reasoning, and duplicate judgments already obtained in a Jev action plan. Treat probabilities as fallible evidence; investigate uncertainty yourself. Keep existing permission checks and the selected chat model. Never let Jev authorize actions, expand scope, or choose another model. On evaluator failure, continue the task without claiming Jev verification.",
-          },
-        ]
-      : []),
+            "Jev evaluation is enabled. You may proactively call mcp__agent__run_jev for bounded classification, evidence checks, or candidate ranking; batch independent questions about concise supplied evidence, including evidence returned by workers. This evaluator supplements the active multi-agent policy: it does not perform the research, implementation or independent review assigned to chat subagents. Jev does not change whether or when to delegate; only the active multi_agent_mode and user instructions govern that choice. It cannot execute tools or spawn agents. Skip trivial conversation, arithmetic, tasks needing new facts or open-ended reasoning, and duplicate judgments already obtained in a Jev action plan. Treat probabilities as fallible evidence; investigate uncertainty yourself. Keep existing permission checks and the selected chat model. Never let Jev authorize actions, expand scope, or choose another model. On evaluator failure, continue the task without claiming Jev verification."
+          : "",
+    },
+  };
+}
+const skillsText = (skills?: string) => (skills ? `## Skills\n${skills}` : "");
+/** The messages a conversation opens with, from its system text and sections. */
+export function promptMessages(
+  system: string,
+  sections: PromptSections,
+): Message[] {
+  const stable = [
+    sections.persona,
+    sections.operational,
+    sections.context,
+    sections.workspace,
+    skillsText(sections.skills),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  return [
+    { role: "system", content: system },
+    ...NOTE_SECTIONS.flatMap((key) =>
+      sections[key]
+        ? [{ role: "developer" as const, content: sections[key] }]
+        : [],
+    ),
     {
       role: "user",
       content: `# AGENTS.md instructions\n<INSTRUCTIONS>\n${stable}\n</INSTRUCTIONS>`,
     },
   ];
+}
+export async function assemblePrompt(
+  runtime: Runtime,
+  ctx: Context,
+  skills: string,
+): Promise<Message[]> {
+  const prompt = await promptSections(runtime, ctx, skills);
+  return promptMessages(prompt.system, prompt.sections);
+}
+/**
+ * The messages that bring a conversation's settings up to date (#177).
+ *
+ * A provider that binds its reasoning to what preceded it (Claude Fable 5.2:
+ * HTTP 400 for a thinking block sent back after a different prefix) and every
+ * prompt cache need the head of a conversation to stay as its first request
+ * sent it. So the conversation keeps the sections it `opening` with, and a
+ * section that differs for this turn is added after the history instead:
+ * policy sections in one user message, each note as a developer message that
+ * stays. They are stored with the turn, so `messages` tells which text the
+ * model last received for a section. A summary or a trim that drops such a
+ * message brings the opening text back, and the difference is added again.
+ */
+export function promptUpdates(
+  opening: PromptSections,
+  current: PromptSections,
+  messages: readonly Message[],
+): Message[] {
+  const told = { ...opening };
+  for (const m of messages) Object.assign(told, m.promptUpdate);
+  const changed = (keys: readonly string[]) =>
+    keys.filter((key) => (told[key] ?? "") !== (current[key] ?? ""));
+  const pick = (keys: string[]) =>
+    Object.fromEntries(keys.map((key) => [key, current[key] ?? ""]));
+  const out: Message[] = [];
+  const policy = changed(POLICY_SECTIONS) as (typeof POLICY_SECTIONS)[number][];
+  if (policy.length)
+    out.push({
+      role: "user",
+      internal: true,
+      promptUpdate: pick(policy),
+      // The heading keeps it among the instructions a forked child receives
+      // (forkMessages), after the opening message it amends.
+      content: `# AGENTS.md instructions update\n<INSTRUCTIONS_UPDATE>\nParts of the AGENTS.md instructions given at the start of this conversation have changed. From this point on, each part below replaces the same part as it was given before. Every part that is not listed still applies.\n\n${policy
+        .map((key) => {
+          const text =
+            key === "skills" ? skillsText(current[key]) : current[key];
+          return `<part replaces="${POLICY_NAMES[key]}">\n${text || "Nothing applies for this part now. Disregard what was given for it before."}\n</part>`;
+        })
+        .join("\n\n")}\n</INSTRUCTIONS_UPDATE>`,
+    });
+  for (const key of changed(NOTE_SECTIONS))
+    out.push({
+      role: "developer",
+      internal: true,
+      sticky: true,
+      promptUpdate: pick([key]),
+      content: current[key] || NOTE_ENDED[key]!,
+    });
+  return out;
 }
 /** Validate all operations before writing, so malformed patches do not half-apply. */
 export async function applyPatch(

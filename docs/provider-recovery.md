@@ -71,6 +71,14 @@ Tests cover SSE failures, HTTP fallback and malformed JSON retries, including
 checks that private upstream content is absent. Earlier failures cannot be
 reconstructed from these new fields.
 
+One response header is kept (#177): Anthropic's
+`anthropic-thinking-prefix-mismatch`, as `thinking_mismatch`. It names the kind
+of edit and the first changed path of a request whose thinking block came back
+after a changed prefix (`kind=...; pattern=...;
+changed_validated=messages.0.content.0`), and only a value made of letters,
+digits and `_ . = ; , -` is recorded. The header is not published and may be
+absent.
+
 ## 失敗の詳細の表示（#42）
 
 2026-10-09 から、どこで失敗したかを Discord と記録に出します。

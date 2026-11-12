@@ -18,7 +18,19 @@ export type ProviderDiagnostics = {
   /** The provider's id for the request (Anthropic `request-id`), for a
    *  support inquiry. Server log only: it is not shown in Discord. */
   request_id?: string;
+  /** Anthropic's diagnosis of a thinking block sent back after a changed
+   *  prefix (#177): the kind of change and a path into the request. */
+  thinking_mismatch?: string;
 };
+
+/** The `anthropic-thinking-prefix-mismatch` response header, which names the
+ *  kind of edit and the first changed path (`kind=...; pattern=...;
+ *  changed_validated=messages.0.content.0`), never content. Anthropic has not
+ *  published it, so anything of another shape is left out. */
+export function thinkingMismatch(headers: Headers): string | undefined {
+  const value = headers.get("anthropic-thinking-prefix-mismatch");
+  return value && /^[A-Za-z0-9_.=;, -]{1,300}$/.test(value) ? value : undefined;
+}
 
 // Never retain upstream messages, bodies, URLs or arbitrary error properties.
 // Non-code values get a fingerprint so repeated failures can still correlate.
@@ -224,6 +236,8 @@ export async function readHttpFailure(
   signal: AbortSignal,
 ): Promise<ProviderError> {
   const fallback = httpFailure(response.status);
+  const mismatch = thinkingMismatch(response.headers);
+  if (mismatch) fallback.diagnostics.thinking_mismatch = mismatch;
   if (
     !response.body ||
     !response.headers.get("content-type")?.includes("application/json")
@@ -261,7 +275,10 @@ export async function readHttpFailure(
             classified.retryable,
             response.status,
           );
-    failure.diagnostics = classified.diagnostics;
+    failure.diagnostics = {
+      ...classified.diagnostics,
+      ...(mismatch && { thinking_mismatch: mismatch }),
+    };
     return failure;
   } catch {
     return fallback;

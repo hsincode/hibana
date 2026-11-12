@@ -97,6 +97,17 @@ Anthropic のプロバイダー（`anthropic`、Claude Max）へのリクエス�
 - `claude-haiku-5-5`・`claude-sonnet-5-5`・`claude-opus-5-5`・`claude-fable-5-2` が、adaptive とこの組み合わせを受け付けることは、`/v1/messages/count_tokens` で確かめた（2026-11-12）
 - beta の機能。ヘッダ名や応答の形が変わったら見直す
 
+### 実 API で確かめたこと（2026-11-12、commit 25ac6ba）
+
+本番の状態と、失敗したターンのチェックポイントから、修正後のコードでリクエストを組み立てて送った。
+
+- `/v1/messages/count_tokens`（無料）: HTTP 400 で失敗した 3 つの会話（Claude Fable 5.2。履歴の thinking ブロックは 7・8・1 個）のリクエストは、どれも 200。同じリクエストから `block_binding` とヘッダを外すと 400 で、エラーの fingerprint は本番のログと同じ `0f28eccbbce38ce7`
+- `/v1/messages`（1 リクエスト、Claude Fable 5.2、effort medium、入力 16,920・出力 1,175 トークン）: 200。応答の `input_transformations` は `thinking_dropped` が 1 件、理由は `prefix_binding_mismatch`。このリクエストだけ、`tool_choice` を `none`、`max_tokens` を 3,000 にし、`cache_control` を外して送った（どれも thinking の束縛の対象外）
+- 上の応答（thinking ブロック 1 個）を履歴に足して、個人のコンテキストを持つ別の発言者の次のターンを `count_tokens` に送った。冒頭をそのままにして変更分を足す形は、`block_binding` なしで 200。冒頭を発言者の設定で作り直す形（修正前）は、`block_binding` なしで 400（`pattern=first_message_rewritten`）、ありで 200 だが応答の thinking は数えられない（捨てられる）。足す形では、応答の thinking の 427 トークンが入力に数えられる
+- 本番のログで fingerprint が違った 3 件のうち、`c3aa51529933fd8a` は同じエラーの別の位置（`messages.1.content.5`、最初に変わった位置は `messages.2.content.0`）。エラーの文に位置が入るので、位置が違うと fingerprint も違う。残る 2 件（`27cf8a4bdddebe77`、`02b8ec9b31abc295`）の文は分かっていない
+
+確かめていないこと: Haiku 5.5・Sonnet 5.5・Opus 5.5 の `/v1/messages`、ツールを呼ぶターン、ターンをまたいで変更のメッセージが履歴に残った後の `/v1/messages`、Claude Max。
+
 ## 確かめ方
 
 - リクエストごとのログ `LLM request completed` の `thinking_dropped` が、API が捨てた thinking ブロックの数（`input_transformations` の `thinking_dropped` の件数）。0 は、チェックが働いて何も捨てなかったこと。項目が無いのは、応答が何も言わなかったこと。`thinking_drop_reasons` は理由（`prefix_binding_mismatch`: 前の内容が変わった。`model_binding_mismatch`: 別のモデルのブロック）。`thinking_mismatch` は、API が付けた診断（応答ヘッダ `anthropic-thinking-prefix-mismatch`。編集の種類と、最初に変わった位置。公開されていないヘッダなので、無いこともある）

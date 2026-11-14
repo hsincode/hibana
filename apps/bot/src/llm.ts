@@ -11,7 +11,11 @@ import {
 } from "./types";
 import { apiFailure, ProviderError, thinkingMismatch } from "./llm-errors";
 import { concreteSelection, routedEffort } from "./auto-route";
-import { deferTools, toolSearchFor } from "./tool-search";
+import {
+  deferTools,
+  toolSearchFor,
+  withDeclaredReferences,
+} from "./tool-search";
 import { readCompletion } from "./llm-stream";
 import {
   requestCompletion,
@@ -490,6 +494,10 @@ export type RequestRecord = {
   thinking_drop_reasons?: string;
   /** The API's diagnosis of the first change, when it sent one. */
   thinking_mismatch?: string;
+  /** Anthropic: references of earlier tool search results left out because
+   *  this request does not send the tool they name (tool-search.ts
+   *  `withDeclaredReferences`). Absent when none was. */
+  tool_references_removed?: number;
 };
 /** Claude Fable 5.2 binds a thinking block to the `system`, `tools` and
  *  `messages` that preceded it, and answers HTTP 400 when the block comes back
@@ -581,6 +589,7 @@ export class LlmClient {
       : (options.temperature ?? this.config.temperature);
     let body: Json;
     let path: string;
+    let referencesRemoved = 0;
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Authorization: `Bearer ${endpoint.apiKey}`,
@@ -667,6 +676,15 @@ export class LlmClient {
             new Set(tools.map((t) => t.function.name)),
           ),
         );
+      // A search result of an earlier turn may name a tool this request does
+      // not send, such as an administrator's tool on another member's turn:
+      // Anthropic rejects the whole request for it (tool-search.ts).
+      const referenced = withDeclaredReferences(
+        turns,
+        new Set((body.tools as Json[]).map((t) => String(t.name))),
+      );
+      body.messages = referenced.turns;
+      referencesRemoved = referenced.removed;
       // Claude Max serves only 4.7+ models, which reject `budget_tokens` and
       // sampling parameters; adaptive thinking plus effort is the only shape.
       if (effort === "none") body.thinking = { type: "disabled" };
@@ -852,6 +870,9 @@ export class LlmClient {
           prefix: audit?.report,
           ...drops,
           ...(mismatch && { thinking_mismatch: mismatch }),
+          ...(referencesRemoved && {
+            tool_references_removed: referencesRemoved,
+          }),
         });
       } catch {
         // Measurement must never discard a completion the provider already billed.

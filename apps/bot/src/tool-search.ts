@@ -97,3 +97,47 @@ export function deferTools(tools: Json[]): { tools: Json[]; note?: string } {
       `Tools can be found for: ${groups.map((g) => GROUPS[g] ?? g).join("; ")}.`,
   };
 }
+
+/** The copy of `turns` to send, without the search results' references to
+ *  tools this request does not declare, and how many were left out.
+ *
+ *  A search result in the history names the tools it loaded, and Anthropic
+ *  answers HTTP 400 ("Tool reference '…' not found in available tools") when
+ *  one of them is missing from the request's `tools`, deferred or not;
+ *  `drop_block` does not cover it, and a retry fails the same way. The list
+ *  changes within a conversation: the home VPN and VPN tools only an
+ *  administrator gets, the server tools, the sandbox, a deploy. Against the
+ *  real API (`count_tokens`, 2026-11-14): a result with fewer or no
+ *  references, an earlier `tool_use` of a tool not declared, and search blocks
+ *  in a request without the search tool are all accepted.
+ *
+ *  The stored history keeps every reference, so a later request that declares
+ *  the tool again sends the result as it was. The blocks are shared with the
+ *  stored messages and are copied, never changed. */
+export function withDeclaredReferences<T extends { content: Json[] }>(
+  turns: T[],
+  declared: ReadonlySet<string>,
+): { turns: T[]; removed: number } {
+  let removed = 0;
+  const out = turns.map((turn) => {
+    let changed = false;
+    const content = turn.content.map((block) => {
+      const result = block.content as Json | undefined;
+      const references = result?.tool_references;
+      if (
+        block.type !== "tool_search_tool_result" ||
+        !Array.isArray(references)
+      )
+        return block;
+      const kept = (references as Json[]).filter((r) =>
+        declared.has(String(r.tool_name)),
+      );
+      if (kept.length === references.length) return block;
+      removed += references.length - kept.length;
+      changed = true;
+      return { ...block, content: { ...result, tool_references: kept } };
+    });
+    return changed ? { ...turn, content } : turn;
+  });
+  return { turns: out, removed };
+}

@@ -2,9 +2,14 @@ import { expect, test } from "bun:test";
 import { Client } from "discord.js";
 import { Agent } from "../agent";
 import { loadConfig } from "../config";
-import { awaitsServerTool, LlmClient } from "../llm";
+import { awaitsServerTool, LlmClient, type RequestRecord } from "../llm";
 import { Runtime } from "../runtime";
-import { LOADED_TOOLS, TOOL_SEARCH, toolSearchFor } from "../tool-search";
+import {
+  LOADED_TOOLS,
+  TOOL_SEARCH,
+  toolSearchFor,
+  withDeclaredReferences,
+} from "../tool-search";
 import { ToolRegistry } from "../tools";
 import codex from "../tools/codex-definitions.json";
 import definitions from "../tools/definitions.json";
@@ -263,4 +268,152 @@ test("Fable 5.2 is in the tool search table on Anthropic only", () => {
   expect(
     toolSearchFor({ provider: "claude_max", model: "claude-fable-5-2" }),
   ).toBe(false);
+});
+
+// Production, 2026-11-14: an administrator's search loaded the home VPN tools,
+// and the next turn in the thread was another member's, whose list does not
+// have them. Anthropic answered HTTP 400 "Tool reference
+// 'mcp__workspace__home_vpn_connect' not found in available tools" to the
+// thread summary, and would have to every later request of that member.
+test("a member's turn sends an administrator's search without the tools it does not have", async () => {
+  const runtime = new Runtime(
+    loadConfig({
+      RUNTIME_STATE_PATH: "",
+      PROVIDER: "anthropic",
+      ANTHROPIC_API_KEY: "fixture",
+      LLM_MODEL: "claude-fable-5-2",
+      BROWSER_PROXY_URL: "http://127.0.0.1:8899",
+      BROWSER_PROXY_USERNAME: "fixture",
+      BROWSER_PROXY_PASSWORD: "fixture",
+    }),
+  );
+  runtime.snapshot.user_roles.admin = "administrator";
+  const registry = new ToolRegistry(
+    runtime,
+    new Client({ intents: [] }),
+    new Agent(new LlmClient(runtime.config)),
+  );
+  registry.sandbox.available = true;
+  const vpn = "mcp__workspace__home_vpn_connect";
+  const browser = "mcp__workspace__playwright_cli";
+  const admin = registry.tools({ ...ctx, guildId: "9", userId: "admin" });
+  const member = registry.tools({ ...ctx, guildId: "9", userId: "member" });
+  expect(admin.map((t) => t.function.name)).toContain(vpn);
+  expect(member.map((t) => t.function.name)).not.toContain(vpn);
+  expect(member.map((t) => t.function.name)).toContain(browser);
+
+  const searched = [
+    {
+      type: "server_tool_use",
+      id: "srvtoolu_1",
+      name: TOOL_SEARCH.name,
+      input: { query: "browser vpn" },
+    },
+    {
+      type: "tool_search_tool_result",
+      tool_use_id: "srvtoolu_1",
+      content: {
+        type: "tool_search_tool_search_result",
+        tool_references: [
+          { type: "tool_reference", tool_name: browser },
+          { type: "tool_reference", tool_name: vpn },
+        ],
+      },
+    },
+    { type: "tool_use", id: "toolu_1", name: browser, input: {} },
+  ];
+  const history: Message[] = [
+    ...hi,
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [
+        {
+          id: "toolu_1",
+          type: "function",
+          function: { name: browser, arguments: "{}" },
+        },
+      ],
+      providerBlocks: searched,
+    },
+    { role: "tool", tool_call_id: "toolu_1", content: "{}" },
+    { role: "assistant", content: "Opened." },
+    { role: "user", content: "And now?" },
+  ];
+  const stored = structuredClone(history);
+  const bodies: Json[] = [];
+  const records: RequestRecord[] = [];
+  const llm = new LlmClient(
+    runtime.config,
+    async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return Response.json({
+        usage: { input_tokens: 1, output_tokens: 1 },
+        content: [{ type: "text", text: "ok" }],
+        stop_reason: "end_turn",
+      });
+    },
+    { onCompletion: (record) => records.push(record) },
+  );
+  const trace = { channel: "1", agent: "root", round: 0 };
+  const selection = { provider: "anthropic", model: "claude-fable-5-2" };
+  await llm.complete(selection, history, member, { trace });
+  await llm.complete(selection, history, admin, { trace });
+
+  const result = (body: Json) =>
+    (body.messages as Json[])
+      .flatMap((m) => m.content as Json[])
+      .find((b) => b.type === "tool_search_tool_result")!;
+  const references = (body: Json) =>
+    (result(body).content as Json).tool_references as Json[];
+  // The member's request: only the reference to a tool it sends.
+  expect(references(bodies[0]!)).toEqual([
+    { type: "tool_reference", tool_name: browser },
+  ]);
+  for (const r of references(bodies[0]!))
+    expect((bodies[0]!.tools as Json[]).map((t) => t.name)).toContain(
+      r.tool_name,
+    );
+  expect(records[0]!.tool_references_removed).toBe(1);
+  // The administrator's next request sends the result as it was stored.
+  expect(result(bodies[1]!)).toEqual(searched[1]!);
+  expect(records[1]!.tool_references_removed).toBeUndefined();
+  // The stored history is not changed.
+  expect(history).toEqual(stored);
+});
+
+test("withDeclaredReferences copies only the results it changes", () => {
+  const result = (...names: string[]) => ({
+    type: "tool_search_tool_result",
+    tool_use_id: "srvtoolu_1",
+    content: {
+      type: "tool_search_tool_search_result",
+      tool_references: names.map((tool_name) => ({
+        type: "tool_reference",
+        tool_name,
+      })),
+    },
+  });
+  const kept = { role: "assistant", content: [result("a")] };
+  const changed = { role: "assistant", content: [result("a", "b", "c")] };
+  // A failed search: no reference list.
+  const failed = {
+    role: "assistant",
+    content: [
+      {
+        type: "tool_search_tool_result",
+        tool_use_id: "srvtoolu_2",
+        content: { type: "tool_search_tool_result_error", error_code: "x" },
+      },
+    ],
+  };
+  const { turns, removed } = withDeclaredReferences(
+    [kept, changed, failed],
+    new Set(["a"]),
+  );
+  expect(removed).toBe(2);
+  expect(turns[0]).toBe(kept);
+  expect(turns[2]).toBe(failed);
+  expect(turns[1]).toEqual({ role: "assistant", content: [result("a")] });
+  expect(changed.content[0]).toEqual(result("a", "b", "c"));
 });

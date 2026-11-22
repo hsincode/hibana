@@ -70,7 +70,10 @@ export function SaveStatus({
       </div>
     );
   }
-  if (botSync.status === "synced" && (state === "saved" || botSync.standalone)) {
+  if (
+    botSync.status === "synced" &&
+    (state === "saved" || botSync.standalone)
+  ) {
     return (
       <div className="save-state is-saved" role="status">
         {/* 反映のたびに key を替えて、火花を 1 回散らす（.spark） */}

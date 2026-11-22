@@ -136,7 +136,11 @@ export function useBotSync(onSynced: () => void): {
   }, [clearPoll]);
 
   const pollOnce = useCallback(async () => {
-    if (!mountedRef.current || targetRef.current === null || inFlightRef.current)
+    if (
+      !mountedRef.current ||
+      targetRef.current === null ||
+      inFlightRef.current
+    )
       return;
     inFlightRef.current = true;
     try {

@@ -62,7 +62,12 @@ describe("bot snapshot sync status (#185)", () => {
 
   test("rejects invalid version payloads on /internal/snapshot/ack", async () => {
     const { call } = await setup();
-    for (const body of [{}, { version: -1 }, { version: 1.5 }, { version: "1" }]) {
+    for (const body of [
+      {},
+      { version: -1 },
+      { version: 1.5 },
+      { version: "1" },
+    ]) {
       const res = await call("/internal/snapshot/ack", {
         method: "POST",
         headers: INTERNAL,
@@ -160,7 +165,11 @@ describe("bot snapshot sync status (#185)", () => {
       {
         path: "/api/budget-fallback",
         method: "PUT",
-        body: { preset: "ds-deepseek-flash", effort: "high", threshold_usd: 15 },
+        body: {
+          preset: "ds-deepseek-flash",
+          effort: "high",
+          threshold_usd: 15,
+        },
       },
     ];
 

@@ -199,7 +199,9 @@ test("saving waits for bot ack, then updates the top bar with a spark and shows 
       (el) => getComputedStyle(el, "::after").animationIterationCount,
     ),
   ).toBe("1");
-  await expect(page.locator(".toast")).toHaveText("設定が bot に反映されました");
+  await expect(page.locator(".toast")).toHaveText(
+    "設定が bot に反映されました",
+  );
 
   // Polling stops once reflected.
   await page.clock.runFor(9_000);
@@ -236,7 +238,9 @@ test("consecutive edits coalesce to the latest version and emit a single toast",
   await page.clock.runFor(3_000);
   await expect(status).toContainText("bot に反映済み");
   await expect(page.locator(".toast")).toHaveCount(1);
-  await expect(page.locator(".toast")).toHaveText("設定が bot に反映されました");
+  await expect(page.locator(".toast")).toHaveText(
+    "設定が bot に反映されました",
+  );
 });
 
 test("sync tracking survives page navigation and notifies on the destination page", async ({
@@ -269,7 +273,9 @@ test("sync tracking survives page navigation and notifies on the destination pag
   await expect(page.locator(".topbar").getByRole("status")).toContainText(
     "bot に反映済み",
   );
-  await expect(page.locator(".toast")).toHaveText("設定が bot に反映されました");
+  await expect(page.locator(".toast")).toHaveText(
+    "設定が bot に反映されました",
+  );
 });
 
 test("explicit save pages such as user role updates also track bot sync", async ({

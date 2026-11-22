@@ -291,7 +291,7 @@ describe("/api/budget-fallback", () => {
       body: { preset: "anthropic-sonnet-5-5", effort: "medium" },
     });
     expect(saved.status).toBe(200);
-    expect(await saved.json()).toEqual({
+    expect(await saved.json()).toMatchObject({
       fallback: { preset: "anthropic-sonnet-5-5", effort: "medium" },
       threshold_usd: 10,
     });
@@ -396,7 +396,7 @@ describe("budget threshold (#95)", () => {
       threshold_usd: 5,
     });
     expect(saved.status).toBe(200);
-    expect(await saved.json()).toEqual({
+    expect(await saved.json()).toMatchObject({
       fallback: { preset: "anthropic-haiku-5-5", effort: "high" },
       threshold_usd: 5,
     });
@@ -465,7 +465,7 @@ describe("budget threshold (#95)", () => {
       preset: "anthropic-sonnet-5-5",
       effort: "low",
     });
-    expect(await saved.json()).toEqual({
+    expect(await saved.json()).toMatchObject({
       fallback: { preset: "anthropic-sonnet-5-5", effort: "low" },
       threshold_usd: 30,
     });

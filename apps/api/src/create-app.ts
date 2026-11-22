@@ -233,6 +233,64 @@ function parseScheduleAssets(raw: string | null): StoredScheduleAssets | null {
   }
 }
 
+const BOT_APPLIED_SNAPSHOT_META = "bot_applied_snapshot";
+
+/** Last snapshot version the running bot reported applying (#185). */
+type BotAppliedSnapshot = { version: number; at: number };
+
+function parseBotAppliedSnapshot(
+  raw: string | null,
+): BotAppliedSnapshot | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<BotAppliedSnapshot>;
+    if (
+      typeof value.version !== "number" ||
+      !Number.isSafeInteger(value.version) ||
+      value.version < 0 ||
+      typeof value.at !== "number" ||
+      !Number.isFinite(value.at) ||
+      value.at < 0
+    )
+      return null;
+    return { version: value.version, at: value.at };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Records the snapshot version the bot applied without ever stepping backwards
+ * across concurrent Vercel instances, and without bumping `snapshot_version`.
+ */
+async function recordBotAppliedSnapshot(
+  store: Store,
+  version: number,
+  at: number,
+): Promise<BotAppliedSnapshot> {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const raw = await store.getMeta(BOT_APPLIED_SNAPSHOT_META);
+    const current = parseBotAppliedSnapshot(raw);
+    if (current && version < current.version) return current;
+    const next: BotAppliedSnapshot = { version, at };
+    if (
+      await store.compareMeta(
+        BOT_APPLIED_SNAPSHOT_META,
+        raw,
+        JSON.stringify(next),
+      )
+    )
+      return next;
+  }
+  const latest = parseBotAppliedSnapshot(
+    await store.getMeta(BOT_APPLIED_SNAPSHOT_META),
+  );
+  if (latest && latest.version >= version) return latest;
+  const fallback: BotAppliedSnapshot = { version, at };
+  await store.setMeta(BOT_APPLIED_SNAPSHOT_META, JSON.stringify(fallback));
+  return fallback;
+}
+
 export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
   const chatgpt = new ChatgptAccounts(
     store,
@@ -559,7 +617,12 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           set.status = done.status;
           return { error: done.error };
         }
-        return { settings: done.settings, version: await store.version() };
+        const version = await store.version();
+        return {
+          settings: done.settings,
+          version,
+          snapshot_version: version,
+        };
       })
       .get("/api/catalog", async ({ cookie }) => {
         const raw = await store.getMeta("available_presets");
@@ -667,13 +730,15 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           // If-None-Match / SSE cannot 304 a stale picker list.
           await store.bumpVersion();
           await publish();
+          const version = await store.version();
           return {
             id: params.id,
             published: isPublished(params.id, overrides),
             min_role: effectiveMinRole(params.id, premium),
             unpublished_presets: unpublishedPresetIds(overrides),
             premium_presets: premiumPresetIds(premium),
-            version: await store.version(),
+            version,
+            snapshot_version: version,
           };
         },
       )
@@ -740,7 +805,14 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
         }
         await store.setUserRole(params.id, next);
         await publish();
-        return { ok: true, discord_id: params.id, role: next };
+        const version = await store.version();
+        return {
+          ok: true,
+          discord_id: params.id,
+          role: next,
+          version,
+          snapshot_version: version,
+        };
       })
       // Another user's personal settings (#175): the rows `/api/me/settings`
       // reads and writes, opened by an Administrator or Moderator for a user
@@ -788,7 +860,12 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
             set.status = done.status;
             return { error: done.error };
           }
-          return { settings: done.settings, version: await store.version() };
+          const version = await store.version();
+          return {
+            settings: done.settings,
+            version,
+            snapshot_version: version,
+          };
         },
       )
       .get("/api/guilds", async ({ cookie, set }) => {
@@ -916,9 +993,11 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           );
           await store.putGuild(params.id, next);
           await publish();
+          const version = await store.version();
           return {
             settings: next,
-            version: await store.version(),
+            version,
+            snapshot_version: version,
           };
         },
       )
@@ -989,9 +1068,11 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           }
           await store.putSchedules(params.id, parsed.data);
           await publish();
+          const version = await store.version();
           return {
             schedules: await store.getSchedules(params.id),
-            version: await store.version(),
+            version,
+            snapshot_version: version,
           };
         },
       )
@@ -1043,6 +1124,52 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
             ETag: snapshotEtag(body.version),
           },
         });
+      })
+      // Bot reports the snapshot version it finished applying and persisting (#185).
+      .post("/internal/snapshot/ack", async ({ request, set, body }) => {
+        if (
+          !requireInternal(request.headers.get("authorization") ?? undefined)
+        ) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const version =
+          body && typeof body === "object"
+            ? (body as { version?: unknown }).version
+            : undefined;
+        if (
+          typeof version !== "number" ||
+          !Number.isSafeInteger(version) ||
+          version < 0
+        ) {
+          set.status = 400;
+          return { error: "invalid version" };
+        }
+        const applied = await recordBotAppliedSnapshot(store, version, now());
+        return {
+          ok: true,
+          applied_version: applied.version,
+          applied_at: applied.at,
+        };
+      })
+      // Dashboard short-polls this after saving to detect when the bot applied the change (#185).
+      .get("/api/sync-status", async ({ cookie, set }) => {
+        set.headers["cache-control"] = "no-store";
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const [snapshot_version, rawApplied] = await Promise.all([
+          store.version(),
+          store.getMeta(BOT_APPLIED_SNAPSHOT_META),
+        ]);
+        const applied = parseBotAppliedSnapshot(rawApplied);
+        return {
+          snapshot_version,
+          applied_version: applied?.version ?? null,
+          applied_at: applied?.at ?? null,
+        };
       })
       .get("/internal/events", ({ request, set }) => {
         if (
@@ -1269,7 +1396,8 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           return { error: "the app settings changed meanwhile; try again" };
         }
         await publish();
-        return { settings: next, version: await store.version() };
+        const version = await store.version();
+        return { settings: next, version, snapshot_version: version };
       })
       // The bot's Discord commands of the same settings. The bot checks that
       // the member is a Moderator or an Administrator first, as it checks a
@@ -1545,7 +1673,13 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
         // 304. The threshold reaches it through `/internal/budget` instead.
         await store.bumpVersion();
         await publish();
-        return { fallback, threshold_usd: await loadBudgetThreshold(store) };
+        const version = await store.version();
+        return {
+          fallback,
+          threshold_usd: await loadBudgetThreshold(store),
+          version,
+          snapshot_version: version,
+        };
       })
       // The bot asks this every few minutes (#89). It has no Admin API key: the
       // decision is made here, from the same figures the page shows and the

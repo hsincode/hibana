@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type Me } from "./api";
 import { Select } from "./controls";
+import { useTrackBotSync } from "./sync";
 import {
   Alert,
   Avatar,
@@ -29,6 +30,7 @@ export function UsersPage({ me }: { me: Me }) {
   const [assignable, setAssignable] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const { toasts, push } = useToasts();
+  const trackBotSync = useTrackBotSync();
   useDocumentTitle("ユーザー");
 
   const load = () => {
@@ -43,10 +45,14 @@ export function UsersPage({ me }: { me: Me }) {
 
   async function setRole(u: UserRow, role: string) {
     try {
-      await api(`/api/users/${u.discord_id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ role }),
-      });
+      const r = await api<{ snapshot_version?: number }>(
+        `/api/users/${u.discord_id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ role }),
+        },
+      );
+      trackBotSync(r?.snapshot_version);
       push("ok", `${u.username} を ${role} にした`);
       load();
     } catch (e) {

@@ -33,6 +33,7 @@ type Seen = {
   path: string;
   etag: string | null;
   status: number;
+  body: unknown;
 };
 
 /** A stand-in for the settings API: counts what the bot asks for. */
@@ -96,13 +97,22 @@ function settingsApi() {
     port: 0,
     async fetch(request) {
       const path = new URL(request.url).pathname;
-      await request.arrayBuffer();
+      const raw = await request.text();
+      let body: unknown;
+      if (raw) {
+        try {
+          body = JSON.parse(raw);
+        } catch {
+          body = raw;
+        }
+      }
       const response = answer(request, path);
       api.seen.push({
         method: request.method,
         path,
         etag: request.headers.get("if-none-match"),
         status: response.status,
+        body,
       });
       return response;
     },
@@ -424,5 +434,52 @@ describe("budget status (#89)", () => {
     await until(() => api.count("GET", "/internal/snapshot") >= 5);
     expect(api.count("GET", "/internal/budget")).toBe(1);
     expect(runtime.budgetLow()).toBe(true);
+  });
+});
+
+describe("snapshot acknowledgement (#185)", () => {
+  test("acknowledges applied version after replace+persist and skips ack on 304", async () => {
+    const { api, runtime, sync } = fixture();
+    await sync.start();
+    await until(() => api.count("GET", "/internal/snapshot", 304) >= 3);
+    const acks = () =>
+      api.seen.filter(
+        (s) => s.method === "POST" && s.path === "/internal/snapshot/ack",
+      );
+    expect(acks().map((a) => a.body)).toEqual([{ version: 1 }]);
+    expect(runtime.snapshot.version).toBe(1);
+
+    // A new version triggers exactly one more ack.
+    api.version = 2;
+    await until(() => runtime.snapshot.version === 2);
+    await until(() => acks().length >= 2);
+    await until(() => api.count("GET", "/internal/snapshot", 304) >= 5);
+    expect(acks().map((a) => a.body)).toEqual([{ version: 1 }, { version: 2 }]);
+  });
+
+  test("an ack failure does not stop syncing and retries on the next 304 poll", async () => {
+    const { api, runtime, errors, sync } = fixture();
+    api.failOnce.add("/internal/snapshot/ack");
+    await sync.start();
+    expect(runtime.snapshot.version).toBe(1);
+    expect(errors.some((e) => e.includes("/internal/snapshot/ack"))).toBe(true);
+
+    // Next 304 poll retries the missed ack for version 1 and succeeds.
+    await until(() => api.count("POST", "/internal/snapshot/ack", 200) >= 1);
+    expect(
+      api.seen
+        .filter(
+          (s) =>
+            s.method === "POST" &&
+            s.path === "/internal/snapshot/ack" &&
+            s.status === 200,
+        )
+        .map((a) => a.body),
+    ).toEqual([{ version: 1 }]);
+
+    // Subsequent snapshot changes still flow normally.
+    api.version = 2;
+    await until(() => api.count("POST", "/internal/snapshot/ack", 200) >= 2);
+    expect(runtime.snapshot.version).toBe(2);
   });
 });

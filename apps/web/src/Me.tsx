@@ -81,7 +81,7 @@ function PersonalSettings({
     setSettings,
     presets: cat?.presets ?? [],
     send: (body) =>
-      api<{ settings: UserSettings }>(endpoint, {
+      api<{ settings: UserSettings; snapshot_version?: number }>(endpoint, {
         method: "PATCH",
         body: JSON.stringify(body),
       }),

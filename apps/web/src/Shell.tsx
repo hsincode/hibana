@@ -25,7 +25,16 @@ import { ThemeMenu } from "./controls";
 import { GUILD_PAGES, guildPath } from "./nav";
 import { Palette, type PaletteNavState } from "./Palette";
 import { SaveStatus, SaveStatusContext, type SaveState } from "./save";
-import { Avatar, Badge, GUILD_PAGE_ICON, Icon, cdnUrl } from "./ui";
+import { BotSyncTrackContext, useBotSync } from "./sync";
+import {
+  Avatar,
+  Badge,
+  GUILD_PAGE_ICON,
+  Icon,
+  ToastArea,
+  cdnUrl,
+  useToasts,
+} from "./ui";
 
 /* ============================================================
    シェル: 上部バー + サイドバー + 本文
@@ -84,6 +93,10 @@ export function Shell({
   const [navOpen, setNavOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [save, setSave] = useState<SaveState | null>(null);
+  const { toasts: syncToasts, push: pushSyncToast } = useToasts();
+  const { state: botSync, track: trackBotSync } = useBotSync(() =>
+    pushSyncToast("ok", "設定が bot に反映されました"),
+  );
   const navToggle = useRef<HTMLButtonElement>(null);
   const side = useRef<HTMLElement>(null);
   const navigation = useRef<HTMLElement>(null);
@@ -202,160 +215,167 @@ export function Shell({
   );
 
   return (
-    <SaveStatusContext.Provider value={setSave}>
-      <a className="skip-link" href="#main-content">
-        メインコンテンツへ
-      </a>
-      <header className="topbar">
-        <button
-          ref={navToggle}
-          type="button"
-          className="icon-btn nav-toggle"
-          aria-label={
-            navOpen ? "ナビゲーションを閉じる" : "ナビゲーションを開く"
-          }
-          aria-expanded={navOpen}
-          aria-controls="main-navigation"
-          onClick={() => setNavOpen(!navOpen)}
-        >
-          {navOpen ? <Icon.close size={20} /> : <Icon.menu size={20} />}
-        </button>
-        <Link to="/" className="brand" aria-label="Hibana サーバー一覧へ">
-          <span className="brand-mark">
-            <Icon.logo />
-          </span>
-          <span className="brand-name">Hibana</span>
-        </Link>
-        <button
-          type="button"
-          className="palette-btn"
-          aria-label="検索・移動（コマンドパレット）"
-          aria-haspopup="dialog"
-          onClick={() => setPaletteOpen(true)}
-        >
-          <Icon.search />
-          <span>検索・移動</span>
-          <kbd>{isMac ? "⌘K" : "Ctrl K"}</kbd>
-        </button>
-
-        <div className="topbar-spacer" />
-
-        <SaveStatus state={save} />
-        <ThemeMenu />
-        <Dropdown.Root>
-          <Dropdown.Trigger
-            className="account-btn"
-            aria-label="アカウントメニュー"
+    <BotSyncTrackContext.Provider value={trackBotSync}>
+      <SaveStatusContext.Provider value={setSave}>
+        <a className="skip-link" href="#main-content">
+          メインコンテンツへ
+        </a>
+        <header className="topbar">
+          <button
+            ref={navToggle}
+            type="button"
+            className="icon-btn nav-toggle"
+            aria-label={
+              navOpen ? "ナビゲーションを閉じる" : "ナビゲーションを開く"
+            }
+            aria-expanded={navOpen}
+            aria-controls="main-navigation"
+            onClick={() => setNavOpen(!navOpen)}
           >
-            <Avatar
-              small
-              round
-              src={cdnUrl("avatars", me.id, me.avatar)}
-              name={me.username}
-            />
-            <span className="account-name">{me.username}</span>
-            <Icon.chevronDown size={14} />
-          </Dropdown.Trigger>
-          <Dropdown.Portal>
-            <Dropdown.Content
-              className="pop"
-              align="end"
-              sideOffset={6}
-              collisionPadding={8}
+            {navOpen ? <Icon.close size={20} /> : <Icon.menu size={20} />}
+          </button>
+          <Link to="/" className="brand" aria-label="Hibana サーバー一覧へ">
+            <span className="brand-mark">
+              <Icon.logo />
+            </span>
+            <span className="brand-name">Hibana</span>
+          </Link>
+          <button
+            type="button"
+            className="palette-btn"
+            aria-label="検索・移動（コマンドパレット）"
+            aria-haspopup="dialog"
+            onClick={() => setPaletteOpen(true)}
+          >
+            <Icon.search />
+            <span>検索・移動</span>
+            <kbd>{isMac ? "⌘K" : "Ctrl K"}</kbd>
+          </button>
+
+          <div className="topbar-spacer" />
+
+          <SaveStatus state={save} botSync={botSync} />
+          <ThemeMenu />
+          <Dropdown.Root>
+            <Dropdown.Trigger
+              className="account-btn"
+              aria-label="アカウントメニュー"
             >
-              <Dropdown.Label className="pop-label">
-                <strong>{me.username}</strong>
-                <Badge>{me.role}</Badge>
-              </Dropdown.Label>
-              <Dropdown.Separator className="pop-sep" />
-              <Dropdown.Item className="pop-item" asChild>
-                <Link to="/me">
-                  <Icon.user />
-                  <span className="grow">マイ設定</span>
-                </Link>
-              </Dropdown.Item>
-              <Dropdown.Item
-                className="pop-item is-danger"
-                disabled={busy}
-                onSelect={() => void logout()}
+              <Avatar
+                small
+                round
+                src={cdnUrl("avatars", me.id, me.avatar)}
+                name={me.username}
+              />
+              <span className="account-name">{me.username}</span>
+              <Icon.chevronDown size={14} />
+            </Dropdown.Trigger>
+            <Dropdown.Portal>
+              <Dropdown.Content
+                className="pop"
+                align="end"
+                sideOffset={6}
+                collisionPadding={8}
               >
-                <Icon.logout />
-                <span className="grow">ログアウト</span>
-              </Dropdown.Item>
-            </Dropdown.Content>
-          </Dropdown.Portal>
-        </Dropdown.Root>
-      </header>
+                <Dropdown.Label className="pop-label">
+                  <strong>{me.username}</strong>
+                  <Badge>{me.role}</Badge>
+                </Dropdown.Label>
+                <Dropdown.Separator className="pop-sep" />
+                <Dropdown.Item className="pop-item" asChild>
+                  <Link to="/me">
+                    <Icon.user />
+                    <span className="grow">マイ設定</span>
+                  </Link>
+                </Dropdown.Item>
+                <Dropdown.Item
+                  className="pop-item is-danger"
+                  disabled={busy}
+                  onSelect={() => void logout()}
+                >
+                  <Icon.logout />
+                  <span className="grow">ログアウト</span>
+                </Dropdown.Item>
+              </Dropdown.Content>
+            </Dropdown.Portal>
+          </Dropdown.Root>
+        </header>
 
-      <div className="shell">
-        <div
-          className={`side-backdrop${navOpen ? " is-open" : ""}`}
-          aria-hidden="true"
+        <div className="shell">
+          <div
+            className={`side-backdrop${navOpen ? " is-open" : ""}`}
+            aria-hidden="true"
+          />
+          <aside ref={side} className={`side${navOpen ? " is-open" : ""}`}>
+            <nav
+              ref={navigation}
+              id="main-navigation"
+              className="side-nav"
+              aria-label="メイン"
+            >
+              <div
+                ref={indicator}
+                className="nav-indicator"
+                aria-hidden="true"
+              />
+              {current.id && (
+                <>
+                  <GuildSwitcher
+                    guilds={guilds}
+                    currentId={current.id}
+                    name={current.guild?.name ?? current.id}
+                    icon={current.guild?.icon ?? null}
+                  />
+                  <div className="nav-group">
+                    {GUILD_PAGES.map((p) =>
+                      link(
+                        guildPath(current.id!, p.path),
+                        GUILD_PAGE_ICON[p.path],
+                        p.label,
+                        true,
+                      ),
+                    )}
+                  </div>
+                  <div className="nav-label">全体</div>
+                </>
+              )}
+              <div className="nav-group">
+                {link("/", <Icon.grid />, "サーバー一覧", true)}
+                {link("/me", <Icon.user />, "マイ設定")}
+                {/* 全体の設定（#161）は誰でも見られ、Moderator 以上が変える。 */}
+                {link("/settings", <Icon.sliders />, "全体の設定")}
+                {link("/artifacts", <Icon.box />, "すべての成果物")}
+                {/* 利用料は全ユーザーが見られる（#85）。古い API はフラグを返さないことがある。 */}
+                {me.can_view_analytics &&
+                  link("/analytics", <Icon.gauge />, "利用料")}
+              </div>
+              {me.can_manage_users && (
+                <>
+                  <div className="nav-label">管理</div>
+                  <div className="nav-group">
+                    {link("/users", <Icon.users />, "ユーザー")}
+                    {link("/models", <Icon.cpu />, "モデル")}
+                  </div>
+                </>
+              )}
+            </nav>
+          </aside>
+
+          <main ref={main} id="main-content" className="main" tabIndex={-1}>
+            {children}
+          </main>
+        </div>
+
+        <Palette
+          open={paletteOpen}
+          onClose={() => setPaletteOpen(false)}
+          guilds={guilds}
+          currentId={current.id}
+          me={me}
         />
-        <aside ref={side} className={`side${navOpen ? " is-open" : ""}`}>
-          <nav
-            ref={navigation}
-            id="main-navigation"
-            className="side-nav"
-            aria-label="メイン"
-          >
-            <div ref={indicator} className="nav-indicator" aria-hidden="true" />
-            {current.id && (
-              <>
-                <GuildSwitcher
-                  guilds={guilds}
-                  currentId={current.id}
-                  name={current.guild?.name ?? current.id}
-                  icon={current.guild?.icon ?? null}
-                />
-                <div className="nav-group">
-                  {GUILD_PAGES.map((p) =>
-                    link(
-                      guildPath(current.id!, p.path),
-                      GUILD_PAGE_ICON[p.path],
-                      p.label,
-                      true,
-                    ),
-                  )}
-                </div>
-                <div className="nav-label">全体</div>
-              </>
-            )}
-            <div className="nav-group">
-              {link("/", <Icon.grid />, "サーバー一覧", true)}
-              {link("/me", <Icon.user />, "マイ設定")}
-              {/* 全体の設定（#161）は誰でも見られ、Moderator 以上が変える。 */}
-              {link("/settings", <Icon.sliders />, "全体の設定")}
-              {link("/artifacts", <Icon.box />, "すべての成果物")}
-              {/* 利用料は全ユーザーが見られる（#85）。古い API はフラグを返さないことがある。 */}
-              {me.can_view_analytics &&
-                link("/analytics", <Icon.gauge />, "利用料")}
-            </div>
-            {me.can_manage_users && (
-              <>
-                <div className="nav-label">管理</div>
-                <div className="nav-group">
-                  {link("/users", <Icon.users />, "ユーザー")}
-                  {link("/models", <Icon.cpu />, "モデル")}
-                </div>
-              </>
-            )}
-          </nav>
-        </aside>
-
-        <main ref={main} id="main-content" className="main" tabIndex={-1}>
-          {children}
-        </main>
-      </div>
-
-      <Palette
-        open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
-        guilds={guilds}
-        currentId={current.id}
-        me={me}
-      />
-    </SaveStatusContext.Provider>
+        {syncToasts.length > 0 && <ToastArea toasts={syncToasts} />}
+      </SaveStatusContext.Provider>
+    </BotSyncTrackContext.Provider>
   );
 }
 

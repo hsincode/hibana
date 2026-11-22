@@ -40,6 +40,8 @@ export class WebSync {
   private queue = new Serial();
   /** Capabilities and assets reached the API since this process started. */
   private announced = false;
+  /** Snapshot version last acknowledged to `/internal/snapshot/ack` (#185). */
+  private ackedVersion?: number;
   /** Digests of the lists the API last accepted. */
   private published: { sites?: string; skills?: string } = {};
   /** When `/internal/budget` was last asked, answered or not. */
@@ -126,7 +128,13 @@ export class WebSync {
         ]),
         redirect: "error",
       });
-      if (r.status === 304) return;
+      if (r.status === 304) {
+        // Retry a previously failed ack for the version already applied locally.
+        const current = this.runtime.snapshot.version;
+        if (current !== undefined && this.ackedVersion !== current)
+          await this.ackSnapshot(current);
+        return;
+      }
       if (!r.ok) throw new Error(`Settings snapshot HTTP ${r.status}`);
       const snapshot = (await r.json()) as Snapshot;
       // The first snapshot this bot ever holds (none was restored from disk)
@@ -137,6 +145,8 @@ export class WebSync {
       );
       this.etag = r.headers.get("etag") ?? undefined;
       await this.runtime.persist();
+      if (typeof snapshot.version === "number")
+        await this.ackSnapshot(snapshot.version);
       for (const command of snapshot.artifact_commands ?? []) {
         await this.tools.sites.applyCommand(command);
         await this.runtime.remote("/internal/artifacts/ack", "POST", {
@@ -183,6 +193,24 @@ export class WebSync {
       if (snapshot.skill_commands?.length || snapshot.artifact_commands?.length)
         await this.publishAssets();
     });
+  }
+  /**
+   * Tells the settings API which snapshot version this process has applied and
+   * persisted (#185). Never throws: a blip must not break the sync loop or
+   * command handling, and the next poll retries when `ackedVersion` still lags.
+   */
+  private async ackSnapshot(version: number) {
+    try {
+      await this.runtime.remote(
+        "/internal/snapshot/ack",
+        "POST",
+        { version },
+        this.abort.signal,
+      );
+      this.ackedVersion = version;
+    } catch (e) {
+      if (!this.abort.signal.aborted) this.onError(e);
+    }
   }
   async publishAssets() {
     return this.assetQueue.run(async () => {

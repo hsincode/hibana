@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from "react";
 import { api } from "./api";
 import { Select } from "./controls";
+import { useTrackBotSync } from "./sync";
 import { Badge, Skeleton, ToastArea, useToasts } from "./ui";
 
 /* ============================================================
@@ -77,6 +78,7 @@ export function BudgetFallbackPanel({ reloadKey }: { reloadKey: string }) {
   // 保存した閾値で判定し直した状態を出すため、保存のあとにも読み直す。
   const [saves, setSaves] = useState(0);
   const { toasts, push } = useToasts();
+  const trackBotSync = useTrackBotSync();
   const id = useId();
 
   useEffect(() => {
@@ -120,17 +122,18 @@ export function BudgetFallbackPanel({ reloadKey }: { reloadKey: string }) {
     if (!draft || threshold === null) return;
     setSaving(true);
     try {
-      const r = await api<{ fallback: Fallback; threshold_usd: number }>(
-        "/api/budget-fallback",
-        {
-          method: "PUT",
-          body: JSON.stringify({
-            preset: draft.preset,
-            effort: draft.effort,
-            threshold_usd: threshold,
-          }),
-        },
-      );
+      const r = await api<{
+        fallback: Fallback;
+        threshold_usd: number;
+        snapshot_version?: number;
+      }>("/api/budget-fallback", {
+        method: "PUT",
+        body: JSON.stringify({
+          preset: draft.preset,
+          effort: draft.effort,
+          threshold_usd: threshold,
+        }),
+      });
       setData((d) =>
         d
           ? {
@@ -142,7 +145,13 @@ export function BudgetFallbackPanel({ reloadKey }: { reloadKey: string }) {
       );
       setDraft(null);
       setSaves((n) => n + 1);
-      push("ok", "保存しました。bot には 2 分ほどで届きます");
+      trackBotSync(r.snapshot_version);
+      push(
+        "ok",
+        r.snapshot_version != null
+          ? "保存しました（閾値の反映は最大 2 分）"
+          : "保存しました。bot には 2 分ほどで届きます",
+      );
     } catch (e) {
       push("error", String((e as Error).message ?? e));
     } finally {

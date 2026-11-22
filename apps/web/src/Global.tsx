@@ -47,10 +47,13 @@ export function GlobalSettingsPage() {
     setSettings,
     presets: [],
     send: (body) =>
-      api<{ settings: Settings }>("/api/app-settings", {
-        method: "PATCH",
-        body: JSON.stringify(body),
-      }),
+      api<{ settings: Settings; snapshot_version?: number }>(
+        "/api/app-settings",
+        {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        },
+      ),
     onError: (message) => push("error", message),
   });
   useDocumentTitle("全体の設定");

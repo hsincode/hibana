@@ -13,6 +13,7 @@ import {
 } from "@hibana/shared/schedules";
 import { api } from "./api";
 import { Select } from "./controls";
+import { useTrackBotSync } from "./sync";
 import { Alert, BoolSeg, Icon, Loading, Section, type Toast } from "./ui";
 
 /* ============================================================
@@ -86,6 +87,7 @@ export function GuildSchedules({
   const [channelError, setChannelError] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const trackBotSync = useTrackBotSync();
 
   const load = useCallback(async () => {
     setError("");
@@ -125,13 +127,19 @@ export function GuildSchedules({
   async function save() {
     setBusy(true);
     try {
-      const r = await api<{ schedules: Schedule[] }>(
+      const r = await api<{ schedules: Schedule[]; snapshot_version?: number }>(
         `/api/guilds/${guildId}/schedules`,
         { method: "PUT", body: JSON.stringify({ schedules: draft }) },
       );
       setLoaded((l) => (l ? { ...l, schedules: r.schedules } : l));
       setDraft(r.schedules);
-      push("ok", "保存しました。bot には 30 秒ほどで届きます。");
+      trackBotSync(r.snapshot_version);
+      push(
+        "ok",
+        r.snapshot_version != null
+          ? "保存しました"
+          : "保存しました。bot には 30 秒ほどで届きます。",
+      );
     } catch (e) {
       push("error", (e as Error).message);
     } finally {

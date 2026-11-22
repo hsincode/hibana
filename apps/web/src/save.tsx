@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { useLocation } from "react-router-dom";
+import { IDLE_BOT_SYNC, type BotSyncState } from "./sync";
 import { Icon } from "./ui";
 
 /* ============================================================
@@ -45,7 +46,63 @@ const SAVE_TEXT: Record<SaveState, string> = {
   failed: "保存に失敗",
 };
 
-export function SaveStatus({ state }: { state: SaveState | null }) {
+export function SaveStatus({
+  state,
+  botSync = IDLE_BOT_SYNC,
+}: {
+  state: SaveState | null;
+  botSync?: BotSyncState;
+}) {
+  if (state === "saving" || state === "failed") {
+    return (
+      <div className={`save-state is-${state}`} role="status">
+        <span className="save-glyph" aria-hidden="true" />
+        <span className="save-text">{SAVE_TEXT[state]}</span>
+      </div>
+    );
+  }
+  if (botSync.status === "pending") {
+    return (
+      <div className="save-state is-syncing" role="status">
+        <span className="save-glyph" aria-hidden="true" />
+        <span className="save-text">bot へ反映待ち…</span>
+        {state === "saved" && <span className="save-sync">保存済み</span>}
+      </div>
+    );
+  }
+  if (
+    botSync.status === "synced" &&
+    (state === "saved" || botSync.standalone)
+  ) {
+    return (
+      <div className="save-state is-saved" role="status">
+        {/* 反映のたびに key を替えて、火花を 1 回散らす（.spark） */}
+        <span
+          key={botSync.seq}
+          className="save-glyph spark"
+          aria-hidden="true"
+        />
+        <span className="save-text">bot に反映済み</span>
+      </div>
+    );
+  }
+  if (botSync.status === "timeout") {
+    return (
+      <div
+        className="save-state is-timeout"
+        role="status"
+        title="bot への反映を確認できませんでした"
+      >
+        <span className="save-glyph" aria-hidden="true" />
+        <span className="save-text">反映未確認</span>
+        <span className="save-sync">
+          {state === "saved"
+            ? "保存済み · bot の同期を確認できませんでした"
+            : "bot の同期を確認できませんでした"}
+        </span>
+      </div>
+    );
+  }
   if (!state) return null;
   return (
     <div
@@ -58,7 +115,7 @@ export function SaveStatus({ state }: { state: SaveState | null }) {
         aria-hidden="true"
       />
       <span className="save-text">{SAVE_TEXT[state]}</span>
-      {/* 届いたかどうかを知る API は無いので、上限だけを案内する（docs/production.md）。 */}
+      {/* snapshot_version を返さない旧 API では上限だけを案内する（docs/production.md）。 */}
       {state === "saved" && (
         <span className="save-sync">bot への反映は最大 30 秒</span>
       )}

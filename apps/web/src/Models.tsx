@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, clearApiCache, type Catalog, type Preset } from "./api";
 import { ChatgptAccounts } from "./ChatgptAccounts";
+import { useTrackBotSync } from "./sync";
 import {
   Alert,
   Badge,
@@ -22,6 +23,7 @@ export function ModelsPage() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const { toasts, push } = useToasts();
+  const trackBotSync = useTrackBotSync();
   useDocumentTitle("モデル");
 
   const load = () => {
@@ -38,10 +40,14 @@ export function ModelsPage() {
   ) {
     setBusy(p.id);
     try {
-      await api(`/api/catalog/presets/${p.id}`, {
-        method: "PATCH",
-        body: JSON.stringify(body),
-      });
+      const r = await api<{ snapshot_version?: number }>(
+        `/api/catalog/presets/${p.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        },
+      );
+      trackBotSync(r?.snapshot_version);
       push("ok", ok);
       clearApiCache();
       load();

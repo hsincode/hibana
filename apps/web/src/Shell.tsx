@@ -25,7 +25,16 @@ import { ThemeMenu } from "./controls";
 import { GUILD_PAGES, guildPath } from "./nav";
 import { Palette, type PaletteNavState } from "./Palette";
 import { SaveStatus, SaveStatusContext, type SaveState } from "./save";
-import { Avatar, Badge, GUILD_PAGE_ICON, Icon, cdnUrl } from "./ui";
+import { BotSyncTrackContext, useBotSync } from "./sync";
+import {
+  Avatar,
+  Badge,
+  GUILD_PAGE_ICON,
+  Icon,
+  ToastArea,
+  cdnUrl,
+  useToasts,
+} from "./ui";
 
 /* ============================================================
    シェル: 上部バー + サイドバー + 本文
@@ -84,6 +93,10 @@ export function Shell({
   const [navOpen, setNavOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [save, setSave] = useState<SaveState | null>(null);
+  const { toasts: syncToasts, push: pushSyncToast } = useToasts();
+  const { state: botSync, track: trackBotSync } = useBotSync(() =>
+    pushSyncToast("ok", "設定が bot に反映されました"),
+  );
   const navToggle = useRef<HTMLButtonElement>(null);
   const side = useRef<HTMLElement>(null);
   const navigation = useRef<HTMLElement>(null);
@@ -202,7 +215,8 @@ export function Shell({
   );
 
   return (
-    <SaveStatusContext.Provider value={setSave}>
+    <BotSyncTrackContext.Provider value={trackBotSync}>
+      <SaveStatusContext.Provider value={setSave}>
       <a className="skip-link" href="#main-content">
         メインコンテンツへ
       </a>
@@ -240,7 +254,7 @@ export function Shell({
 
         <div className="topbar-spacer" />
 
-        <SaveStatus state={save} />
+        <SaveStatus state={save} botSync={botSync} />
         <ThemeMenu />
         <Dropdown.Root>
           <Dropdown.Trigger
@@ -355,7 +369,9 @@ export function Shell({
         currentId={current.id}
         me={me}
       />
+      {syncToasts.length > 0 && <ToastArea toasts={syncToasts} />}
     </SaveStatusContext.Provider>
+    </BotSyncTrackContext.Provider>
   );
 }
 

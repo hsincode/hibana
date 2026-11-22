@@ -70,10 +70,13 @@ export function GuildPage() {
     presets: cat?.presets ?? [],
     send: (body) => {
       if (!id) return Promise.reject(new Error("missing guild id"));
-      return api<{ settings: GuildSettings }>(`/api/guilds/${id}/settings`, {
-        method: "PATCH",
-        body: JSON.stringify(body),
-      });
+      return api<{ settings: GuildSettings; snapshot_version?: number }>(
+        `/api/guilds/${id}/settings`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        },
+      );
     },
     onError: (message) => push("error", message),
     scope: id,

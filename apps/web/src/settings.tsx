@@ -13,6 +13,7 @@ import {
   type SaveMarks,
   type SaveState,
 } from "./save";
+import { useTrackBotSync } from "./sync";
 import { BoolSeg, Icon, Section, SubjectContext } from "./ui";
 
 /* ============================================================
@@ -130,12 +131,15 @@ export function useOptimisticPatch<T extends OverlaySettings>(opts: {
   settings: T | null;
   setSettings: (next: T) => void;
   presets: Preset[];
-  send: (body: Record<string, unknown>) => Promise<{ settings: T }>;
+  send: (
+    body: Record<string, unknown>,
+  ) => Promise<{ settings: T; snapshot_version?: number }>;
   onError: (message: string) => void;
   scope?: string;
   /** マイ設定の「デフォルト」は null。サーバー設定のリセットとは表示を分ける。 */
   blankReset?: boolean;
 }): { patch: PatchFn; save: SaveState; marks: SaveMarks } {
+  const trackBotSync = useTrackBotSync();
   const [save, setSave] = useState<SaveState>("idle");
   const [marks, setMarks] = useState<Record<string, Mark>>({});
   const [pulses, setPulses] = useState<Record<string, Pulse>>({});
@@ -222,6 +226,8 @@ export function useOptimisticPatch<T extends OverlaySettings>(opts: {
         optsRef.current;
       try {
         const r = await send(merged);
+        // 保存が成立したら、別サーバーへ移っていても bot への反映追跡を始める（#185）。
+        trackBotSync(r.snapshot_version);
         // 応答を待つ間に別のサーバーへ移っていたら、前のサーバーの結果は捨てる。
         if (scope !== lastScope.current) return;
         confirmedRef.current = r.settings;
@@ -263,7 +269,7 @@ export function useOptimisticPatch<T extends OverlaySettings>(opts: {
         }
       }
     })();
-  }, [pulse, setMark]);
+  }, [pulse, setMark, trackBotSync]);
 
   const patch = useCallback<PatchFn>(
     (body, row) => {

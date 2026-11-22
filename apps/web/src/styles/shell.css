@@ -86,9 +86,15 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
+  overflow: hidden;
   color: var(--muted);
   font-size: var(--fs-xs);
   white-space: nowrap;
+}
+.save-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .save-glyph {
   width: 7px;
@@ -107,12 +113,31 @@
   border-color: var(--ink);
   background: transparent;
 }
+.save-state.is-syncing {
+  color: var(--ink-2);
+}
+.save-state.is-syncing .save-glyph {
+  border-color: var(--accent);
+  background: transparent;
+}
 .save-state.is-saved {
   color: var(--ink);
 }
 .save-state.is-saved .save-glyph {
   background: var(--accent);
   border-color: var(--accent);
+}
+/* 反映未確認（タイムアウト）は注意色＋▲形で琥珀と区別する（#142、#185） */
+.save-state.is-timeout {
+  color: var(--warn);
+}
+.save-state.is-timeout .save-glyph {
+  width: 8px;
+  height: 7px;
+  border: 0;
+  border-radius: 0;
+  background: var(--warn);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
 }
 .save-state.is-failed {
   color: var(--danger);
@@ -755,8 +780,11 @@
   .save-sync {
     display: none;
   }
-  /* 変化が無い間の案内は省き、保存中・保存済み・失敗だけを出す */
-  .save-state:not(.is-saving):not(.is-saved):not(.is-failed) .save-text {
+  /* 変化が無い間の案内は省き、保存・反映の状態だけを出す */
+  .save-state:not(.is-saving):not(.is-syncing):not(.is-saved):not(
+      .is-timeout
+    ):not(.is-failed)
+    .save-text {
     display: none;
   }
   .topbar {

@@ -167,9 +167,11 @@ Ultra＋Jev の同時実行に加え、本番でも通常サブエージェン�
 実行中とは判定できません。追加の Exa 判定修正は、この失敗による停止をログで確認し、
 新しい作業によるチェックポイント更新がないことを確認してから反映しました。
 
-## botとAPIの設定同期（2026-10-08）
+## botとAPIの設定同期（2026-10-08、反映確認の追加は 2026-11-23）
 
 botは30秒ごとに `GET /internal/snapshot` を `If-None-Match` 付きで呼び、変更がなければ304を受け取ります（`apps/bot/src/sync.ts` の `SNAPSHOT_POLL_MS`）。ダッシュボードでの変更がbotに届くまで、最大で30秒かかります。
+
+botは200で受け取ったスナップショットをメモリ反映（`runtime.replace`）とディスク永続化（`runtime.persist`）し終えた直後に、`POST /internal/snapshot/ack` へ `{ version }` を報告します（[#185](https://github.com/hsincode/hibana/issues/185)）。APIは `meta` の `bot_applied_snapshot` へ単調増加で記録し（`snapshot_version` は上げない）、ダッシュボードは設定保存後に `GET /api/sync-status` を3秒間隔・最大60秒だけポーリングして反映完了を通知します。通常時の304ポーリングでは ack を送らず、ack 送信が一時失敗した場合だけ次の304応答時に未送信分を再送します。
 
 以前は `/internal/events`（SSE）へ常時接続していました。Vercelは応答が開いている間、関数のインスタンスのメモリに課金するため、Hobbyの上限を超えてAPIとWebが停止しました（[#27](https://github.com/hsincode/hibana/issues/27)）。APIの `/internal/events` は、SSEを使う版のbotへ切り戻せるように残しています。
 

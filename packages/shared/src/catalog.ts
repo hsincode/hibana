@@ -344,9 +344,10 @@ export const MODEL_PRESETS = [
   },
   // Refuseless (`REFUSELESS_API_KEY`), an OpenAI-compatible Chat Completions
   // endpoint. The wire ids are the ones its `GET /v1/models` listed on
-  // 2026-10-23. Its `reasoning_effort` takes only off (none) / low / high /
-  // max, and the GLM models cannot turn reasoning off: `llm.ts` maps the
-  // stored effort onto that set.
+  // 2026-10-23 (the Abliterated Fast one on 2026-11-24). Its
+  // `reasoning_effort` takes only off (none) / low / high / max, and the GLM
+  // models cannot turn reasoning off: `llm.ts` maps the stored effort onto
+  // that set.
   {
     id: "refuseless-glm-5.3",
     provider: "refuseless",
@@ -364,6 +365,12 @@ export const MODEL_PRESETS = [
     provider: "refuseless",
     model: "deepseek-v4.1-flash-abliterated",
     label: "Refuseless / DeepSeek V4.1 Flash Abliterated",
+  },
+  {
+    id: "refuseless-deepseek-v4.1-flash-fast",
+    provider: "refuseless",
+    model: "deepseek-v4.1-flash-abliterated-fast",
+    label: "Refuseless / DeepSeek V4.1 Flash Abliterated Fast",
   },
 ] as const;
 

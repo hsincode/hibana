@@ -589,6 +589,8 @@ test("Refuseless gets Chat Completions with only the reasoning efforts it accept
     ["deepseek-v4.1-flash-abliterated", "none", "none"],
     ["deepseek-v4.1-flash-abliterated", "medium", "high"],
     ["deepseek-v4.1-flash-abliterated", "max", "max"],
+    ["deepseek-v4.1-flash-abliterated-fast", "none", "none"],
+    ["deepseek-v4.1-flash-abliterated-fast", "medium", "high"],
   ] as const) {
     await client.complete(
       { provider: "refuseless", model, effort },

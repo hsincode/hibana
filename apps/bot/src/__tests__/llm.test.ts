@@ -619,6 +619,198 @@ test("Refuseless gets Chat Completions with only the reasoning efforts it accept
   expect(body.reasoning_effort).toBe("high");
 });
 
+test("Refuseless inlines remote image URLs as base64 data URLs, caches them, and does not mutate input messages (#189)", async () => {
+  const cfg = loadConfig({ REFUSELESS_API_KEY: "fixture" });
+  const bodies: Json[] = [];
+  const downloads: { url: string; limit?: number }[] = [];
+  const gifBytes = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]);
+  const existingDataUrl = "data:image/png;base64,iVBORw0KGgo=";
+  const remoteUrl = "https://cdn.discordapp.com/attachments/1/2/anim.gif?ex=1";
+  const client = new LlmClient(
+    cfg,
+    async (_to, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return Response.json({
+        choices: [{ message: { role: "assistant", content: "ok" } }],
+      });
+    },
+    {},
+    async (url, _signal, limit) => {
+      downloads.push({ url, limit });
+      return new Response(gifBytes, {
+        status: 200,
+        headers: { "content-type": "image/gif; charset=binary" },
+      });
+    },
+  );
+  const input: Message[] = [
+    {
+      role: "user",
+      content: "Look at these",
+      images: [remoteUrl, existingDataUrl],
+    },
+  ];
+  await client.complete(
+    { provider: "refuseless", model: "glm-5.3-flash-abliterated" },
+    input,
+    [],
+  );
+  await client.complete(
+    { provider: "refuseless", model: "glm-5.3-flash-abliterated" },
+    input,
+    [],
+  );
+  // Original message stays untouched (checkpoints keep URLs, not multi-MB base64).
+  expect(input[0]!.images).toEqual([remoteUrl, existingDataUrl]);
+  // Downloaded once (with the 8 MiB bound) and reused on the next round of the turn.
+  expect(downloads).toEqual([{ url: remoteUrl, limit: 8 * 1024 * 1024 }]);
+  const expectedData = `data:image/gif;base64,${Buffer.from(gifBytes).toString("base64")}`;
+  for (const body of bodies) {
+    const sent = (body.messages as Json[])[0]!;
+    expect(sent.content).toEqual([
+      { type: "text", text: "Look at these" },
+      { type: "image_url", image_url: { url: expectedData } },
+      { type: "image_url", image_url: { url: existingDataUrl } },
+    ]);
+  }
+});
+
+test("Refuseless omits undownloadable or unsupported remote images with a note, propagates aborts, and leaves other providers unchanged (#189)", async () => {
+  const cfg = loadConfig({
+    REFUSELESS_API_KEY: "fixture",
+    DEEPSEEK_API_KEY: "fixture",
+  });
+  let body: Json = {};
+  let attempts = 0;
+  const downloader = async (url: string, signal?: AbortSignal) => {
+    signal?.throwIfAborted();
+    attempts++;
+    if (url.includes("fail")) throw new Error("Response exceeds size limit");
+    if (url.includes("svg"))
+      return new Response("<svg/>", {
+        status: 200,
+        headers: { "content-type": "image/svg+xml" },
+      });
+    if (url.includes("empty"))
+      return new Response(new Uint8Array(), {
+        status: 200,
+        headers: { "content-type": "image/png" },
+      });
+    return new Response(new Uint8Array([137, 80, 78, 71]), {
+      status: 200,
+      headers: { "content-type": "image/png" },
+    });
+  };
+  const client = new LlmClient(
+    cfg,
+    async (_to, init) => {
+      body = JSON.parse(String(init?.body));
+      return Response.json({
+        choices: [{ message: { role: "assistant", content: "ok" } }],
+      });
+    },
+    {},
+    downloader,
+  );
+  // Mixed valid + unsupported + empty: keeps only the valid inlined image and notes the 2 skipped.
+  await client.complete(
+    { provider: "refuseless", model: "glm-5.3-flash-abliterated" },
+    [
+      {
+        role: "user",
+        content: "Check",
+        images: [
+          "https://cdn.discordapp.com/ok.png",
+          "https://cdn.discordapp.com/bad.svg",
+          "https://cdn.discordapp.com/empty.png",
+        ],
+      },
+    ],
+    [],
+  );
+  const mixed = (body.messages as Json[])[0]!.content as Json[];
+  expect(mixed).toHaveLength(2);
+  expect(String(mixed[0]!.text)).toContain("Check");
+  expect(String(mixed[0]!.text)).toContain(
+    "2 attached images could not be shown",
+  );
+  expect(mixed[1]).toEqual({
+    type: "image_url",
+    image_url: {
+      url: `data:image/png;base64,${Buffer.from([137, 80, 78, 71]).toString("base64")}`,
+    },
+  });
+
+  // All failed with empty content: plain text note, no image_url, and failure is not cached.
+  const beforeFail = attempts;
+  await client.complete(
+    { provider: "refuseless", model: "glm-5.3-flash-abliterated" },
+    [
+      {
+        role: "user",
+        content: "",
+        images: ["https://cdn.discordapp.com/fail.gif"],
+      },
+    ],
+    [],
+  );
+  const onlyNote = (body.messages as Json[])[0]!.content;
+  expect(typeof onlyNote).toBe("string");
+  expect(String(onlyNote)).toStartWith("[1 attached image could not be shown");
+  await client.complete(
+    { provider: "refuseless", model: "glm-5.3-flash-abliterated" },
+    [
+      {
+        role: "user",
+        content: "",
+        images: ["https://cdn.discordapp.com/fail.gif"],
+      },
+    ],
+    [],
+  );
+  expect(attempts).toBe(beforeFail + 2);
+
+  // Abort propagates rather than silently dropping the image.
+  const aborted = new AbortController();
+  aborted.abort(new Error("cancelled"));
+  await expect(
+    client.complete(
+      { provider: "refuseless", model: "glm-5.3-flash-abliterated" },
+      [
+        {
+          role: "user",
+          content: "hi",
+          images: ["https://cdn.discordapp.com/new.png"],
+        },
+      ],
+      [],
+      { signal: aborted.signal },
+    ),
+  ).rejects.toThrow("cancelled");
+
+  // Other providers keep remote URLs untouched and do not invoke the downloader.
+  const beforeOther = attempts;
+  await client.complete(
+    { provider: "deepseek", model: "deepseek-chat" },
+    [
+      {
+        role: "user",
+        content: "hi",
+        images: ["https://cdn.discordapp.com/other.png"],
+      },
+    ],
+    [],
+  );
+  expect(attempts).toBe(beforeOther);
+  expect((body.messages as Json[])[0]!.content).toEqual([
+    { type: "text", text: "hi" },
+    {
+      type: "image_url",
+      image_url: { url: "https://cdn.discordapp.com/other.png" },
+    },
+  ]);
+});
+
 test("PROVIDER=refuseless defaults to its first preset and keeps its key to itself", () => {
   const cfg = loadConfig({
     PROVIDER: "refuseless",

@@ -27,6 +27,7 @@ import {
   type PrefixReport,
   type RequestTrace,
 } from "./prefix-audit";
+import { downloadPublic } from "./network";
 export { retryDelay } from "./llm-request";
 
 // Claude Opus 5.5, Sonnet 5.5 and the Fable / Mythos 5 line reject a fixed
@@ -531,8 +532,19 @@ function thinkingDrops(
 export type LlmHooks = RequestHooks & {
   onCompletion?: (record: RequestRecord) => void;
 };
+// Refuseless rejects remote image URLs on /v1/chat/completions with HTTP 400
+// ("Remote image URLs are not supported. Send images inline as base64 data:
+// URLs"). Inline remote attachment URLs for this provider only (#189).
+const REFUSELESS_IMAGE_TYPES = /^image\/(png|jpeg|gif|webp)$/;
+// Matches view_image's 8 MiB bound (tools/index.ts); verified up to 3.88 MiB GIF.
+const REFUSELESS_IMAGE_BYTES = 8 * 1024 * 1024;
+const REFUSELESS_IMAGE_CACHE_MAX_ENTRIES = 16;
+const REFUSELESS_IMAGE_CACHE_MAX_CHARS = 32 * 1024 * 1024;
+
 export class LlmClient {
   private audit = new PrefixAudit();
+  private inlineImageCache = new Map<string, string>();
+  private inlineImageCacheChars = 0;
   constructor(
     private config: Config,
     private fetcher: (
@@ -540,7 +552,104 @@ export class LlmClient {
       init?: RequestInit,
     ) => Promise<Response> = fetch,
     private hooks: LlmHooks = {},
+    private imageDownloader: (
+      url: string,
+      signal?: AbortSignal,
+      limit?: number,
+    ) => Promise<Response> = downloadPublic,
   ) {}
+  private cacheInlineImage(url: string, dataUrl: string) {
+    if (dataUrl.length > REFUSELESS_IMAGE_CACHE_MAX_CHARS) return;
+    const prev = this.inlineImageCache.get(url);
+    if (prev !== undefined) {
+      this.inlineImageCacheChars -= prev.length;
+      this.inlineImageCache.delete(url);
+    }
+    while (
+      this.inlineImageCache.size >= REFUSELESS_IMAGE_CACHE_MAX_ENTRIES ||
+      this.inlineImageCacheChars + dataUrl.length >
+        REFUSELESS_IMAGE_CACHE_MAX_CHARS
+    ) {
+      const oldest = this.inlineImageCache.keys().next().value;
+      if (oldest === undefined) break;
+      this.inlineImageCacheChars -= this.inlineImageCache.get(oldest)!.length;
+      this.inlineImageCache.delete(oldest);
+    }
+    this.inlineImageCache.set(url, dataUrl);
+    this.inlineImageCacheChars += dataUrl.length;
+  }
+  private async inlineImageUrl(
+    url: string,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    if (url.startsWith("data:")) return url;
+    const cached = this.inlineImageCache.get(url);
+    if (cached !== undefined) {
+      // Refresh insertion order so active turn images stay warm across rounds.
+      this.inlineImageCache.delete(url);
+      this.inlineImageCache.set(url, cached);
+      return cached;
+    }
+    try {
+      const response = await this.imageDownloader(
+        url,
+        signal,
+        REFUSELESS_IMAGE_BYTES,
+      );
+      const rawType =
+        response.headers
+          .get("content-type")
+          ?.split(";")[0]
+          ?.trim()
+          .toLowerCase() ?? "";
+      const type = rawType === "image/jpg" ? "image/jpeg" : rawType;
+      if (!response.ok || !REFUSELESS_IMAGE_TYPES.test(type)) {
+        await response.body?.cancel();
+        return undefined;
+      }
+      const bytes = Buffer.from(await response.arrayBuffer());
+      if (!bytes.length || bytes.length > REFUSELESS_IMAGE_BYTES)
+        return undefined;
+      const dataUrl = `data:${type};base64,${bytes.toString("base64")}`;
+      this.cacheInlineImage(url, dataUrl);
+      return dataUrl;
+    } catch {
+      signal?.throwIfAborted();
+      return undefined;
+    }
+  }
+  private async inlineRemoteImages(
+    messages: Message[],
+    signal?: AbortSignal,
+  ): Promise<Message[]> {
+    if (!messages.some((m) => m.images?.some((u) => !u.startsWith("data:"))))
+      return messages;
+    const out: Message[] = [];
+    for (const m of messages) {
+      if (!m.images?.some((u) => !u.startsWith("data:"))) {
+        out.push(m);
+        continue;
+      }
+      const images: string[] = [];
+      let skipped = 0;
+      for (const url of m.images) {
+        const inlined = await this.inlineImageUrl(url, signal);
+        if (inlined) images.push(inlined);
+        else skipped++;
+      }
+      const note = skipped
+        ? `[${skipped} attached image${skipped === 1 ? "" : "s"} could not be shown to you: larger than ${Math.floor(REFUSELESS_IMAGE_BYTES / (1024 * 1024))} MB, not png/jpeg/gif/webp, or no longer downloadable. Save the attachment into the workspace to work on it.]`
+        : "";
+      out.push({
+        ...m,
+        content: note
+          ? [m.content, note].filter(Boolean).join("\n")
+          : m.content,
+        images: images.length ? images : undefined,
+      });
+    }
+    return out;
+  }
   async complete(
     selection: Selection,
     messages: Message[],
@@ -709,9 +818,13 @@ export class LlmClient {
       if (options.cache !== false) body.cache_control = { type: "ephemeral" };
     } else {
       path = "/chat/completions";
+      const chatMessages =
+        selection.provider === "refuseless"
+          ? await this.inlineRemoteImages(messages, options.signal)
+          : messages;
       body = {
         model: selection.model,
-        messages: toChatMessages(messages, /^gpt-/.test(selection.model)),
+        messages: toChatMessages(chatMessages, /^gpt-/.test(selection.model)),
         max_tokens: max,
         // Claude 5-series models reject sampling parameters with HTTP 400.
         ...(!claude5(selection.model) && { temperature }),

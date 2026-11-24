@@ -26,7 +26,12 @@ const catalog = {
   triggers: ["hibana"],
 };
 
-async function mockSyncApi(page: Page) {
+/**
+ * `syncResponseDelayMs` holds each `GET /api/sync-status` answer back after it
+ * has been counted, the way a slow CI runner does: the page only arms its next
+ * poll once the answer has arrived and been read (#191).
+ */
+async function mockSyncApi(page: Page, { syncResponseDelayMs = 0 } = {}) {
   const state = {
     snapshotVersion: 1,
     appliedVersion: 1 as number | null,
@@ -147,6 +152,10 @@ async function mockSyncApi(page: Page) {
     }
     if (path === "/api/sync-status") {
       state.syncCalls += 1;
+      if (syncResponseDelayMs > 0)
+        await new Promise((resolve) =>
+          setTimeout(resolve, syncResponseDelayMs),
+        );
       return route.fulfill({
         json: {
           snapshot_version: state.snapshotVersion,
@@ -302,13 +311,46 @@ test("explicit save pages such as user role updates also track bot sync", async 
   ).toHaveCount(1);
 });
 
+/** BOT_SYNC_POLL_MS in `src/sync.tsx`; no other timer on these pages uses it. */
+const POLL_MS = 3_000;
+
+/**
+ * Count the poll timers the page arms. Wraps the fake `setTimeout` that
+ * `page.clock.install()` put in place, so call it after `page.goto`.
+ */
+async function countPollTimers(page: Page) {
+  await page.evaluate((pollMs) => {
+    const w = window as unknown as { __pollTimers: number };
+    w.__pollTimers = 0;
+    const fake = window.setTimeout;
+    window.setTimeout = ((
+      handler: TimerHandler,
+      timeout?: number,
+      ...args: unknown[]
+    ) => {
+      if (timeout === pollMs) w.__pollTimers += 1;
+      return fake(handler, timeout, ...args);
+    }) as typeof window.setTimeout;
+  }, POLL_MS);
+  return () =>
+    page.evaluate(
+      () => (window as unknown as { __pollTimers: number }).__pollTimers,
+    );
+}
+
 test("stops polling and shows timeout state after 60 seconds without ack", async ({
   page,
 }) => {
-  await page.clock.install();
-  const state = await mockSyncApi(page);
+  // After `install()` the fake clock still flows with real time, so on a slow
+  // runner the real seconds between steps bring the 60s deadline forward.
+  // Pause it once the page has loaded: from then on only `runFor` moves it.
+  const start = new Date("2026-11-24T09:00:00+09:00").getTime();
+  await page.clock.install({ time: start });
+  const state = await mockSyncApi(page, { syncResponseDelayMs: 100 });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/g/100");
+  await page.clock.pauseAt(start + 10 * 60_000);
+  const pollTimers = await countPollTimers(page);
 
   const status = page.locator(".topbar").getByRole("status");
   const effort = page.getByRole("combobox", { name: "effort", exact: true });
@@ -317,13 +359,18 @@ test("stops polling and shows timeout state after 60 seconds without ack", async
   await expect(status).toContainText("bot へ反映待ち…");
 
   // Step through 20 x 3s polls (60s total) while the bot never acknowledges.
+  // The page arms the next poll only after reading the previous answer, so
+  // move the clock only once that timer exists: moving it earlier delays
+  // every later poll and leaves fewer than 20 before the deadline (#191).
   for (let i = 1; i <= 20; i++) {
-    await page.clock.runFor(3_000);
+    await expect.poll(pollTimers).toBe(i);
+    await page.clock.runFor(POLL_MS);
     await expect.poll(() => state.syncCalls).toBe(i);
   }
   await expect(status).toContainText("反映未確認");
   const callsAtTimeout = state.syncCalls;
   expect(callsAtTimeout).toBe(20);
+  expect(await pollTimers()).toBe(20);
 
   // No more polling after timeout.
   await page.clock.runFor(15_000);

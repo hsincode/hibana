@@ -55,6 +55,15 @@ import {
   schedulesSchema,
   type ScheduleAsset,
 } from "@hibana/shared/schedules";
+import {
+  WORKSPACE_EXPORT_COOLDOWN_MS,
+  WORKSPACE_EXPORT_MAX_ARCHIVE_BYTES,
+  WORKSPACE_EXPORT_MAX_RAW_BYTES,
+  WORKSPACE_EXPORT_TTL_MS,
+  redactExportForViewer,
+  workspaceExportAckSchema,
+  workspaceExportRequestSchema,
+} from "@hibana/shared/exports";
 import { cookieCrossOrigin, type WebEnv } from "./env";
 import { randomUrlSafe, s256Challenge } from "./pkce";
 import {
@@ -170,6 +179,9 @@ async function loadSnapshot(
   const skill_commands = (await store.listSkillCommands()).filter(
     (c) => c.result === null,
   );
+  const workspace_export_commands = (await store.listWorkspaceExportCommands())
+    .filter((c) => c.result === null)
+    .sort((a, b) => a.id - b.id);
   const schedules = await store.allSchedules();
   const versionAfter = await store.version();
   const body: CachedSnapshot = {
@@ -185,6 +197,7 @@ async function loadSnapshot(
     app_settings,
     artifact_commands,
     skill_commands,
+    workspace_export_commands,
     schedules,
     chatgpt_available: (await chatgpt?.available()) ?? false,
   };
@@ -2117,6 +2130,109 @@ export function createApp(env: WebEnv, store: Store, hooks: AppHooks = {}) {
           );
           await publish();
           return { ok: true, pending: cmd.action, token };
+        },
+      )
+      .post("/internal/exports/ack", async ({ request, set, body }) => {
+        if (
+          !requireInternal(request.headers.get("authorization") ?? undefined)
+        ) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const parsed = workspaceExportAckSchema.safeParse(body);
+        if (!parsed.success) {
+          set.status = 400;
+          return { error: "invalid export acknowledgement" };
+        }
+        await store.ackWorkspaceExportCommand(
+          parsed.data.id,
+          parsed.data.result,
+        );
+        await publish();
+        return { ok: true };
+      })
+      .get("/api/guilds/:id/exports", async ({ cookie, set, params }) => {
+        const s = await requireSession(cookieSid(cookie as never));
+        if (!s) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const access = guildId.safeParse(params.id).success
+          ? await guildAccess(env, hooks, s.access_token, params.id, s.role)
+          : { open: false, manage: false };
+        if (!access.open) {
+          set.status = 404;
+          return { error: "guild not found" };
+        }
+        const commands = await store.listWorkspaceExportCommands(params.id);
+        return {
+          can_edit: access.manage,
+          exports: commands.map((c) => redactExportForViewer(c, access.manage)),
+          limits: {
+            max_raw_bytes: WORKSPACE_EXPORT_MAX_RAW_BYTES,
+            max_archive_bytes: WORKSPACE_EXPORT_MAX_ARCHIVE_BYTES,
+            ttl_secs: Math.floor(WORKSPACE_EXPORT_TTL_MS / 1000),
+            cooldown_secs: Math.floor(WORKSPACE_EXPORT_COOLDOWN_MS / 1000),
+          },
+        };
+      })
+      .post(
+        "/api/guilds/:id/exports",
+        async ({ cookie, set, params, body }) => {
+          const s = await requireSession(cookieSid(cookie as never));
+          if (!s) {
+            set.status = 401;
+            return { error: "unauthorized" };
+          }
+          const access = guildId.safeParse(params.id).success
+            ? await guildAccess(env, hooks, s.access_token, params.id, s.role)
+            : { open: false, manage: false };
+          if (!access.open) {
+            set.status = 404;
+            return { error: "guild not found" };
+          }
+          if (!access.manage) {
+            set.status = 403;
+            return { error: MANAGE_REQUIRED };
+          }
+          const parsed = workspaceExportRequestSchema.safeParse(body ?? {});
+          if (!parsed.success) {
+            set.status = 400;
+            return { error: "invalid export request" };
+          }
+          const recent = await store.listWorkspaceExportCommands(params.id);
+          if (recent.some((c) => c.result === null)) {
+            set.status = 409;
+            return {
+              error:
+                "このサーバーのエクスポートを準備中です。完了するまで待ってください。",
+            };
+          }
+          const latest = recent[0];
+          const currentNow = now();
+          if (
+            latest &&
+            currentNow - latest.created_at < WORKSPACE_EXPORT_COOLDOWN_MS
+          ) {
+            const retryAfter = Math.ceil(
+              (WORKSPACE_EXPORT_COOLDOWN_MS -
+                (currentNow - latest.created_at)) /
+                1000,
+            );
+            set.status = 429;
+            set.headers["retry-after"] = String(Math.max(1, retryAfter));
+            return {
+              error: `連続して実行できません。${Math.max(1, retryAfter)} 秒後に再試行してください。`,
+              retry_after_secs: Math.max(1, retryAfter),
+            };
+          }
+          const command = await store.enqueueWorkspaceExportCommand(
+            params.id,
+            parsed.data.include_settings,
+            currentNow,
+          );
+          await publish();
+          return { ok: true, command };
         },
       )
       .post("/api/guilds/:id/clear", unavailable)

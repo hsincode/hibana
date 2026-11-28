@@ -137,7 +137,7 @@ export const Icon = {
   ),
 };
 
-/** サーバー設定の 6 ページの印（nav.ts の `path` で引く）。 */
+/** サーバー設定の 7 ページの印（nav.ts の `path` で引く）。 */
 export const GUILD_PAGE_ICON: Record<string, ReactNode> = {
   "": <Icon.agent />,
   tools: <Icon.sliders />,
@@ -145,6 +145,7 @@ export const GUILD_PAGE_ICON: Record<string, ReactNode> = {
   skills: <Icon.skill />,
   artifacts: <Icon.box />,
   schedules: <Icon.clock />,
+  data: <Icon.download />,
 };
 
 /* ---------- provider marks ---------- */

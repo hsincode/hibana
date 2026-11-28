@@ -42,6 +42,8 @@ export type CachedSnapshot = {
     guild_id: string | null;
     action: string;
   }[];
+  /** Pending guild workspace export requests waiting for the bot (#193). */
+  workspace_export_commands: import("@hibana/shared/exports").WorkspaceExportCommand[];
 };
 
 /**

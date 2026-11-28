@@ -82,6 +82,8 @@ export type Snapshot = {
     action: string;
     args: Record<string, unknown>;
   }[];
+  /** Pending guild workspace export requests (#193). */
+  workspace_export_commands?: import("@hibana/shared/exports").WorkspaceExportCommand[];
   /** Scheduled actions per server (定時アクション). The dashboard writes
    *  them; absent before the API served any. Checked again where they run. */
   schedules?: Record<string, unknown>;

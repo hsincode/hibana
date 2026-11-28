@@ -91,6 +91,7 @@ import { Sandbox, safePath, quote, filesUnder } from "./sandbox";
 import { DiscordTools, ADMIN_TOOLS } from "./discord";
 import { Skills } from "./skills";
 import { Sites } from "./sites";
+import { WorkspaceExporter } from "../workspace-export";
 import { Media } from "./media";
 import { Vpn } from "./vpn";
 import { WebTools } from "./web";
@@ -129,6 +130,7 @@ export class ToolRegistry {
   readonly discord: DiscordTools;
   readonly skills: Skills;
   readonly sites: Sites;
+  readonly exports: WorkspaceExporter;
   readonly media: Media;
   readonly vpn: Vpn;
   readonly web: WebTools;
@@ -161,6 +163,13 @@ export class ToolRegistry {
     this.discord = new DiscordTools(client, runtime, this.sandbox);
     this.skills = new Skills(runtime.config);
     this.sites = new Sites(runtime.config, this.sandbox);
+    this.exports = new WorkspaceExporter(
+      runtime.config,
+      runtime,
+      this.sandbox,
+      this.sites,
+    );
+    this.sites.setExportLookup((token) => this.exports.lookup(token));
     this.media = new Media(this.sandbox, log);
     this.vpn = new Vpn(runtime.config, this.sandbox, { log });
     this.web = new WebTools(runtime.config, runtime);
@@ -193,12 +202,17 @@ export class ToolRegistry {
     await this.sandbox.probe();
     await this.skills.load();
     await this.sites.load();
+    await this.exports.load();
     await this.sites.start();
     await this.vpn.load();
     this.maintenance = setInterval(() => {
       if (this.sweeping) return;
       this.sweeping = true;
-      void Promise.all([this.sandbox.sweep(), this.sites.sweep()])
+      void Promise.all([
+        this.sandbox.sweep(),
+        this.sites.sweep(),
+        this.exports.sweep(),
+      ])
         .catch((e) =>
           console.error(
             "Maintenance failed:",
@@ -1442,6 +1456,7 @@ export class ToolRegistry {
     this.vpn.close();
     await this.media.close();
     await this.sandbox.close();
+    this.exports.stop();
     this.sites.stop();
   }
 }

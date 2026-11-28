@@ -59,10 +59,17 @@ export function byteRange(
   if (first >= size || last < first) return null;
   return [first, last];
 }
+export type ExportDownload = {
+  filePath: string;
+  filename: string;
+  bytes: number;
+};
+
 export class Sites {
   private rows: Site[] = [];
   private serial = new Serial();
   private server?: Server<undefined>;
+  private exportLookup?: (token: string) => ExportDownload | undefined;
   // Set when each site is served on its own origin. Without it every site
   // shares STATIC_SITE_BASE_URL's origin under /s/<token>/.
   private origin?: ReturnType<typeof parseOrigin>;
@@ -209,9 +216,69 @@ export class Sites {
       fetch: (request) => this.serve(request),
     });
   }
+  /** Registers short-lived workspace archive downloads served alongside sites (#193). */
+  setExportLookup(fn: (token: string) => ExportDownload | undefined) {
+    this.exportLookup = fn;
+  }
+  /** Download URL for an ephemeral workspace export token (#193). */
+  exportUrl(token: string, filename: string) {
+    return this.origin
+      ? `${this.origin.scheme}://${this.origin.before}${token}${this.origin.after}/${encodeURIComponent(filename)}`
+      : `${this.config.siteBase.replace(/\/$/, "")}/dl/${token}/${encodeURIComponent(filename)}`;
+  }
+  private serveExport(request: Request, entry: ExportDownload): Response {
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      return new Response("Method not allowed", {
+        status: 405,
+        headers: { Allow: "GET, HEAD" },
+      });
+    }
+    const data = Bun.file(entry.filePath);
+    const range = byteRange(request.headers.get("range"), entry.bytes);
+    if (range === null) {
+      return new Response(null, {
+        status: 416,
+        headers: { "Content-Range": `bytes */${entry.bytes}` },
+      });
+    }
+    const body = range ? data.slice(range[0], range[1] + 1) : data;
+    return new Response(request.method === "HEAD" ? null : body, {
+      status: range ? 206 : 200,
+      headers: {
+        "Accept-Ranges": "bytes",
+        "Content-Type": "application/gzip",
+        "Content-Disposition": `attachment; filename="${entry.filename}"`,
+        "Content-Length": String(range ? range[1] - range[0] + 1 : entry.bytes),
+        ...(range
+          ? { "Content-Range": `bytes ${range[0]}-${range[1]}/${entry.bytes}` }
+          : {}),
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+        "Content-Security-Policy": "default-src 'none'; sandbox",
+      },
+    });
+  }
   async serve(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const hosted = this.tokenOfHost(url.host);
+    if (hosted && this.exportLookup) {
+      const exported = this.exportLookup(hosted);
+      if (exported) return this.serveExport(request, exported);
+    }
+    if (!hosted && this.exportLookup) {
+      const dl = /^\/dl\/([a-f0-9]{32,64})(?:\/[^/]*)?$/.exec(url.pathname);
+      if (dl) {
+        const exported = this.exportLookup(dl[1]!);
+        if (!exported) return new Response("Not found", { status: 404 });
+        if (this.origin)
+          return new Response(null, {
+            status: 308,
+            headers: { Location: this.exportUrl(dl[1]!, exported.filename) },
+          });
+        return this.serveExport(request, exported);
+      }
+    }
     let token = hosted,
       rest = url.pathname.slice(1);
     if (!hosted) {

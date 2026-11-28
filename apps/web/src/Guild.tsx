@@ -16,6 +16,7 @@ import {
 } from "./api";
 import { AgentSections, guildEffective } from "./Agent";
 import { GuildArtifacts } from "./Artifacts";
+import { GuildData } from "./Data";
 import { GuildSchedules } from "./Schedules";
 import { Select } from "./controls";
 import { roleAllows } from "./ModelPicker";
@@ -47,7 +48,7 @@ import {
 
 /* ============================================================
    サーバー設定
-   1 つのサーバーを 6 ページに分けて見せる。設定の読み込みと保存のキューは
+   1 つのサーバーを 7 ページに分けて見せる。設定の読み込みと保存のキューは
    ここで 1 度だけ持ち、ページを行き来しても保存中の変更や書きかけの文章が残るようにする。
    ============================================================ */
 export function GuildPage() {
@@ -190,7 +191,7 @@ export function GuildPage() {
               </p>
             </div>
           </div>
-          {/* 狭い幅ではサイドバーが引き出しになるので、6 ページをタブ帯でも出す。 */}
+          {/* 狭い幅ではサイドバーが引き出しになるので、7 ページをタブ帯でも出す。 */}
           <nav className="guild-tabs" aria-label="サーバーのページ">
             {GUILD_PAGES.map((p) => (
               <NavLink key={p.path} to={guildPath(id, p.path)} end>
@@ -263,6 +264,9 @@ export function GuildPage() {
         )}
         {page.path === "schedules" && (
           <GuildSchedules key={id} guildId={id} push={push} />
+        )}
+        {page.path === "data" && (
+          <GuildData key={id} guildId={id} push={push} />
         )}
 
         <ToastArea toasts={toasts} />

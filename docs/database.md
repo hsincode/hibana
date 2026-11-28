@@ -25,6 +25,15 @@
 - スキーマに合わなくなった件は、読むときに外す（`parseStoredSchedules`）
 - bot が送る素材の一覧は `meta` の `schedule_assets` に置く（snapshot の版は上げない）
 
+## ワークスペースのエクスポートの表（#193）
+
+| 表                          | 1 行の単位                                                 | 主キー | ほかの索引            |
+| --------------------------- | ---------------------------------------------------------- | ------ | --------------------- |
+| `workspace_export_commands` | サーバーのワークスペース `.tar.gz` 作成依頼と結果（JSONB） | `id`   | `(guild_id, id DESC)` |
+
+- ダッシュボードの `POST /api/guilds/:id/exports` で積み、snapshot の `workspace_export_commands`（未完了分のみ）で bot へ渡す。bot は圧縮と短命配信の準備後に `POST /internal/exports/ack` で結果を返す
+- サーバーごとに直近 10 件を残して古い完了済み行を削除する。RLS を有効にする
+
 ## 利用状況の表（#110、#111）
 
 `/analytics` の利用状況は、次の 2 つの表から数えます。どちらも API が起動時に作り、RLS を有効にします。

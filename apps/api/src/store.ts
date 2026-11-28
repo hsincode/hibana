@@ -1,4 +1,9 @@
 import { SQL } from "bun";
+import {
+  WORKSPACE_EXPORT_HISTORY_LIMIT,
+  type WorkspaceExportCommand,
+  type WorkspaceExportResult,
+} from "@hibana/shared/exports";
 import { parseStoredSchedules, type Schedule } from "@hibana/shared/schedules";
 import type { SkillRow, SkillCommand } from "./skills";
 import type { BlockedRow, LogEntry, LogQuery, LogRow } from "./audit";
@@ -93,6 +98,19 @@ export interface Store {
   ): Promise<SkillCommand>;
   listSkillCommands(): Promise<SkillCommand[]>;
   ackSkillCommand(id: number, result: Record<string, unknown>): Promise<void>;
+  /** Dashboard → bot workspace archive export requests (#193). */
+  enqueueWorkspaceExportCommand(
+    guildId: string,
+    includeSettings: boolean,
+    createdAt: number,
+  ): Promise<WorkspaceExportCommand>;
+  listWorkspaceExportCommands(
+    guildId?: string,
+  ): Promise<WorkspaceExportCommand[]>;
+  ackWorkspaceExportCommand(
+    id: number,
+    result: WorkspaceExportResult,
+  ): Promise<void>;
   migrate(): Promise<void>;
   getMeta(key: string): Promise<string | null>;
   setMeta(key: string, value: string): Promise<void>;
@@ -211,6 +229,8 @@ export class MemoryStore implements Store {
   private skills: SkillRow[] = [];
   private skillCommands: SkillCommand[] = [];
   private skillSeq = 0;
+  private exportCommands: WorkspaceExportCommand[] = [];
+  private exportSeq = 0;
 
   async replaceSkills(rows: SkillRow[]) {
     this.skills = structuredClone(rows);
@@ -239,6 +259,49 @@ export class MemoryStore implements Store {
   }
   async ackSkillCommand(id: number, result: Record<string, unknown>) {
     const command = this.skillCommands.find((c) => c.id === id);
+    if (command && command.result === null) {
+      command.result = structuredClone(result);
+      await this.bumpVersion();
+    }
+  }
+  async enqueueWorkspaceExportCommand(
+    guildId: string,
+    includeSettings: boolean,
+    createdAt: number,
+  ) {
+    const command: WorkspaceExportCommand = {
+      id: ++this.exportSeq,
+      guild_id: guildId,
+      include_settings: includeSettings,
+      created_at: createdAt,
+      result: null,
+    };
+    this.exportCommands.push(command);
+    // Keep pending rows plus at most WORKSPACE_EXPORT_HISTORY_LIMIT recent rows per guild.
+    const forGuild = this.exportCommands
+      .filter((c) => c.guild_id === guildId)
+      .sort((a, b) => b.id - a.id);
+    const drop = new Set(
+      forGuild
+        .slice(WORKSPACE_EXPORT_HISTORY_LIMIT)
+        .filter((c) => c.result !== null)
+        .map((c) => c.id),
+    );
+    if (drop.size)
+      this.exportCommands = this.exportCommands.filter((c) => !drop.has(c.id));
+    await this.bumpVersion();
+    return structuredClone(command);
+  }
+  async listWorkspaceExportCommands(guildId?: string) {
+    const rows = guildId
+      ? this.exportCommands.filter((c) => c.guild_id === guildId)
+      : this.exportCommands;
+    return structuredClone(rows)
+      .sort((a, b) => b.id - a.id)
+      .slice(0, guildId ? WORKSPACE_EXPORT_HISTORY_LIMIT : rows.length);
+  }
+  async ackWorkspaceExportCommand(id: number, result: WorkspaceExportResult) {
+    const command = this.exportCommands.find((c) => c.id === id);
     if (command && command.result === null) {
       command.result = structuredClone(result);
       await this.bumpVersion();
@@ -674,6 +737,71 @@ export class PostgresStore implements Store {
       .sql`DELETE FROM skill_commands WHERE result IS NOT NULL AND created_at < NOW() - INTERVAL '1 day'`;
     await this.bumpVersion();
   }
+  async enqueueWorkspaceExportCommand(
+    guildId: string,
+    includeSettings: boolean,
+    createdAt: number,
+  ): Promise<WorkspaceExportCommand> {
+    const rows = (await this.sql`
+      INSERT INTO workspace_export_commands (guild_id, include_settings, created_at)
+      VALUES (${guildId}, ${includeSettings}, ${createdAt})
+      RETURNING id, guild_id, include_settings, created_at, result
+    `) as WorkspaceExportCommand[];
+    await this.sql`
+      DELETE FROM workspace_export_commands
+      WHERE guild_id = ${guildId} AND result IS NOT NULL AND id NOT IN (
+        SELECT id FROM workspace_export_commands
+        WHERE guild_id = ${guildId}
+        ORDER BY id DESC
+        LIMIT ${WORKSPACE_EXPORT_HISTORY_LIMIT}
+      )
+    `;
+    await this.bumpVersion();
+    const r = rows[0]!;
+    return {
+      id: Number(r.id),
+      guild_id: r.guild_id,
+      include_settings: Boolean(r.include_settings),
+      created_at: Number(r.created_at),
+      result: r.result ?? null,
+    };
+  }
+  async listWorkspaceExportCommands(
+    guildId?: string,
+  ): Promise<WorkspaceExportCommand[]> {
+    const rows = (
+      guildId
+        ? await this.sql`
+            SELECT id, guild_id, include_settings, created_at, result
+            FROM workspace_export_commands
+            WHERE guild_id = ${guildId}
+            ORDER BY id DESC
+            LIMIT ${WORKSPACE_EXPORT_HISTORY_LIMIT}
+          `
+        : await this.sql`
+            SELECT id, guild_id, include_settings, created_at, result
+            FROM workspace_export_commands
+            WHERE result IS NULL OR created_at > ${Date.now() - 86_400_000}
+            ORDER BY id DESC
+          `
+    ) as WorkspaceExportCommand[];
+    return rows.map((r) => ({
+      id: Number(r.id),
+      guild_id: r.guild_id,
+      include_settings: Boolean(r.include_settings),
+      created_at: Number(r.created_at),
+      result: r.result ?? null,
+    }));
+  }
+  async ackWorkspaceExportCommand(id: number, result: WorkspaceExportResult) {
+    const rows = (await this.sql`
+      UPDATE workspace_export_commands
+      SET result = ${JSON.stringify(result)}::jsonb
+      WHERE id = ${id} AND result IS NULL
+      RETURNING id
+    `) as { id: number }[];
+    if (rows.length) await this.bumpVersion();
+  }
 
   async migrate() {
     await this
@@ -776,6 +904,16 @@ export class PostgresStore implements Store {
       guild_id TEXT PRIMARY KEY,
       schedules JSONB NOT NULL
     )`;
+    // Dashboard → bot guild workspace export requests (#193).
+    await this.sql`CREATE TABLE IF NOT EXISTS workspace_export_commands (
+      id BIGSERIAL PRIMARY KEY,
+      guild_id TEXT NOT NULL,
+      include_settings BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at BIGINT NOT NULL,
+      result JSONB
+    )`;
+    await this
+      .sql`CREATE INDEX IF NOT EXISTS workspace_export_commands_guild ON workspace_export_commands (guild_id, id DESC)`;
     if (this.logs) {
       await this.sql`CREATE TABLE IF NOT EXISTS logs (
         id BIGSERIAL PRIMARY KEY,
@@ -848,6 +986,8 @@ export class PostgresStore implements Store {
     await this.sql`ALTER TABLE usage_daily ENABLE ROW LEVEL SECURITY`;
     await this.sql`ALTER TABLE site_history ENABLE ROW LEVEL SECURITY`;
     await this.sql`ALTER TABLE guild_schedules ENABLE ROW LEVEL SECURITY`;
+    await this
+      .sql`ALTER TABLE workspace_export_commands ENABLE ROW LEVEL SECURITY`;
     if (this.logs) await this.sql`ALTER TABLE logs ENABLE ROW LEVEL SECURITY`;
     if (!(await this.getMeta("snapshot_version"))) {
       await this.setMeta("snapshot_version", "0");

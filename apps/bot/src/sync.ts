@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { WorkspaceExportResult } from "@hibana/shared/exports";
 import { Runtime, type Snapshot } from "./runtime";
 import { ToolRegistry } from "./tools";
 import { sleep, Serial } from "./io";
@@ -186,6 +187,24 @@ export class WebSync {
           };
         }
         await this.runtime.remote("/internal/skills/ack", "POST", {
+          id: command.id,
+          result,
+        });
+      }
+      for (const command of snapshot.workspace_export_commands ?? []) {
+        let result: WorkspaceExportResult;
+        try {
+          result = await this.tools.exports.create(
+            command.guild_id,
+            Boolean(command.include_settings),
+          );
+        } catch (e) {
+          result = {
+            ok: false,
+            error: e instanceof Error ? e.message : String(e),
+          };
+        }
+        await this.runtime.remote("/internal/exports/ack", "POST", {
           id: command.id,
           result,
         });

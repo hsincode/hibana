@@ -4,7 +4,7 @@
 
 ## 画面の分け方
 
-上部バーとサイドバー（シェル）の中に、ページが 1 つ入ります。サイドバーは上から「今のサーバー」の 6 ページ、全体、管理の順です。1000px 以下ではサイドバーが引き出しになり、サーバーのページには同じ 6 ページのタブ帯が出ます。
+上部バーとサイドバー（シェル）の中に、ページが 1 つ入ります。サイドバーは上から「今のサーバー」の 7 ページ、全体、管理の順です。1000px 以下ではサイドバーが引き出しになり、サーバーのページには同じ 7 ページのタブ帯が出ます。
 
 ```mermaid
 flowchart LR
@@ -18,6 +18,7 @@ flowchart LR
       skills["/g/:id/skills<br>スキル"]
       gart["/g/:id/artifacts<br>成果物"]
       sched["/g/:id/schedules<br>定時アクション"]
+      data["/g/:id/data<br>データ"]
     end
     subgraph all["全体"]
       servers["/<br>サーバー一覧"]
@@ -47,6 +48,7 @@ flowchart LR
 | `/g/:id/skills`    | スキル             | 一覧、作成、他サーバーからのインポート、有効・無効、削除、ダウンロード                                                                                                                                            | 同上                                                                                                                                   |
 | `/g/:id/artifacts` | 成果物             | このサーバーの公開サイトと会議の録音（#138）、延命・永久化・解除（録音はできない）                                                                                                                                | 同上                                                                                                                                   |
 | `/g/:id/schedules` | 定時アクション     | 毎日の時刻に投稿と、通話中なら音声の再生（#163、[定時アクション](schedules.md)）。一覧ごと「保存」で送る                                                                                                          | 同上                                                                                                                                   |
+| `/g/:id/data`      | データ             | ローカルワークスペース（任意でサーバー設定 JSON）を `.tar.gz` に圧縮し、bot の静的配信サーバーの短命トークン URL（15 分有効）からダウンロードする（#193）。管理できる人以外は URL を隠して見るだけ                | 同上                                                                                                                                   |
 | `/me`              | マイ設定           | 「あなたの上書き」、モデル・サブエージェント・Jev の上書き、ユーザーコンテキスト                                                                                                                                  | ログイン済み                                                                                                                           |
 | `/settings`        | 全体の設定         | temperature・exa・スレッド履歴と要約・MCP サーバー URL・voice-mode・filler removal（#161）、予算が少ないときのモデルと閾値（#89、#95。閾値を切ったときに設定を書き換える、#121。#161 で利用料のページから移した） | ログイン済み。変更は Moderator 以上（`can_manage_app_settings`、`canManageBudget`、#161）。それ以外の人には部品を無効にして見せる      |
 | `/artifacts`       | すべての成果物     | 開けるサーバー全部の公開サイトと会議の録音。延命・永久化は、管理できるサーバーのものだけ（#166）                                                                                                                  | ログイン済み                                                                                                                           |
@@ -55,10 +57,10 @@ flowchart LR
 | `/models`          | モデル             | ChatGPT マスターアカウント、プリセットの公開とプレミアム                                                                                                                                                          | `can_manage_users`                                                                                                                     |
 | `/analytics`       | 利用料             | Anthropic の cost report と、今日の推計（usage report）、利用状況（#110）。予算が少ないときのモデルと閾値は全体の設定にある（#161）                                                                               | ログイン済み（`can_view_analytics`、#85）。利用状況は Administrator だけ（`can_view_usage`、#110）                                     |
 
-サーバーのページ（`/g/:id` から `/g/:id/schedules`）の権限は次のとおりです（判断記録: #166）。
+サーバーのページ（`/g/:id` から `/g/:id/data`）の権限は次のとおりです（判断記録: #166、#193）。
 
 - 開けるのは、そのサーバーのメンバー（ユーザーの Discord のサーバー一覧と bot のサーバー一覧の両方にあるサーバー）と、bot のいるすべてのサーバーの Administrator・Moderator
-- 変えられるのは、そのサーバーを管理できる人: Discord の「サーバー管理」か「管理者」の権限を持つ人、サーバーのオーナー、Administrator・Moderator。API は、ほかの人の書き込み（`PATCH /api/guilds/:id/settings`・`POST /api/guilds/:id/skills`・`PATCH /api/guilds/:id/artifacts/:token`・`PUT /api/guilds/:id/schedules`）を 403 で断る。読み込みの応答の `can_edit`（サーバーの一覧では `can_manage`）で、画面が部品を無効にする
+- 変えられるのは、そのサーバーを管理できる人: Discord の「サーバー管理」か「管理者」の権限を持つ人、サーバーのオーナー、Administrator・Moderator。API は、ほかの人の書き込み（`PATCH /api/guilds/:id/settings`・`POST /api/guilds/:id/skills`・`PATCH /api/guilds/:id/artifacts/:token`・`PUT /api/guilds/:id/schedules`・`POST /api/guilds/:id/exports`）を 403 で断り、`GET /api/guilds/:id/exports` ではダウンロード URL を伏せる。読み込みの応答の `can_edit`（サーバーの一覧では `can_manage`）で、画面が部品を無効にする
 - 判定は、開けるかどうかと同じ Discord の `/users/@me/guilds` の応答（`owner`・`permissions`）で行い、Discord への問い合わせは増やさない
 - サーバー単位の停止（`bot_disabled`）を変えられるのは Administrator・Moderator だけ（#64）。それを含む保存は、ほかの項目も保存せずに 403 で断る
 - bot の側でも同じ規則にしている。サーバーの設定を変えるスラッシュコマンド（`/switch`・`/server-context`・`/server-tools`・`/thread-only`・`/suppress-embeds`・`/text-model`、サーバーの中の `/user-context`）と、会話で設定を変えるツール（`set_bot_model`・`set_triggers`、サーバーの中の `set_user_context`）は、管理できる人でなければ断る（`apps/bot/src/guild-permission.ts`）。値を読むだけの使い方は誰でもできる
@@ -77,7 +79,7 @@ flowchart LR
 
 ### 「今のサーバー」
 
-サイドバーの 6 ページがどのサーバーを指すかは、URL が `/g/:id` のときはその `id`、それ以外のページでは最後に見ていたサーバーです（ブラウザの `localStorage` の `hibana-guild`。無ければ一覧の先頭）。サイドバーの上のボタンで切り替えます。切り替えると、同じ種類のページのまま別のサーバーへ移ります。
+サイドバーの 7 ページがどのサーバーを指すかは、URL が `/g/:id` のときはその `id`、それ以外のページでは最後に見ていたサーバーです（ブラウザの `localStorage` の `hibana-guild`。無ければ一覧の先頭）。サイドバーの上のボタンで切り替えます。切り替えると、同じ種類のページのまま別のサーバーへ移ります。
 
 ### コマンドパレット
 

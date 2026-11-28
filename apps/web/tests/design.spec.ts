@@ -191,6 +191,28 @@ async function mockApi(page: Page, retainSettings = false, canEdit?: boolean) {
             assets_reported_at: 1788652800000,
             can_edit: true,
           };
+    else if (path.endsWith("/exports"))
+      data = body
+        ? {
+            ok: true,
+            command: {
+              id: 1,
+              guild_id: "100",
+              include_settings: Boolean(body.include_settings),
+              created_at: 1788652800000,
+              result: null,
+            },
+          }
+        : {
+            exports: [],
+            limits: {
+              max_raw_bytes: 1024 * 1024 * 1024,
+              max_archive_bytes: 500 * 1024 * 1024,
+              ttl_secs: 900,
+              cooldown_secs: 60,
+            },
+            ...edit,
+          };
     else if (path.endsWith("/channels")) data = { channels: scheduleChannels };
     else if (path === "/api/users")
       data = {
@@ -1189,6 +1211,7 @@ test("server settings are split into six pages, reachable from the sidebar and t
     skills: "スキル",
     artifacts: "成果物",
     schedules: "定時アクション",
+    data: "データ",
   };
   await expect(
     page.getByRole("heading", { name: "/switch モデル", level: 2 }),

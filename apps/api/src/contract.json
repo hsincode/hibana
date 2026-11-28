@@ -16,6 +16,7 @@
     "GET /api/guilds/:id/artifacts",
     "GET /api/guilds/:id/channels",
     "GET /api/guilds/:id/context",
+    "GET /api/guilds/:id/exports",
     "GET /api/guilds/:id/schedules",
     "GET /api/guilds/:id/settings",
     "GET /api/guilds/:id/skills",
@@ -51,6 +52,7 @@
     "POST /api/chatgpt/login",
     "POST /api/chatgpt/login/:id",
     "POST /api/guilds/:id/clear",
+    "POST /api/guilds/:id/exports",
     "POST /api/guilds/:id/retry",
     "POST /api/guilds/:id/skills",
     "POST /auth/logout",
@@ -58,6 +60,7 @@
     "POST /internal/artifacts/ack",
     "POST /internal/capabilities",
     "POST /internal/chatgpt/credential",
+    "POST /internal/exports/ack",
     "POST /internal/logs",
     "POST /internal/skills",
     "POST /internal/skills/ack",
@@ -122,6 +125,7 @@
     "user_contexts",
     "user_overrides",
     "user_roles",
-    "version"
+    "version",
+    "workspace_export_commands"
   ]
 }

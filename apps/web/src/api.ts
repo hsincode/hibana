@@ -1,3 +1,4 @@
+import type { PublicWorkspaceExportCommand } from "@hibana/shared/exports";
 import type {
   AppSettings,
   MultiAgentRoles,
@@ -184,4 +185,16 @@ export type AppSettingsResponse = {
   /** リセット（PATCH で null）したときに戻る値。 */
   defaults: AppSettings;
   can_edit: boolean;
+};
+
+/** GET /api/guilds/:id/exports（#193）。 */
+export type GuildExportsResponse = {
+  can_edit?: boolean;
+  exports: PublicWorkspaceExportCommand[];
+  limits?: {
+    max_raw_bytes: number;
+    max_archive_bytes: number;
+    ttl_secs: number;
+    cooldown_secs: number;
+  };
 };
